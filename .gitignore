@@ -1,0 +1,27 @@
+# Vue
+web/node_modules/
+web/dist/
+
+# Java
+server/target/
+*.class
+
+# Python
+ai-engine/.venv/
+ai-engine/__pycache__/
+*.pyc
+
+# IDE
+.idea/
+*.iml
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
