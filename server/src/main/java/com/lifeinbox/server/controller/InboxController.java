@@ -1,8 +1,12 @@
 package com.lifeinbox.server.controller;
 
+import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxItem;
-import com.lifeinbox.server.mapper.InboxItemMapper;
+import com.lifeinbox.server.service.InboxService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -12,14 +16,19 @@ import java.util.List;
 @RequestMapping("/api/inbox")
 public class InboxController {
 
-    private final InboxItemMapper inboxItemMapper;
+    private final InboxService inboxService;
 
-    public InboxController(InboxItemMapper inboxItemMapper) {
-        this.inboxItemMapper = inboxItemMapper;
+    public InboxController(InboxService inboxService) {
+        this.inboxService = inboxService;
     }
 
     @GetMapping
     public List<InboxItem> list() {
-        return inboxItemMapper.selectList(null);
+        return inboxService.list();
+    }
+
+    @PostMapping
+    public InboxItem create(@Valid @RequestBody CreateInboxItemRequest request) {
+        return inboxService.create(request);
     }
 }
