@@ -15,6 +15,9 @@ const saving = ref(false)
 const deletingId = ref(null)
 const archivingId = ref(null)
 const favoritingId = ref(null)
+const summarizingId = ref(null)
+const summaryErrorItemId = ref(null)
+const summaryErrorMessage = ref('')
 const errorMessage = ref('')
 
 const clearSelectedUpload = () => {
@@ -224,6 +227,40 @@ const toggleFavorite = async (item) => {
   }
 }
 
+const generateSummary = async (item) => {
+  // 当前没有后台任务状态，同一时间只允许一次显式摘要请求，避免重复消耗模型额度。
+  if (summarizingId.value !== null) return
+  summarizingId.value = item.id
+  summaryErrorItemId.value = null
+  summaryErrorMessage.value = ''
+
+  try {
+    const response = await fetch(`/api/inbox/${item.id}/ai/summary`, {
+      method: 'POST'
+    })
+
+    if (!response.ok) {
+      let message = 'AI 摘要生成失败，请稍后重试。'
+      try {
+        const problem = await response.json()
+        message = problem.detail || problem.message || message
+      } catch {
+        // 上游异常不一定包含 JSON；保留对用户安全的通用提示。
+      }
+      throw new Error(message)
+    }
+
+    // 成功后重新读取 Java 持久化的数据，刷新页面时也会得到同一份 summary。
+    await loadInbox()
+  } catch (error) {
+    console.error(error)
+    summaryErrorItemId.value = item.id
+    summaryErrorMessage.value = error.message || 'AI 摘要生成失败，请稍后重试。'
+  } finally {
+    summarizingId.value = null
+  }
+}
+
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
 onMounted(loadInbox)
@@ -382,7 +419,7 @@ onBeforeUnmount(clearSelectedUpload)
                 class="favorite-button"
                 type="button"
                 :class="{ 'is-favorite': item.favorite === 1 }"
-                :disabled="favoritingId === item.id || archivingId === item.id || deletingId === item.id"
+                :disabled="favoritingId === item.id || archivingId === item.id || deletingId === item.id || summarizingId === item.id"
                 @click="toggleFavorite(item)"
               >
                 {{ item.favorite === 1 ? '★ 已收藏' : '☆ 收藏' }}
@@ -390,7 +427,7 @@ onBeforeUnmount(clearSelectedUpload)
               <button
                 class="archive-button"
                 type="button"
-                :disabled="archivingId === item.id || deletingId === item.id || favoritingId === item.id"
+                :disabled="archivingId === item.id || deletingId === item.id || favoritingId === item.id || summarizingId === item.id"
                 @click="archiveItem(item.id)"
               >
                 {{ archivingId === item.id ? '归档中…' : '归档' }}
@@ -398,7 +435,7 @@ onBeforeUnmount(clearSelectedUpload)
               <button
                 class="delete-button"
                 type="button"
-                :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id"
+                :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || summarizingId === item.id"
                 @click="deleteItem(item.id)"
               >
                 {{ deletingId === item.id ? '删除中…' : '删除' }}
@@ -432,6 +469,31 @@ onBeforeUnmount(clearSelectedUpload)
           <template v-else>
             <h3 v-if="item.title">{{ item.title }}</h3>
             <p>{{ item.content }}</p>
+            <div v-if="item.type === 'TEXT' && item.summary" class="summary-block">
+              <strong>AI 摘要</strong>
+              <p>{{ item.summary }}</p>
+            </div>
+            <div v-if="item.type === 'TEXT'" class="summary-actions">
+              <button
+                class="summary-button"
+                type="button"
+                :disabled="summarizingId !== null || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
+                @click="generateSummary(item)"
+              >
+                {{ summarizingId === item.id
+                  ? '生成中…'
+                  : item.summary
+                    ? '重新生成摘要'
+                    : '生成摘要' }}
+              </button>
+            </div>
+            <p
+              v-if="summaryErrorItemId === item.id"
+              class="summary-error"
+              role="alert"
+            >
+              {{ summaryErrorMessage }}
+            </p>
           </template>
         </article>
       </div>

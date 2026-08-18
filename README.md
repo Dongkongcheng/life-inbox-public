@@ -151,7 +151,7 @@ V0.2 的目标是：
 * ✅ FastAPI `/health`
 * ✅ Java ↔ Python Health Integration
 * ✅ AI 服务不可用时返回结构化 503
-* ⏳ AI Summary
+* ✅ TEXT AI Summary（显式触发）
 * ⏳ AI Tags
 * ⏳ AI Classification
 * ⏳ Keyword Extraction
@@ -398,6 +398,7 @@ user_id
 type
 title
 content
+summary
 source_url
 file_url
 status
@@ -488,6 +489,14 @@ inbox_item
 ```
 
 表。
+
+如果数据库来自 V0.1，请在启动新版后端前手工执行本仓库的迁移文件：
+
+```text
+docs/sql/v0.2-task2-add-summary.sql
+```
+
+它只为 `inbox_item` 增加可空的 `summary TEXT` 字段，不会自动处理历史数据。
 
 ---
 
@@ -605,14 +614,22 @@ ai-engine
 
 Python 服务。
 
-V0.2 Task 1 已完成 FastAPI 基础服务和 Java/Python 健康检查链路，当前还没有接入大模型或真实 AI 处理能力。
+V0.2 Task 2 已完成 TEXT 的显式 AI 摘要链路。Capture 仍然先独立保存，只有用户点击“生成摘要”时才调用 Python 和 LLM；Java 校验成功结果后再保存 `summary`。
 
-进入 `ai-engine` 后安装依赖并启动：
+进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
 ```powershell
 uv sync
+
+$env:LIFEINBOX_LLM_API_KEY="<your-api-key>"
+$env:LIFEINBOX_LLM_MODEL="<your-model>"
+$env:LIFEINBOX_LLM_BASE_URL="https://your-provider.example/v1"
+$env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
+
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/summarize` 会返回 503。
 
 Python 健康检查：
 
@@ -626,7 +643,39 @@ Spring Boot 集成检查：
 GET http://localhost:8080/api/ai/health
 ```
 
-Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖。连接和读取超时统一配置在 `server/src/main/resources/application.yaml`；Python 不可用时，该 AI 接口返回 503，原有 Capture 功能不受影响。
+Python 摘要接口：
+
+```text
+POST http://localhost:8000/summarize
+Request:  { "title": "可选标题", "text": "需要摘要的正文" }
+Response: { "summary": "生成后的摘要" }
+```
+
+产品接口：
+
+```text
+POST http://localhost:8080/api/inbox/{id}/ai/summary
+```
+
+可以在 PowerShell 中手工验证完整链路：
+
+```powershell
+$captureBody = @{
+  type = "TEXT"
+  title = "摘要测试"
+  content = "这是一条用于验证 LifeInbox AI 摘要的文本。"
+} | ConvertTo-Json
+
+$item = Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8080/api/inbox" `
+  -ContentType "application/json" `
+  -Body $captureBody
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/summary"
+```
+
+随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`。再次调用会用新摘要覆盖旧摘要。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，摘要读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.summary-read-timeout` 调得更大。Python 或 LLM 不可用时，摘要请求返回 503，旧摘要和原始 InboxItem 不会被改写，原有 Capture 功能仍可使用。
 
 目标架构：
 

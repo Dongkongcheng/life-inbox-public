@@ -1,0 +1,71 @@
+from collections.abc import Callable
+from typing import Any
+
+import httpx
+
+from app.config import LlmSettings
+from app.prompts import SUMMARY_SYSTEM_PROMPT, build_summary_user_prompt
+
+
+class LlmServiceError(RuntimeError):
+    """LLM 网络、鉴权或上游状态异常。"""
+
+
+class LlmTimeoutError(LlmServiceError):
+    """LLM 在配置的时间内没有返回。"""
+
+
+class LlmInvalidResponseError(LlmServiceError):
+    """LLM 返回的 JSON 结构或摘要内容不合法。"""
+
+
+class LlmClient:
+    """调用可配置的 OpenAI-compatible Chat Completions API。"""
+
+    def __init__(
+        self,
+        settings_loader: Callable[[], LlmSettings] = LlmSettings.from_environment,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._settings_loader = settings_loader
+        self._transport = transport
+
+    def generate_summary(self, title: str | None, text: str) -> str:
+        settings = self._settings_loader()
+        request_body: dict[str, Any] = {
+            "model": settings.model,
+            "messages": [
+                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": build_summary_user_prompt(title, text)},
+            ],
+            "max_tokens": 400,
+        }
+
+        try:
+            # 不使用供应商 SDK，Base URL、Model 和 Key 均由环境变量决定。
+            with httpx.Client(
+                timeout=httpx.Timeout(settings.timeout_seconds),
+                transport=self._transport,
+            ) as client:
+                response = client.post(
+                    f"{settings.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=request_body,
+                )
+                response.raise_for_status()
+        except httpx.TimeoutException as exception:
+            raise LlmTimeoutError("LLM 请求超时") from exception
+        except (httpx.RequestError, httpx.HTTPStatusError) as exception:
+            # 不把上游响应正文或 API Key 暴露给调用方。
+            raise LlmServiceError("LLM 服务暂不可用") from exception
+
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exception:
+            raise LlmInvalidResponseError("LLM 返回结构不合法") from exception
+        if not isinstance(content, str) or not content.strip():
+            raise LlmInvalidResponseError("LLM 返回了空摘要")
+        return content.strip()

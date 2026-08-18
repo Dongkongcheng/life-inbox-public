@@ -3,6 +3,7 @@ package com.lifeinbox.server.controller;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.service.InboxService;
+import com.lifeinbox.server.service.InboxSummaryService;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -24,9 +25,11 @@ import java.util.List;
 public class InboxController {
 
     private final InboxService inboxService;
+    private final InboxSummaryService inboxSummaryService;
 
-    public InboxController(InboxService inboxService) {
+    public InboxController(InboxService inboxService, InboxSummaryService inboxSummaryService) {
         this.inboxService = inboxService;
+        this.inboxSummaryService = inboxSummaryService;
     }
 
     /** 主 Inbox 只展示仍处于 ACTIVE 状态的条目。 */
@@ -57,6 +60,14 @@ public class InboxController {
             @RequestParam(value = "title", required = false) String title
     ) {
         return inboxService.createImage(file, title);
+    }
+
+    /**
+     * 摘要由用户在 Capture 成功后显式触发，AI 故障不会阻止原始 InboxItem 保存。
+     */
+    @PostMapping("/{id}/ai/summary")
+    public InboxItem generateSummary(@PathVariable Long id) {
+        return inboxSummaryService.generateSummary(id);
     }
 
     // 删除、归档和收藏等简单操作只负责参数转发，业务判断留在 Service。
