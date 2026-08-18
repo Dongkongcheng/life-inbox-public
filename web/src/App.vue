@@ -6,6 +6,7 @@ const content = ref('')
 const inboxItems = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const deletingId = ref(null)
 const errorMessage = ref('')
 
 const loadInbox = async () => {
@@ -54,6 +55,33 @@ const saveText = async () => {
   }
 }
 
+const deleteItem = async (id) => {
+  deletingId.value = id
+  errorMessage.value = ''
+
+  try {
+    const response = await fetch(`/api/inbox/${id}`, {
+      method: 'DELETE'
+    })
+
+    if (response.status === 404) {
+      throw new Error('NOT_FOUND')
+    }
+    if (!response.ok) {
+      throw new Error('DELETE_FAILED')
+    }
+
+    await loadInbox()
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = error.message === 'NOT_FOUND'
+      ? '该条信息不存在，可能已经被删除。'
+      : '删除失败，请稍后重试。'
+  } finally {
+    deletingId.value = null
+  }
+}
+
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
 onMounted(loadInbox)
@@ -92,9 +120,19 @@ onMounted(loadInbox)
       <p v-else-if="inboxItems.length === 0" class="empty-state">Inbox 还是空的，先保存一段文字吧。</p>
       <div v-else class="item-list">
         <article v-for="item in inboxItems" :key="item.id" class="inbox-item">
-          <div class="item-meta">
-            <span>{{ item.type }}</span>
-            <time>{{ formatTime(item.createdTime) }}</time>
+          <div class="item-top">
+            <div class="item-meta">
+              <span>{{ item.type }}</span>
+              <time>{{ formatTime(item.createdTime) }}</time>
+            </div>
+            <button
+              class="delete-button"
+              type="button"
+              :disabled="deletingId === item.id"
+              @click="deleteItem(item.id)"
+            >
+              {{ deletingId === item.id ? '删除中…' : '删除' }}
+            </button>
           </div>
           <h3 v-if="item.title">{{ item.title }}</h3>
           <p>{{ item.content }}</p>

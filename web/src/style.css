@@ -67,7 +67,7 @@ button:hover { background: #255f4a; }
 button:disabled { cursor: wait; opacity: 0.65; }
 .error-message { margin: 16px 0 0; color: #b42318; }
 .inbox-section { margin-top: 24px; }
-.section-heading, .item-meta {
+.section-heading, .item-top, .item-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -83,7 +83,18 @@ button:disabled { cursor: wait; opacity: 0.65; }
   background: #fcfdfc;
 }
 .item-meta { color: #75827c; font-size: 0.76rem; }
+.item-meta { justify-content: flex-start; }
 .item-meta span { color: #2f745b; font-weight: 750; letter-spacing: 0.08em; }
+.delete-button {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid #f0c7c3;
+  color: #b42318;
+  background: #fff;
+  font-size: 0.8rem;
+}
+.delete-button:hover { background: #fff1f0; }
 .inbox-item h3 { margin: 10px 0 6px; color: #1b3027; font-size: 1.05rem; }
 .inbox-item > p {
   margin: 10px 0 0;
@@ -96,4 +107,5 @@ button:disabled { cursor: wait; opacity: 0.65; }
   .page-shell { width: min(100% - 20px, 760px); padding: 36px 0; }
   .capture-card, .inbox-section { padding: 20px; border-radius: 14px; }
   button { width: 100%; }
+  .delete-button { width: auto; }
 }
