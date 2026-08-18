@@ -191,7 +191,9 @@ onMounted(loadInbox)
       </div>
 
       <form @submit.prevent="saveItem">
-        <label for="title">标题（可选）</label>
+        <label for="title">
+          {{ captureType === 'URL' ? '标题（可选，将尝试自动获取）' : '标题（可选）' }}
+        </label>
         <input
           id="title"
           v-model="title"
