@@ -47,4 +47,16 @@ public class InboxController {
         inboxService.archive(id);
         return ResponseEntity.noContent().build();
     }
+
+    @PutMapping("/{id}/favorite")
+    public ResponseEntity<Void> favorite(@PathVariable Long id) {
+        inboxService.favorite(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/{id}/unfavorite")
+    public ResponseEntity<Void> unfavorite(@PathVariable Long id) {
+        inboxService.unfavorite(id);
+        return ResponseEntity.noContent().build();
+    }
 }

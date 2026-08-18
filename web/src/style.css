@@ -86,6 +86,7 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .item-meta { justify-content: flex-start; }
 .item-meta span { color: #2f745b; font-weight: 750; letter-spacing: 0.08em; }
 .item-actions { display: flex; gap: 8px; }
+.favorite-button,
 .archive-button,
 .delete-button {
   flex: 0 0 auto;
@@ -93,6 +94,13 @@ button:disabled { cursor: wait; opacity: 0.65; }
   padding: 6px 10px;
   font-size: 0.8rem;
 }
+.favorite-button {
+  border: 1px solid #e3d39b;
+  color: #806b22;
+  background: #fff;
+}
+.favorite-button:hover,
+.favorite-button.is-favorite { background: #fff8dc; }
 .archive-button {
   border: 1px solid #b9d8cc;
   color: #2f745b;
@@ -117,6 +125,7 @@ button:disabled { cursor: wait; opacity: 0.65; }
   .page-shell { width: min(100% - 20px, 760px); padding: 36px 0; }
   .capture-card, .inbox-section { padding: 20px; border-radius: 14px; }
   button { width: 100%; }
+  .favorite-button,
   .archive-button,
   .delete-button { width: auto; }
 }

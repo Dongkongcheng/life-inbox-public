@@ -8,6 +8,7 @@ const loading = ref(false)
 const saving = ref(false)
 const deletingId = ref(null)
 const archivingId = ref(null)
+const favoritingId = ref(null)
 const errorMessage = ref('')
 
 const loadInbox = async () => {
@@ -110,6 +111,34 @@ const archiveItem = async (id) => {
   }
 }
 
+const toggleFavorite = async (item) => {
+  favoritingId.value = item.id
+  errorMessage.value = ''
+  const action = item.favorite === 1 ? 'unfavorite' : 'favorite'
+
+  try {
+    const response = await fetch(`/api/inbox/${item.id}/${action}`, {
+      method: 'PUT'
+    })
+
+    if (response.status === 404) {
+      throw new Error('NOT_FOUND')
+    }
+    if (!response.ok) {
+      throw new Error('FAVORITE_FAILED')
+    }
+
+    await loadInbox()
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = error.message === 'NOT_FOUND'
+      ? '该条信息不存在，可能已经被删除。'
+      : '收藏操作失败，请稍后重试。'
+  } finally {
+    favoritingId.value = null
+  }
+}
+
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
 onMounted(loadInbox)
@@ -155,9 +184,18 @@ onMounted(loadInbox)
             </div>
             <div class="item-actions">
               <button
+                class="favorite-button"
+                type="button"
+                :class="{ 'is-favorite': item.favorite === 1 }"
+                :disabled="favoritingId === item.id || archivingId === item.id || deletingId === item.id"
+                @click="toggleFavorite(item)"
+              >
+                {{ item.favorite === 1 ? '★ 已收藏' : '☆ 收藏' }}
+              </button>
+              <button
                 class="archive-button"
                 type="button"
-                :disabled="archivingId === item.id || deletingId === item.id"
+                :disabled="archivingId === item.id || deletingId === item.id || favoritingId === item.id"
                 @click="archiveItem(item.id)"
               >
                 {{ archivingId === item.id ? '归档中…' : '归档' }}
@@ -165,7 +203,7 @@ onMounted(loadInbox)
               <button
                 class="delete-button"
                 type="button"
-                :disabled="deletingId === item.id || archivingId === item.id"
+                :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id"
                 @click="deleteItem(item.id)"
               >
                 {{ deletingId === item.id ? '删除中…' : '删除' }}
