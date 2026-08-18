@@ -19,3 +19,9 @@ life-inbox:
   storage:
     # 相对路径以 server 的启动目录为基准，运行时目录已由 .gitignore 忽略。
     upload-dir: uploads
+  ai:
+    # AI 服务地址必须可由环境变量覆盖，避免业务代码绑定到某个部署地址。
+    base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+    # 跨服务调用必须有连接和读取超时，Python 不可用时 Java 才能快速失败。
+    connect-timeout: 2s
+    read-timeout: 5s

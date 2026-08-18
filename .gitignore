@@ -9,7 +9,8 @@ server/uploads/
 
 # Python
 ai-engine/.venv/
-ai-engine/__pycache__/
+ai-engine/**/__pycache__/
+ai-engine/.pytest_cache/
 *.pyc
 
 # IDE
