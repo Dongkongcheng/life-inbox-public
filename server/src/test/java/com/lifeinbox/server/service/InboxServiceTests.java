@@ -3,11 +3,14 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import com.lifeinbox.server.mapper.InboxTagMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,13 +24,28 @@ import static org.mockito.ArgumentMatchers.any;
 class InboxServiceTests {
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
+    private final InboxTagMapper inboxTagMapper = mock(InboxTagMapper.class);
     private final UrlMetadataService urlMetadataService = mock(UrlMetadataService.class);
     private final FileStorageService fileStorageService = mock(FileStorageService.class);
     private final InboxService inboxService = new InboxService(
             inboxItemMapper,
+            inboxTagMapper,
             urlMetadataService,
             fileStorageService
     );
+
+    @Test
+    void listReturnsTagNamesForEachInboxItem() {
+        InboxItem item = savedItem(1L, "TEXT", "标题", "正文", null);
+        when(inboxItemMapper.selectList(any())).thenReturn(List.of(item));
+        when(inboxTagMapper.selectTagNamesByInboxItemId(1L))
+                .thenReturn(List.of("Java", "Spring AI"));
+
+        List<InboxItem> result = inboxService.list();
+
+        assertEquals(List.of("Java", "Spring AI"), result.getFirst().getTags());
+        verify(inboxTagMapper).selectTagNamesByInboxItemId(1L);
+    }
 
     @Test
     void createTextKeepsExistingTextBehavior() {

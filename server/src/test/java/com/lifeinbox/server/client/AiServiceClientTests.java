@@ -1,5 +1,6 @@
 package com.lifeinbox.server.client;
 
+import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -11,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -120,6 +122,73 @@ class AiServiceClientTests {
             assertThrows(
                     AiServiceUnavailableException.class,
                     () -> client.summarize(null, "正文")
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzePostsOneStructuredRequestAndParsesAllResults() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] body = ("""
+                    {"summary":"结构化摘要","category":"技术学习","tags":["Java","Spring AI"]}
+                    """).strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = new AiServiceClient(
+                    "http://127.0.0.1:" + server.getAddress().getPort(),
+                    Duration.ofSeconds(1),
+                    Duration.ofSeconds(1),
+                    Duration.ofSeconds(1)
+            );
+
+            assertEquals(
+                    new AiAnalyzeResponse(
+                            "结构化摘要",
+                            "技术学习",
+                            List.of("Java", "Spring AI")
+                    ),
+                    client.analyze("学习", "Spring AI 正文")
+            );
+            assertEquals(
+                    "{\"title\":\"学习\",\"text\":\"Spring AI 正文\"}",
+                    requestBody.get()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzeConvertsPythonFailureToAiServiceException() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze", exchange -> {
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = new AiServiceClient(
+                    "http://127.0.0.1:" + server.getAddress().getPort(),
+                    Duration.ofSeconds(1),
+                    Duration.ofSeconds(1),
+                    Duration.ofSeconds(1)
+            );
+
+            assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.analyze(null, "正文")
             );
         } finally {
             server.stop(0);

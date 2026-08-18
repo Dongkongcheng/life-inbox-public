@@ -151,9 +151,10 @@ V0.2 的目标是：
 * ✅ FastAPI `/health`
 * ✅ Java ↔ Python Health Integration
 * ✅ AI 服务不可用时返回结构化 503
-* ✅ TEXT AI Summary（显式触发）
-* ⏳ AI Tags
-* ⏳ AI Classification
+* ✅ TEXT AI Analyze（显式触发）
+  * ✅ Summary
+  * ✅ Category
+  * ✅ Tags
 * ⏳ Keyword Extraction
 * ⏳ Entity Extraction
 * ⏳ AI Processing Status
@@ -399,12 +400,20 @@ type
 title
 content
 summary
+category
 source_url
 file_url
 status
 favorite
 created_time
 updated_time
+```
+
+AI Tags 使用统一关系模型，不按 Capture 类型拆表：
+
+```text
+tag
+inbox_tag
 ```
 
 其中：
@@ -494,9 +503,10 @@ inbox_item
 
 ```text
 docs/sql/v0.2-task2-add-summary.sql
+docs/sql/v0.2-task3-add-analysis.sql
 ```
 
-它只为 `inbox_item` 增加可空的 `summary TEXT` 字段，不会自动处理历史数据。
+请按 Task 顺序执行。Task 2 增加可空的 `summary`；Task 3 增加可空的 `category`，并创建统一的 `tag`、`inbox_tag` 标签关系表。迁移不会自动分析或回填历史数据。
 
 ---
 
@@ -614,7 +624,7 @@ ai-engine
 
 Python 服务。
 
-V0.2 Task 2 已完成 TEXT 的显式 AI 摘要链路。Capture 仍然先独立保存，只有用户点击“生成摘要”时才调用 Python 和 LLM；Java 校验成功结果后再保存 `summary`。
+V0.2 Task 3 已将 TEXT 摘要升级为显式 AI Analyze。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；一次调用返回 `summary`、有限 `category` 和最多 5 个 `tags`，Java 二次校验后在短事务中统一持久化。
 
 进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
@@ -629,7 +639,7 @@ $env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/summarize` 会返回 503。
+`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/analyze` 和兼容的 `/summarize` 会返回 503。
 
 Python 健康检查：
 
@@ -643,27 +653,35 @@ Spring Boot 集成检查：
 GET http://localhost:8080/api/ai/health
 ```
 
-Python 摘要接口：
+Python Analyze 接口：
 
 ```text
-POST http://localhost:8000/summarize
-Request:  { "title": "可选标题", "text": "需要摘要的正文" }
-Response: { "summary": "生成后的摘要" }
+POST http://localhost:8000/analyze
+Request:  { "title": "可选标题", "text": "需要分析的正文" }
+Response: {
+  "summary": "生成后的摘要",
+  "category": "技术学习",
+  "tags": ["Spring AI", "Java"]
+}
 ```
+
+允许的 Category 为：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 必须有 1～5 个，每个最长 64 个字符。旧 `POST /summarize` 暂时保留原请求和 `{ "summary": "..." }` 响应，但底层复用同一次 Analyze，不维护第二套 Prompt。
 
 产品接口：
 
 ```text
-POST http://localhost:8080/api/inbox/{id}/ai/summary
+POST http://localhost:8080/api/inbox/{id}/ai/analyze
 ```
+
+旧 `POST /api/inbox/{id}/ai/summary` 也暂时保留为兼容入口，并委托同一个 Analyze Service。
 
 可以在 PowerShell 中手工验证完整链路：
 
 ```powershell
 $captureBody = @{
   type = "TEXT"
-  title = "摘要测试"
-  content = "这是一条用于验证 LifeInbox AI 摘要的文本。"
+  title = "分析测试"
+  content = "Spring AI 是 Spring 生态面向 AI 应用开发的框架。"
 } | ConvertTo-Json
 
 $item = Invoke-RestMethod -Method Post `
@@ -672,10 +690,10 @@ $item = Invoke-RestMethod -Method Post `
   -Body $captureBody
 
 Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/summary"
+  -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/analyze"
 ```
 
-随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`。再次调用会用新摘要覆盖旧摘要。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，摘要读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.summary-read-timeout` 调得更大。Python 或 LLM 不可用时，摘要请求返回 503，旧摘要和原始 InboxItem 不会被改写，原有 Capture 功能仍可使用。
+随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category` 和 `tags` 数组。再次调用会把三项作为一组替换，而不是追加旧标签。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python `/analyze` 会把无效结果映射为 502、上游故障映射为 503；Java 产品接口统一返回安全的结构化 503。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
 
 目标架构：
 
@@ -728,11 +746,8 @@ Delete
 ```text
 Python AI Engine
         ↓
-AI Summary
-        ↓
-AI Tags
-        ↓
-Classification
+TEXT AI Analyze
+Summary + Category + Tags
         ↓
 Keyword / Entity Extraction
 ```

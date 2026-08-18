@@ -15,9 +15,9 @@ const saving = ref(false)
 const deletingId = ref(null)
 const archivingId = ref(null)
 const favoritingId = ref(null)
-const summarizingId = ref(null)
-const summaryErrorItemId = ref(null)
-const summaryErrorMessage = ref('')
+const analyzingId = ref(null)
+const analysisErrorItemId = ref(null)
+const analysisErrorMessage = ref('')
 const errorMessage = ref('')
 
 const clearSelectedUpload = () => {
@@ -227,20 +227,20 @@ const toggleFavorite = async (item) => {
   }
 }
 
-const generateSummary = async (item) => {
-  // 当前没有后台任务状态，同一时间只允许一次显式摘要请求，避免重复消耗模型额度。
-  if (summarizingId.value !== null) return
-  summarizingId.value = item.id
-  summaryErrorItemId.value = null
-  summaryErrorMessage.value = ''
+const analyzeItem = async (item) => {
+  // 当前没有后台任务状态，同一时间只允许一次显式分析请求，避免重复消耗模型额度。
+  if (analyzingId.value !== null) return
+  analyzingId.value = item.id
+  analysisErrorItemId.value = null
+  analysisErrorMessage.value = ''
 
   try {
-    const response = await fetch(`/api/inbox/${item.id}/ai/summary`, {
+    const response = await fetch(`/api/inbox/${item.id}/ai/analyze`, {
       method: 'POST'
     })
 
     if (!response.ok) {
-      let message = 'AI 摘要生成失败，请稍后重试。'
+      let message = 'AI 分析失败，请稍后重试。'
       try {
         const problem = await response.json()
         message = problem.detail || problem.message || message
@@ -250,16 +250,20 @@ const generateSummary = async (item) => {
       throw new Error(message)
     }
 
-    // 成功后重新读取 Java 持久化的数据，刷新页面时也会得到同一份 summary。
+    // 成功后重新读取 Java 持久化的数据，确保摘要、分类和标签作为一组展示。
     await loadInbox()
   } catch (error) {
     console.error(error)
-    summaryErrorItemId.value = item.id
-    summaryErrorMessage.value = error.message || 'AI 摘要生成失败，请稍后重试。'
+    // 不在前端清空旧分析结果；重新分析失败时，用户仍能查看上一次的有效结果。
+    analysisErrorItemId.value = item.id
+    analysisErrorMessage.value = error.message || 'AI 分析失败，请稍后重试。'
   } finally {
-    summarizingId.value = null
+    analyzingId.value = null
   }
 }
+
+const hasTags = (item) => Array.isArray(item.tags) && item.tags.length > 0
+const hasAnalysis = (item) => Boolean(item.summary || item.category || hasTags(item))
 
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
@@ -402,7 +406,12 @@ onBeforeUnmount(clearSelectedUpload)
       <p v-if="loading" class="empty-state">正在加载…</p>
       <p v-else-if="inboxItems.length === 0" class="empty-state">Inbox 还是空的，先保存一条信息吧。</p>
       <div v-else class="item-list">
-        <article v-for="item in inboxItems" :key="item.id" class="inbox-item">
+        <article
+          v-for="item in inboxItems"
+          :key="item.id"
+          class="inbox-item"
+          :aria-busy="analyzingId === item.id"
+        >
           <div class="item-top">
             <div class="item-meta">
               <span>{{ item.type === 'URL'
@@ -419,7 +428,7 @@ onBeforeUnmount(clearSelectedUpload)
                 class="favorite-button"
                 type="button"
                 :class="{ 'is-favorite': item.favorite === 1 }"
-                :disabled="favoritingId === item.id || archivingId === item.id || deletingId === item.id || summarizingId === item.id"
+                :disabled="favoritingId === item.id || archivingId === item.id || deletingId === item.id || analyzingId === item.id"
                 @click="toggleFavorite(item)"
               >
                 {{ item.favorite === 1 ? '★ 已收藏' : '☆ 收藏' }}
@@ -427,7 +436,7 @@ onBeforeUnmount(clearSelectedUpload)
               <button
                 class="archive-button"
                 type="button"
-                :disabled="archivingId === item.id || deletingId === item.id || favoritingId === item.id || summarizingId === item.id"
+                :disabled="archivingId === item.id || deletingId === item.id || favoritingId === item.id || analyzingId === item.id"
                 @click="archiveItem(item.id)"
               >
                 {{ archivingId === item.id ? '归档中…' : '归档' }}
@@ -435,7 +444,7 @@ onBeforeUnmount(clearSelectedUpload)
               <button
                 class="delete-button"
                 type="button"
-                :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || summarizingId === item.id"
+                :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || analyzingId === item.id"
                 @click="deleteItem(item.id)"
               >
                 {{ deletingId === item.id ? '删除中…' : '删除' }}
@@ -469,30 +478,54 @@ onBeforeUnmount(clearSelectedUpload)
           <template v-else>
             <h3 v-if="item.title">{{ item.title }}</h3>
             <p>{{ item.content }}</p>
-            <div v-if="item.type === 'TEXT' && item.summary" class="summary-block">
-              <strong>AI 摘要</strong>
-              <p>{{ item.summary }}</p>
-            </div>
-            <div v-if="item.type === 'TEXT'" class="summary-actions">
+            <section
+              v-if="item.type === 'TEXT' && hasAnalysis(item)"
+              class="analysis-block"
+              aria-label="AI 分析结果"
+              aria-live="polite"
+            >
+              <h4>AI 分析</h4>
+              <div v-if="item.summary" class="analysis-field">
+                <strong class="analysis-label">摘要</strong>
+                <p>{{ item.summary }}</p>
+              </div>
+              <div v-if="item.category" class="analysis-field">
+                <strong class="analysis-label">分类</strong>
+                <span class="analysis-category">{{ item.category }}</span>
+              </div>
+              <div v-if="hasTags(item)" class="analysis-field">
+                <strong class="analysis-label">标签</strong>
+                <ul class="analysis-tags" aria-label="AI 标签">
+                  <li
+                    v-for="(tag, index) in item.tags"
+                    :key="`${item.id}-${index}-${tag}`"
+                    class="analysis-tag"
+                  >
+                    {{ tag }}
+                  </li>
+                </ul>
+              </div>
+            </section>
+            <div v-if="item.type === 'TEXT'" class="analysis-actions" aria-live="polite">
               <button
-                class="summary-button"
+                class="analysis-button"
                 type="button"
-                :disabled="summarizingId !== null || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
-                @click="generateSummary(item)"
+                :disabled="analyzingId !== null || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
+                @click="analyzeItem(item)"
               >
-                {{ summarizingId === item.id
-                  ? '生成中…'
-                  : item.summary
-                    ? '重新生成摘要'
-                    : '生成摘要' }}
+                {{ analyzingId === item.id
+                  ? '分析中…'
+                  : hasAnalysis(item)
+                    ? '重新分析'
+                    : 'AI 分析' }}
               </button>
             </div>
             <p
-              v-if="summaryErrorItemId === item.id"
-              class="summary-error"
+              v-if="analysisErrorItemId === item.id"
+              class="analysis-error"
               role="alert"
             >
-              {{ summaryErrorMessage }}
+              {{ analysisErrorMessage }}
             </p>
           </template>
         </article>
