@@ -21,9 +21,11 @@ public class InboxService {
     private static final String TYPE_URL = "URL";
 
     private final InboxItemMapper inboxItemMapper;
+    private final UrlMetadataService urlMetadataService;
 
-    public InboxService(InboxItemMapper inboxItemMapper) {
+    public InboxService(InboxItemMapper inboxItemMapper, UrlMetadataService urlMetadataService) {
         this.inboxItemMapper = inboxItemMapper;
+        this.urlMetadataService = urlMetadataService;
     }
 
     public List<InboxItem> list() {
@@ -45,6 +47,9 @@ public class InboxService {
         } else if (TYPE_URL.equals(request.getType())) {
             String sourceUrl = validateAndNormalizeUrl(request.getSourceUrl());
             inboxItem.setSourceUrl(sourceUrl);
+            if (isBlank(request.getTitle())) {
+                inboxItem.setTitle(urlMetadataService.resolveTitle(sourceUrl));
+            }
         } else {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "暂不支持该 InboxItem 类型");
         }

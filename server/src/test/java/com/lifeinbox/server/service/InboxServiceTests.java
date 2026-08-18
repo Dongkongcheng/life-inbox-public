@@ -20,7 +20,8 @@ import static org.mockito.ArgumentMatchers.any;
 class InboxServiceTests {
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
-    private final InboxService inboxService = new InboxService(inboxItemMapper);
+    private final UrlMetadataService urlMetadataService = mock(UrlMetadataService.class);
+    private final InboxService inboxService = new InboxService(inboxItemMapper, urlMetadataService);
 
     @Test
     void createTextKeepsExistingTextBehavior() {
@@ -37,6 +38,7 @@ class InboxServiceTests {
         assertEquals("文字标题", captor.getValue().getTitle());
         assertEquals("文字内容", captor.getValue().getContent());
         assertEquals(null, captor.getValue().getSourceUrl());
+        verify(urlMetadataService, never()).resolveTitle(any());
     }
 
     @Test
@@ -65,6 +67,24 @@ class InboxServiceTests {
         assertEquals("OpenAI Java", captor.getValue().getTitle());
         assertEquals(null, captor.getValue().getContent());
         assertEquals("https://github.com/openai/openai-java", captor.getValue().getSourceUrl());
+        verify(urlMetadataService, never()).resolveTitle(any());
+    }
+
+    @Test
+    void createUrlFetchesTitleWhenTitleIsBlank() {
+        String sourceUrl = "https://github.com/openai/openai-java";
+        CreateInboxItemRequest request = createRequest("URL", " ", null, sourceUrl);
+        InboxItem savedItem = savedItem(3L, "URL", "openai/openai-java", null, sourceUrl);
+        when(urlMetadataService.resolveTitle(sourceUrl)).thenReturn("openai/openai-java");
+        prepareInsert(savedItem);
+
+        InboxItem result = inboxService.create(request);
+
+        assertEquals(savedItem, result);
+        ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
+        verify(inboxItemMapper).insert(captor.capture());
+        assertEquals("openai/openai-java", captor.getValue().getTitle());
+        verify(urlMetadataService).resolveTitle(sourceUrl);
     }
 
     @Test
