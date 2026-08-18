@@ -93,6 +93,100 @@ class FileStorageServiceTests {
     }
 
     @Test
+    void storesImageWithUuidNameAndImageMediaType() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        byte[] pngContent = new byte[]{
+                (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+                0x00, 0x00, 0x00, 0x00
+        };
+        MockMultipartFile image = new MockMultipartFile(
+                "file",
+                "微信截图.png",
+                "image/png",
+                pngContent
+        );
+
+        FileStorageService.StoredFile storedImage = service.storeImage(image);
+
+        assertEquals("微信截图.png", storedImage.originalFilename());
+        assertTrue(storedImage.storedName().matches("[0-9a-f-]{36}\\.png"));
+        assertEquals("image/png", service.mediaTypeFor(storedImage.storedName()).toString());
+        assertArrayEquals(
+                pngContent,
+                Files.readAllBytes(tempDirectory.resolve(storedImage.storedName()))
+        );
+    }
+
+    @Test
+    void rejectsNonImageExtensionFromImageUpload() {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "notes.txt",
+                "text/plain",
+                "not an image".getBytes()
+        );
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.storeImage(file)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+    }
+
+    @Test
+    void rejectsImageWithMismatchedContentType() {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        MockMultipartFile image = new MockMultipartFile(
+                "file",
+                "photo.png",
+                "text/plain",
+                new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+        );
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.storeImage(image)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+    }
+
+    @Test
+    void rejectsImageWithInvalidSignature() {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        MockMultipartFile image = new MockMultipartFile(
+                "file",
+                "fake.png",
+                "image/png",
+                "not really a png".getBytes()
+        );
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.storeImage(image)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+    }
+
+    @Test
+    void rejectsImageLargerThanTenMegabytes() {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        MultipartFile image = mock(MultipartFile.class);
+        when(image.isEmpty()).thenReturn(false);
+        when(image.getSize()).thenReturn(FileStorageService.MAX_IMAGE_SIZE + 1);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.storeImage(image)
+        );
+
+        assertEquals(HttpStatus.CONTENT_TOO_LARGE, exception.getStatusCode());
+    }
+
+    @Test
     void rejectsOriginalFilenameContainingPathTraversal() {
         FileStorageService service = new FileStorageService(tempDirectory.toString());
         MockMultipartFile file = new MockMultipartFile(

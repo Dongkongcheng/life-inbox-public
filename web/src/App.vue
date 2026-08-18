@@ -1,11 +1,12 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const title = ref('')
 const content = ref('')
 const sourceUrl = ref('')
 const selectedFile = ref(null)
 const fileInput = ref(null)
+const imagePreviewUrl = ref('')
 const captureType = ref('TEXT')
 const inboxItems = ref([])
 const loading = ref(false)
@@ -14,6 +15,32 @@ const deletingId = ref(null)
 const archivingId = ref(null)
 const favoritingId = ref(null)
 const errorMessage = ref('')
+
+const clearSelectedUpload = () => {
+  if (imagePreviewUrl.value) {
+    URL.revokeObjectURL(imagePreviewUrl.value)
+    imagePreviewUrl.value = ''
+  }
+  selectedFile.value = null
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+const changeCaptureType = (type) => {
+  if (captureType.value !== type) clearSelectedUpload()
+  captureType.value = type
+  errorMessage.value = ''
+}
+
+const handleFileChange = (event) => {
+  if (imagePreviewUrl.value) {
+    URL.revokeObjectURL(imagePreviewUrl.value)
+    imagePreviewUrl.value = ''
+  }
+  selectedFile.value = event.target.files?.[0] || null
+  if (captureType.value === 'IMAGE' && selectedFile.value) {
+    imagePreviewUrl.value = URL.createObjectURL(selectedFile.value)
+  }
+}
 
 const loadInbox = async () => {
   loading.value = true
@@ -39,18 +66,18 @@ const saveItem = async () => {
     errorMessage.value = '请输入 URL。'
     return
   }
-  if (captureType.value === 'FILE' && !selectedFile.value) {
-    errorMessage.value = '请选择文件。'
+  if ((captureType.value === 'FILE' || captureType.value === 'IMAGE') && !selectedFile.value) {
+    errorMessage.value = captureType.value === 'IMAGE' ? '请选择图片。' : '请选择文件。'
     return
   }
 
   let endpoint = '/api/inbox'
   let requestOptions
-  if (captureType.value === 'FILE') {
+  if (captureType.value === 'FILE' || captureType.value === 'IMAGE') {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
     if (title.value.trim()) formData.append('title', title.value.trim())
-    endpoint = '/api/inbox/file'
+    endpoint = captureType.value === 'IMAGE' ? '/api/inbox/image' : '/api/inbox/file'
     requestOptions = {
       method: 'POST',
       body: formData
@@ -79,7 +106,9 @@ const saveItem = async () => {
   try {
     const response = await fetch(endpoint, requestOptions)
     if (!response.ok) {
-      let message = response.status === 413 ? '文件大小不能超过 20MB。' : '保存失败，请稍后重试。'
+      let message = response.status === 413
+        ? captureType.value === 'IMAGE' ? '图片大小不能超过 10MB。' : '文件大小不能超过 20MB。'
+        : '保存失败，请稍后重试。'
       try {
         const problem = await response.json()
         if (problem.detail) message = problem.detail
@@ -92,8 +121,7 @@ const saveItem = async () => {
     title.value = ''
     content.value = ''
     sourceUrl.value = ''
-    selectedFile.value = null
-    if (fileInput.value) fileInput.value.value = ''
+    clearSelectedUpload()
     await loadInbox()
   } catch (error) {
     console.error(error)
@@ -188,6 +216,7 @@ const toggleFavorite = async (item) => {
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
 onMounted(loadInbox)
+onBeforeUnmount(clearSelectedUpload)
 </script>
 
 <template>
@@ -195,7 +224,7 @@ onMounted(loadInbox)
     <header class="page-header">
       <p class="eyebrow">Capture first, organize later</p>
       <h1>LifeInbox</h1>
-      <p>先把值得保留的文字、链接和文件放进来。</p>
+      <p>先把值得保留的文字、链接、文件和图片放进来。</p>
     </header>
 
     <section class="capture-card" aria-labelledby="capture-heading">
@@ -206,7 +235,7 @@ onMounted(loadInbox)
           type="button"
           :class="{ active: captureType === 'TEXT' }"
           :aria-pressed="captureType === 'TEXT'"
-          @click="captureType = 'TEXT'"
+          @click="changeCaptureType('TEXT')"
         >
           文字
         </button>
@@ -215,7 +244,7 @@ onMounted(loadInbox)
           type="button"
           :class="{ active: captureType === 'URL' }"
           :aria-pressed="captureType === 'URL'"
-          @click="captureType = 'URL'"
+          @click="changeCaptureType('URL')"
         >
           链接
         </button>
@@ -224,9 +253,18 @@ onMounted(loadInbox)
           type="button"
           :class="{ active: captureType === 'FILE' }"
           :aria-pressed="captureType === 'FILE'"
-          @click="captureType = 'FILE'"
+          @click="changeCaptureType('FILE')"
         >
           文件
+        </button>
+        <button
+          class="type-button"
+          type="button"
+          :class="{ active: captureType === 'IMAGE' }"
+          :aria-pressed="captureType === 'IMAGE'"
+          @click="changeCaptureType('IMAGE')"
+        >
+          图片
         </button>
       </div>
 
@@ -234,7 +272,7 @@ onMounted(loadInbox)
         <label for="title">
           {{ captureType === 'URL'
             ? '标题（可选，将尝试自动获取）'
-            : captureType === 'FILE'
+            : captureType === 'FILE' || captureType === 'IMAGE'
               ? '标题（可选，默认使用文件名）'
               : '标题（可选）' }}
         </label>
@@ -247,7 +285,9 @@ onMounted(loadInbox)
             ? '例如：学习 Agent'
             : captureType === 'URL'
               ? '例如：Spring AI MCP'
-              : '例如：操作系统实验报告'"
+              : captureType === 'FILE'
+                ? '例如：操作系统实验报告'
+                : '例如：旅行照片'"
         />
 
         <template v-if="captureType === 'TEXT'">
@@ -269,14 +309,24 @@ onMounted(loadInbox)
         </template>
 
         <template v-else>
-          <label for="file">文件（最大 20MB）</label>
+          <label for="file">
+            {{ captureType === 'IMAGE' ? '图片（最大 10MB）' : '文件（最大 20MB）' }}
+          </label>
           <input
             id="file"
             ref="fileInput"
             type="file"
-            accept=".pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip"
+            :accept="captureType === 'IMAGE'
+              ? '.jpg,.jpeg,.png,.webp,.gif,.bmp'
+              : '.pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip'"
             required
-            @change="selectedFile = $event.target.files?.[0] || null"
+            @change="handleFileChange"
+          />
+          <img
+            v-if="captureType === 'IMAGE' && imagePreviewUrl"
+            class="local-image-preview"
+            :src="imagePreviewUrl"
+            alt="待上传图片预览"
           />
         </template>
 
@@ -287,7 +337,9 @@ onMounted(loadInbox)
               ? '保存文字'
               : captureType === 'URL'
                 ? '保存链接'
-                : '上传文件' }}
+                : captureType === 'FILE'
+                  ? '上传文件'
+                  : '上传图片' }}
         </button>
       </form>
       <p v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
@@ -305,7 +357,13 @@ onMounted(loadInbox)
         <article v-for="item in inboxItems" :key="item.id" class="inbox-item">
           <div class="item-top">
             <div class="item-meta">
-              <span>{{ item.type === 'URL' ? '🔗 URL' : item.type === 'FILE' ? '📄 FILE' : item.type }}</span>
+              <span>{{ item.type === 'URL'
+                ? '🔗 URL'
+                : item.type === 'FILE'
+                  ? '📄 FILE'
+                  : item.type === 'IMAGE'
+                    ? '🖼️ IMAGE'
+                    : item.type }}</span>
               <time>{{ formatTime(item.createdTime) }}</time>
             </div>
             <div class="item-actions">
@@ -348,6 +406,17 @@ onMounted(loadInbox)
               <a :href="item.fileUrl" target="_blank" rel="noopener noreferrer">查看</a>
               <a :href="item.fileUrl" :download="item.title || 'download'">下载</a>
             </div>
+          </template>
+          <template v-else-if="item.type === 'IMAGE'">
+            <h3 v-if="item.title">{{ item.title }}</h3>
+            <a class="image-link" :href="item.fileUrl" target="_blank" rel="noopener noreferrer">
+              <img
+                class="image-thumbnail"
+                :src="item.fileUrl"
+                :alt="item.title || 'Inbox 图片'"
+                loading="lazy"
+              />
+            </a>
           </template>
           <template v-else>
             <h3 v-if="item.title">{{ item.title }}</h3>

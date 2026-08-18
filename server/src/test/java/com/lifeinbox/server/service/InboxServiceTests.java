@@ -193,6 +193,53 @@ class InboxServiceTests {
     }
 
     @Test
+    void createImageStoresImageInboxItem() {
+        MultipartFile image = mock(MultipartFile.class);
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.png";
+        when(fileStorageService.storeImage(image)).thenReturn(
+                new FileStorageService.StoredFile(storedName, "微信截图.png")
+        );
+        when(inboxItemMapper.insert(any(InboxItem.class))).thenAnswer(invocation -> {
+            InboxItem itemToInsert = invocation.getArgument(0);
+            itemToInsert.setId(5L);
+            return 1;
+        });
+        InboxItem savedItem = new InboxItem();
+        savedItem.setId(5L);
+        savedItem.setType("IMAGE");
+        savedItem.setTitle("旅行照片");
+        savedItem.setFileUrl("/api/files/" + storedName);
+        when(inboxItemMapper.selectById(5L)).thenReturn(savedItem);
+
+        InboxItem result = inboxService.createImage(image, " 旅行照片 ");
+
+        assertEquals(savedItem, result);
+        ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
+        verify(inboxItemMapper).insert(captor.capture());
+        assertEquals("IMAGE", captor.getValue().getType());
+        assertEquals("旅行照片", captor.getValue().getTitle());
+        assertEquals("/api/files/" + storedName, captor.getValue().getFileUrl());
+        assertEquals("ACTIVE", captor.getValue().getStatus());
+        assertEquals(0, captor.getValue().getFavorite());
+        verify(fileStorageService, never()).delete(storedName);
+    }
+
+    @Test
+    void createImageDeletesStoredImageWhenDatabaseInsertFails() {
+        MultipartFile image = mock(MultipartFile.class);
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.jpg";
+        when(fileStorageService.storeImage(image)).thenReturn(
+                new FileStorageService.StoredFile(storedName, "照片.jpg")
+        );
+        when(inboxItemMapper.insert(any(InboxItem.class)))
+                .thenThrow(new IllegalStateException("database unavailable"));
+
+        assertThrows(IllegalStateException.class, () -> inboxService.createImage(image, null));
+
+        verify(fileStorageService).delete(storedName);
+    }
+
+    @Test
     void deleteRemovesExistingItem() {
         when(inboxItemMapper.deleteById(1L)).thenReturn(1);
 
