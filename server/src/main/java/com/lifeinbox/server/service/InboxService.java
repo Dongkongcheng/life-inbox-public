@@ -57,4 +57,25 @@ public class InboxService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }
     }
+
+    public void favorite(Long id) {
+        updateFavorite(id, 1);
+    }
+
+    public void unfavorite(Long id) {
+        updateFavorite(id, 0);
+    }
+
+    private void updateFavorite(Long id, int favorite) {
+        InboxItem inboxItem = inboxItemMapper.selectById(id);
+        if (inboxItem == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+        }
+
+        inboxItem.setFavorite(favorite);
+        int updatedRows = inboxItemMapper.updateById(inboxItem);
+        if (updatedRows == 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+        }
+    }
 }

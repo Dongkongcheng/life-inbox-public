@@ -64,4 +64,60 @@ class InboxServiceTests {
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
     }
+
+    @Test
+    void favoriteUpdatesExistingItemWithoutChangingStatus() {
+        InboxItem inboxItem = new InboxItem();
+        inboxItem.setId(1L);
+        inboxItem.setStatus("ACTIVE");
+        inboxItem.setFavorite(0);
+        when(inboxItemMapper.selectById(1L)).thenReturn(inboxItem);
+        when(inboxItemMapper.updateById(inboxItem)).thenReturn(1);
+
+        assertDoesNotThrow(() -> inboxService.favorite(1L));
+
+        assertEquals(1, inboxItem.getFavorite());
+        assertEquals("ACTIVE", inboxItem.getStatus());
+        verify(inboxItemMapper).updateById(inboxItem);
+    }
+
+    @Test
+    void unfavoriteUpdatesExistingItemWithoutChangingStatus() {
+        InboxItem inboxItem = new InboxItem();
+        inboxItem.setId(1L);
+        inboxItem.setStatus("ACTIVE");
+        inboxItem.setFavorite(1);
+        when(inboxItemMapper.selectById(1L)).thenReturn(inboxItem);
+        when(inboxItemMapper.updateById(inboxItem)).thenReturn(1);
+
+        assertDoesNotThrow(() -> inboxService.unfavorite(1L));
+
+        assertEquals(0, inboxItem.getFavorite());
+        assertEquals("ACTIVE", inboxItem.getStatus());
+        verify(inboxItemMapper).updateById(inboxItem);
+    }
+
+    @Test
+    void favoriteReturnsNotFoundWhenItemDoesNotExist() {
+        when(inboxItemMapper.selectById(99L)).thenReturn(null);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.favorite(99L)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+    }
+
+    @Test
+    void unfavoriteReturnsNotFoundWhenItemDoesNotExist() {
+        when(inboxItemMapper.selectById(99L)).thenReturn(null);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.unfavorite(99L)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+    }
 }
