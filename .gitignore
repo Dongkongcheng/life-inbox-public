@@ -4,6 +4,7 @@ web/dist/
 
 # Java
 server/target/
+server/uploads/
 *.class
 
 # Python
