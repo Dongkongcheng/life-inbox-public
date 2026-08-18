@@ -1,5 +1,6 @@
 package com.lifeinbox.server.service;
 
+import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,32 @@ class InboxServiceTests {
         ResponseStatusException exception = assertThrows(
                 ResponseStatusException.class,
                 () -> inboxService.delete(99L)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+    }
+
+    @Test
+    void archiveUpdatesExistingItemStatus() {
+        InboxItem inboxItem = new InboxItem();
+        inboxItem.setId(1L);
+        inboxItem.setStatus("ACTIVE");
+        when(inboxItemMapper.selectById(1L)).thenReturn(inboxItem);
+        when(inboxItemMapper.updateById(inboxItem)).thenReturn(1);
+
+        assertDoesNotThrow(() -> inboxService.archive(1L));
+
+        assertEquals("ARCHIVED", inboxItem.getStatus());
+        verify(inboxItemMapper).updateById(inboxItem);
+    }
+
+    @Test
+    void archiveReturnsNotFoundWhenItemDoesNotExist() {
+        when(inboxItemMapper.selectById(99L)).thenReturn(null);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.archive(99L)
         );
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());

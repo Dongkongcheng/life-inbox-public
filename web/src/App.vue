@@ -7,6 +7,7 @@ const inboxItems = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const deletingId = ref(null)
+const archivingId = ref(null)
 const errorMessage = ref('')
 
 const loadInbox = async () => {
@@ -82,6 +83,33 @@ const deleteItem = async (id) => {
   }
 }
 
+const archiveItem = async (id) => {
+  archivingId.value = id
+  errorMessage.value = ''
+
+  try {
+    const response = await fetch(`/api/inbox/${id}/archive`, {
+      method: 'PUT'
+    })
+
+    if (response.status === 404) {
+      throw new Error('NOT_FOUND')
+    }
+    if (!response.ok) {
+      throw new Error('ARCHIVE_FAILED')
+    }
+
+    await loadInbox()
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = error.message === 'NOT_FOUND'
+      ? '该条信息不存在，可能已经被删除。'
+      : '归档失败，请稍后重试。'
+  } finally {
+    archivingId.value = null
+  }
+}
+
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
 onMounted(loadInbox)
@@ -125,14 +153,24 @@ onMounted(loadInbox)
               <span>{{ item.type }}</span>
               <time>{{ formatTime(item.createdTime) }}</time>
             </div>
-            <button
-              class="delete-button"
-              type="button"
-              :disabled="deletingId === item.id"
-              @click="deleteItem(item.id)"
-            >
-              {{ deletingId === item.id ? '删除中…' : '删除' }}
-            </button>
+            <div class="item-actions">
+              <button
+                class="archive-button"
+                type="button"
+                :disabled="archivingId === item.id || deletingId === item.id"
+                @click="archiveItem(item.id)"
+              >
+                {{ archivingId === item.id ? '归档中…' : '归档' }}
+              </button>
+              <button
+                class="delete-button"
+                type="button"
+                :disabled="deletingId === item.id || archivingId === item.id"
+                @click="deleteItem(item.id)"
+              >
+                {{ deletingId === item.id ? '删除中…' : '删除' }}
+              </button>
+            </div>
           </div>
           <h3 v-if="item.title">{{ item.title }}</h3>
           <p>{{ item.content }}</p>
