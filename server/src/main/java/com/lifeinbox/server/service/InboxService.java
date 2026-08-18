@@ -22,6 +22,7 @@ public class InboxService {
     private static final String TYPE_TEXT = "TEXT";
     private static final String TYPE_URL = "URL";
     private static final String TYPE_FILE = "FILE";
+    private static final String TYPE_IMAGE = "IMAGE";
     private static final String FILE_URL_PREFIX = "/api/files/";
     private static final int MAX_TITLE_LENGTH = 255;
 
@@ -71,15 +72,29 @@ public class InboxService {
 
     @Transactional
     public InboxItem createFile(MultipartFile file, String title) {
-        String normalizedTitle = title == null ? null : title.trim();
-        if (normalizedTitle != null && normalizedTitle.length() > MAX_TITLE_LENGTH) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title 长度不能超过 255");
-        }
-
         FileStorageService.StoredFile storedFile = fileStorageService.store(file);
+        return createStoredItem(storedFile, title, TYPE_FILE);
+    }
+
+    @Transactional
+    public InboxItem createImage(MultipartFile file, String title) {
+        FileStorageService.StoredFile storedFile = fileStorageService.storeImage(file);
+        return createStoredItem(storedFile, title, TYPE_IMAGE);
+    }
+
+    private InboxItem createStoredItem(
+            FileStorageService.StoredFile storedFile,
+            String title,
+            String type
+    ) {
         try {
+            String normalizedTitle = title == null ? null : title.trim();
+            if (normalizedTitle != null && normalizedTitle.length() > MAX_TITLE_LENGTH) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title 长度不能超过 255");
+            }
+
             InboxItem inboxItem = new InboxItem();
-            inboxItem.setType(TYPE_FILE);
+            inboxItem.setType(type);
             inboxItem.setTitle(
                     isBlank(normalizedTitle)
                             ? defaultFileTitle(storedFile.originalFilename())
@@ -91,12 +106,12 @@ public class InboxService {
 
             int insertedRows = inboxItemMapper.insert(inboxItem);
             if (insertedRows != 1) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "文件记录保存失败");
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "上传记录保存失败");
             }
 
             InboxItem savedItem = inboxItemMapper.selectById(inboxItem.getId());
             if (savedItem == null) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "文件记录保存失败");
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "上传记录保存失败");
             }
             return savedItem;
         } catch (RuntimeException | Error exception) {

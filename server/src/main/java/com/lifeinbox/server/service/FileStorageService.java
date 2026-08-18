@@ -26,10 +26,14 @@ import java.util.regex.Pattern;
 public class FileStorageService {
 
     static final long MAX_FILE_SIZE = 20L * 1024 * 1024;
+    static final long MAX_IMAGE_SIZE = 10L * 1024 * 1024;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(FileStorageService.class);
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
+    private static final Set<String> FILE_EXTENSIONS = Set.of(
             "pdf", "txt", "md", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "zip"
+    );
+    private static final Set<String> IMAGE_EXTENSIONS = Set.of(
+            "jpg", "jpeg", "png", "webp", "gif", "bmp"
     );
     private static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES = Map.ofEntries(
             Map.entry("pdf", Set.of("application/pdf")),
@@ -50,11 +54,17 @@ public class FileStorageService {
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     "application/zip"
             )),
-            Map.entry("zip", Set.of("application/zip", "application/x-zip-compressed"))
+            Map.entry("zip", Set.of("application/zip", "application/x-zip-compressed")),
+            Map.entry("jpg", Set.of("image/jpeg")),
+            Map.entry("jpeg", Set.of("image/jpeg")),
+            Map.entry("png", Set.of("image/png")),
+            Map.entry("webp", Set.of("image/webp")),
+            Map.entry("gif", Set.of("image/gif")),
+            Map.entry("bmp", Set.of("image/bmp", "image/x-ms-bmp"))
     );
     private static final Pattern STORED_NAME_PATTERN = Pattern.compile(
             "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\."
-                    + "(?:pdf|txt|md|doc|docx|ppt|pptx|xls|xlsx|zip)$"
+                    + "(?:pdf|txt|md|doc|docx|ppt|pptx|xls|xlsx|zip|jpg|jpeg|png|webp|gif|bmp)$"
     );
 
     private final Path uploadDirectory;
@@ -67,16 +77,41 @@ public class FileStorageService {
     }
 
     public StoredFile store(MultipartFile file) {
+        return store(file, FILE_EXTENSIONS, MAX_FILE_SIZE, "文件", true, false);
+    }
+
+    public StoredFile storeImage(MultipartFile file) {
+        return store(file, IMAGE_EXTENSIONS, MAX_IMAGE_SIZE, "图片", false, true);
+    }
+
+    private StoredFile store(
+            MultipartFile file,
+            Set<String> allowedExtensions,
+            long maxSize,
+            String itemName,
+            boolean allowOctetStream,
+            boolean validateImageContent
+    ) {
         if (file == null || file.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件不能为空");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, itemName + "不能为空");
         }
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "文件大小不能超过 20MB");
+        if (file.getSize() > maxSize) {
+            String maxSizeText = maxSize == MAX_IMAGE_SIZE ? "10MB" : "20MB";
+            throw new ResponseStatusException(
+                    HttpStatus.CONTENT_TOO_LARGE,
+                    itemName + "大小不能超过 " + maxSizeText
+            );
         }
 
         String originalFilename = validateOriginalFilename(file.getOriginalFilename());
         String extension = extensionOf(originalFilename);
-        validateContentType(extension, file.getContentType());
+        if (!allowedExtensions.contains(extension)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持该" + itemName + "类型");
+        }
+        validateContentType(extension, file.getContentType(), allowOctetStream);
+        if (validateImageContent) {
+            validateImageSignature(file, extension);
+        }
 
         String storedName = UUID.randomUUID() + "." + extension;
         Path destination = resolveStoredPath(storedName);
@@ -111,6 +146,11 @@ public class FileStorageService {
             case "pdf" -> MediaType.APPLICATION_PDF;
             case "txt", "md" -> MediaType.TEXT_PLAIN;
             case "zip" -> MediaType.parseMediaType("application/zip");
+            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
+            case "png" -> MediaType.IMAGE_PNG;
+            case "gif" -> MediaType.IMAGE_GIF;
+            case "webp" -> MediaType.parseMediaType("image/webp");
+            case "bmp" -> MediaType.parseMediaType("image/bmp");
             default -> MediaType.APPLICATION_OCTET_STREAM;
         };
     }
@@ -143,19 +183,19 @@ public class FileStorageService {
         }
 
         String extension = filename.substring(lastDot + 1).toLowerCase(Locale.ROOT);
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持该文件类型");
-        }
         return extension;
     }
 
-    private void validateContentType(String extension, String contentType) {
+    private void validateContentType(String extension, String contentType, boolean allowOctetStream) {
         if (contentType == null || contentType.isBlank()) {
-            return;
+            if (allowOctetStream) {
+                return;
+            }
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "图片 Content-Type 不能为空");
         }
 
         String normalizedContentType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
-        if (MediaType.APPLICATION_OCTET_STREAM_VALUE.equals(normalizedContentType)) {
+        if (allowOctetStream && MediaType.APPLICATION_OCTET_STREAM_VALUE.equals(normalizedContentType)) {
             return;
         }
 
@@ -163,6 +203,50 @@ public class FileStorageService {
         if (allowedTypes == null || !allowedTypes.contains(normalizedContentType)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件扩展名与 Content-Type 不匹配");
         }
+    }
+
+    private void validateImageSignature(MultipartFile file, String extension) {
+        byte[] header;
+        try (InputStream inputStream = file.getInputStream()) {
+            header = inputStream.readNBytes(12);
+        } catch (IOException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "图片读取失败",
+                    exception
+            );
+        }
+
+        boolean matches = switch (extension) {
+            case "jpg", "jpeg" -> startsWith(header, 0xff, 0xd8, 0xff);
+            case "png" -> startsWith(header, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+            case "gif" -> startsWith(header, 0x47, 0x49, 0x46, 0x38, 0x37, 0x61)
+                    || startsWith(header, 0x47, 0x49, 0x46, 0x38, 0x39, 0x61);
+            case "webp" -> startsWith(header, 0x52, 0x49, 0x46, 0x46)
+                    && startsWithAt(header, 8, 0x57, 0x45, 0x42, 0x50);
+            case "bmp" -> startsWith(header, 0x42, 0x4d);
+            default -> false;
+        };
+
+        if (!matches) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "图片内容与扩展名不匹配");
+        }
+    }
+
+    private boolean startsWith(byte[] actual, int... expected) {
+        return startsWithAt(actual, 0, expected);
+    }
+
+    private boolean startsWithAt(byte[] actual, int offset, int... expected) {
+        if (actual.length < offset + expected.length) {
+            return false;
+        }
+        for (int index = 0; index < expected.length; index++) {
+            if (Byte.toUnsignedInt(actual[offset + index]) != expected[index]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Path resolveStoredPath(String storedName) {

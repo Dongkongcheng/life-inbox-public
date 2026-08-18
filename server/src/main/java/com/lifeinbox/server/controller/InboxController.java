@@ -47,6 +47,14 @@ public class InboxController {
         return inboxService.createFile(file, title);
     }
 
+    @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public InboxItem createImage(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "title", required = false) String title
+    ) {
+        return inboxService.createImage(file, title);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         inboxService.delete(id);
