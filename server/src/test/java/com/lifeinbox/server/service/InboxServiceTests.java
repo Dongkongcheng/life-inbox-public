@@ -6,6 +6,7 @@ import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -21,7 +22,12 @@ class InboxServiceTests {
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
     private final UrlMetadataService urlMetadataService = mock(UrlMetadataService.class);
-    private final InboxService inboxService = new InboxService(inboxItemMapper, urlMetadataService);
+    private final FileStorageService fileStorageService = mock(FileStorageService.class);
+    private final InboxService inboxService = new InboxService(
+            inboxItemMapper,
+            urlMetadataService,
+            fileStorageService
+    );
 
     @Test
     void createTextKeepsExistingTextBehavior() {
@@ -137,6 +143,53 @@ class InboxServiceTests {
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
         verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+    }
+
+    @Test
+    void createFileUsesOriginalFilenameAndStoresFileUrl() {
+        MultipartFile file = mock(MultipartFile.class);
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.pdf";
+        when(fileStorageService.store(file)).thenReturn(
+                new FileStorageService.StoredFile(storedName, "操作系统实验报告.pdf")
+        );
+        when(inboxItemMapper.insert(any(InboxItem.class))).thenAnswer(invocation -> {
+            InboxItem itemToInsert = invocation.getArgument(0);
+            itemToInsert.setId(4L);
+            return 1;
+        });
+        InboxItem savedItem = new InboxItem();
+        savedItem.setId(4L);
+        savedItem.setType("FILE");
+        savedItem.setTitle("操作系统实验报告.pdf");
+        savedItem.setFileUrl("/api/files/" + storedName);
+        when(inboxItemMapper.selectById(4L)).thenReturn(savedItem);
+
+        InboxItem result = inboxService.createFile(file, " ");
+
+        assertEquals(savedItem, result);
+        ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
+        verify(inboxItemMapper).insert(captor.capture());
+        assertEquals("FILE", captor.getValue().getType());
+        assertEquals("操作系统实验报告.pdf", captor.getValue().getTitle());
+        assertEquals("/api/files/" + storedName, captor.getValue().getFileUrl());
+        assertEquals("ACTIVE", captor.getValue().getStatus());
+        assertEquals(0, captor.getValue().getFavorite());
+        verify(fileStorageService, never()).delete(storedName);
+    }
+
+    @Test
+    void createFileDeletesStoredFileWhenDatabaseInsertFails() {
+        MultipartFile file = mock(MultipartFile.class);
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.txt";
+        when(fileStorageService.store(file)).thenReturn(
+                new FileStorageService.StoredFile(storedName, "笔记.txt")
+        );
+        when(inboxItemMapper.insert(any(InboxItem.class)))
+                .thenThrow(new IllegalStateException("database unavailable"));
+
+        assertThrows(IllegalStateException.class, () -> inboxService.createFile(file, null));
+
+        verify(fileStorageService).delete(storedName);
     }
 
     @Test

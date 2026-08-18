@@ -6,6 +6,8 @@ import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
@@ -19,13 +21,22 @@ public class InboxService {
     private static final String STATUS_ARCHIVED = "ARCHIVED";
     private static final String TYPE_TEXT = "TEXT";
     private static final String TYPE_URL = "URL";
+    private static final String TYPE_FILE = "FILE";
+    private static final String FILE_URL_PREFIX = "/api/files/";
+    private static final int MAX_TITLE_LENGTH = 255;
 
     private final InboxItemMapper inboxItemMapper;
     private final UrlMetadataService urlMetadataService;
+    private final FileStorageService fileStorageService;
 
-    public InboxService(InboxItemMapper inboxItemMapper, UrlMetadataService urlMetadataService) {
+    public InboxService(
+            InboxItemMapper inboxItemMapper,
+            UrlMetadataService urlMetadataService,
+            FileStorageService fileStorageService
+    ) {
         this.inboxItemMapper = inboxItemMapper;
         this.urlMetadataService = urlMetadataService;
+        this.fileStorageService = fileStorageService;
     }
 
     public List<InboxItem> list() {
@@ -56,6 +67,48 @@ public class InboxService {
 
         inboxItemMapper.insert(inboxItem);
         return inboxItemMapper.selectById(inboxItem.getId());
+    }
+
+    @Transactional
+    public InboxItem createFile(MultipartFile file, String title) {
+        String normalizedTitle = title == null ? null : title.trim();
+        if (normalizedTitle != null && normalizedTitle.length() > MAX_TITLE_LENGTH) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title 长度不能超过 255");
+        }
+
+        FileStorageService.StoredFile storedFile = fileStorageService.store(file);
+        try {
+            InboxItem inboxItem = new InboxItem();
+            inboxItem.setType(TYPE_FILE);
+            inboxItem.setTitle(
+                    isBlank(normalizedTitle)
+                            ? defaultFileTitle(storedFile.originalFilename())
+                            : normalizedTitle
+            );
+            inboxItem.setFileUrl(FILE_URL_PREFIX + storedFile.storedName());
+            inboxItem.setStatus(STATUS_ACTIVE);
+            inboxItem.setFavorite(0);
+
+            int insertedRows = inboxItemMapper.insert(inboxItem);
+            if (insertedRows != 1) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "文件记录保存失败");
+            }
+
+            InboxItem savedItem = inboxItemMapper.selectById(inboxItem.getId());
+            if (savedItem == null) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "文件记录保存失败");
+            }
+            return savedItem;
+        } catch (RuntimeException | Error exception) {
+            fileStorageService.delete(storedFile.storedName());
+            throw exception;
+        }
+    }
+
+    private String defaultFileTitle(String originalFilename) {
+        return originalFilename.length() <= MAX_TITLE_LENGTH
+                ? originalFilename
+                : originalFilename.substring(0, MAX_TITLE_LENGTH);
     }
 
     private String validateAndNormalizeUrl(String sourceUrl) {

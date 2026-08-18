@@ -4,6 +4,8 @@ import { onMounted, ref } from 'vue'
 const title = ref('')
 const content = ref('')
 const sourceUrl = ref('')
+const selectedFile = ref(null)
+const fileInput = ref(null)
 const captureType = ref('TEXT')
 const inboxItems = ref([])
 const loading = ref(false)
@@ -37,36 +39,65 @@ const saveItem = async () => {
     errorMessage.value = '请输入 URL。'
     return
   }
+  if (captureType.value === 'FILE' && !selectedFile.value) {
+    errorMessage.value = '请选择文件。'
+    return
+  }
 
-  const requestBody = captureType.value === 'TEXT'
-    ? {
+  let endpoint = '/api/inbox'
+  let requestOptions
+  if (captureType.value === 'FILE') {
+    const formData = new FormData()
+    formData.append('file', selectedFile.value)
+    if (title.value.trim()) formData.append('title', title.value.trim())
+    endpoint = '/api/inbox/file'
+    requestOptions = {
+      method: 'POST',
+      body: formData
+    }
+  } else {
+    const requestBody = captureType.value === 'TEXT'
+      ? {
         type: 'TEXT',
         title: title.value.trim() || null,
         content: content.value.trim()
       }
-    : {
+      : {
         type: 'URL',
         title: title.value.trim() || null,
         sourceUrl: sourceUrl.value.trim()
       }
+    requestOptions = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    }
+  }
 
   saving.value = true
   errorMessage.value = ''
   try {
-    const response = await fetch('/api/inbox', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    })
-    if (!response.ok) throw new Error('保存失败')
+    const response = await fetch(endpoint, requestOptions)
+    if (!response.ok) {
+      let message = response.status === 413 ? '文件大小不能超过 20MB。' : '保存失败，请稍后重试。'
+      try {
+        const problem = await response.json()
+        if (problem.detail) message = problem.detail
+      } catch {
+        // 响应不一定包含 JSON 错误正文。
+      }
+      throw new Error(message)
+    }
 
     title.value = ''
     content.value = ''
     sourceUrl.value = ''
+    selectedFile.value = null
+    if (fileInput.value) fileInput.value.value = ''
     await loadInbox()
   } catch (error) {
     console.error(error)
-    errorMessage.value = '保存失败，请稍后重试。'
+    errorMessage.value = error.message || '保存失败，请稍后重试。'
   } finally {
     saving.value = false
   }
@@ -164,7 +195,7 @@ onMounted(loadInbox)
     <header class="page-header">
       <p class="eyebrow">Capture first, organize later</p>
       <h1>LifeInbox</h1>
-      <p>先把值得保留的文字和链接放进来。</p>
+      <p>先把值得保留的文字、链接和文件放进来。</p>
     </header>
 
     <section class="capture-card" aria-labelledby="capture-heading">
@@ -188,18 +219,35 @@ onMounted(loadInbox)
         >
           链接
         </button>
+        <button
+          class="type-button"
+          type="button"
+          :class="{ active: captureType === 'FILE' }"
+          :aria-pressed="captureType === 'FILE'"
+          @click="captureType = 'FILE'"
+        >
+          文件
+        </button>
       </div>
 
       <form @submit.prevent="saveItem">
         <label for="title">
-          {{ captureType === 'URL' ? '标题（可选，将尝试自动获取）' : '标题（可选）' }}
+          {{ captureType === 'URL'
+            ? '标题（可选，将尝试自动获取）'
+            : captureType === 'FILE'
+              ? '标题（可选，默认使用文件名）'
+              : '标题（可选）' }}
         </label>
         <input
           id="title"
           v-model="title"
           type="text"
           maxlength="255"
-          :placeholder="captureType === 'TEXT' ? '例如：学习 Agent' : '例如：Spring AI MCP'"
+          :placeholder="captureType === 'TEXT'
+            ? '例如：学习 Agent'
+            : captureType === 'URL'
+              ? '例如：Spring AI MCP'
+              : '例如：操作系统实验报告'"
         />
 
         <template v-if="captureType === 'TEXT'">
@@ -208,7 +256,7 @@ onMounted(loadInbox)
           placeholder="例如：今天准备学习 Agent Memory"></textarea>
         </template>
 
-        <template v-else>
+        <template v-else-if="captureType === 'URL'">
           <label for="source-url">URL</label>
           <input
             id="source-url"
@@ -220,8 +268,26 @@ onMounted(loadInbox)
           />
         </template>
 
+        <template v-else>
+          <label for="file">文件（最大 20MB）</label>
+          <input
+            id="file"
+            ref="fileInput"
+            type="file"
+            accept=".pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip"
+            required
+            @change="selectedFile = $event.target.files?.[0] || null"
+          />
+        </template>
+
         <button type="submit" :disabled="saving">
-          {{ saving ? '保存中…' : captureType === 'TEXT' ? '保存文字' : '保存链接' }}
+          {{ saving
+            ? '保存中…'
+            : captureType === 'TEXT'
+              ? '保存文字'
+              : captureType === 'URL'
+                ? '保存链接'
+                : '上传文件' }}
         </button>
       </form>
       <p v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
@@ -234,12 +300,12 @@ onMounted(loadInbox)
       </div>
 
       <p v-if="loading" class="empty-state">正在加载…</p>
-      <p v-else-if="inboxItems.length === 0" class="empty-state">Inbox 还是空的，先保存一段文字吧。</p>
+      <p v-else-if="inboxItems.length === 0" class="empty-state">Inbox 还是空的，先保存一条信息吧。</p>
       <div v-else class="item-list">
         <article v-for="item in inboxItems" :key="item.id" class="inbox-item">
           <div class="item-top">
             <div class="item-meta">
-              <span>{{ item.type === 'URL' ? '🔗 URL' : item.type }}</span>
+              <span>{{ item.type === 'URL' ? '🔗 URL' : item.type === 'FILE' ? '📄 FILE' : item.type }}</span>
               <time>{{ formatTime(item.createdTime) }}</time>
             </div>
             <div class="item-actions">
@@ -275,6 +341,13 @@ onMounted(loadInbox)
             <a class="source-link" :href="item.sourceUrl" target="_blank" rel="noopener noreferrer">
               {{ item.sourceUrl }}
             </a>
+          </template>
+          <template v-else-if="item.type === 'FILE'">
+            <h3>📄 {{ item.title || '未命名文件' }}</h3>
+            <div class="file-links">
+              <a :href="item.fileUrl" target="_blank" rel="noopener noreferrer">查看</a>
+              <a :href="item.fileUrl" :download="item.title || 'download'">下载</a>
+            </div>
           </template>
           <template v-else>
             <h3 v-if="item.title">{{ item.title }}</h3>

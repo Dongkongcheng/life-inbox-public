@@ -137,6 +137,8 @@ button:disabled { cursor: wait; opacity: 0.65; }
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+.file-links { display: flex; gap: 14px; margin-top: 10px; }
+.file-links a { color: #2f745b; font-weight: 650; }
 .inbox-item > p {
   margin: 10px 0 0;
   line-height: 1.65;
