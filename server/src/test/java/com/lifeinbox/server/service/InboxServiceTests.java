@@ -1,8 +1,10 @@
 package com.lifeinbox.server.service;
 
+import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -10,13 +12,112 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 class InboxServiceTests {
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
     private final InboxService inboxService = new InboxService(inboxItemMapper);
+
+    @Test
+    void createTextKeepsExistingTextBehavior() {
+        CreateInboxItemRequest request = createRequest("TEXT", "文字标题", "文字内容", null);
+        InboxItem savedItem = savedItem(1L, "TEXT", "文字标题", "文字内容", null);
+        prepareInsert(savedItem);
+
+        InboxItem result = inboxService.create(request);
+
+        assertEquals(savedItem, result);
+        ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
+        verify(inboxItemMapper).insert(captor.capture());
+        assertEquals("TEXT", captor.getValue().getType());
+        assertEquals("文字标题", captor.getValue().getTitle());
+        assertEquals("文字内容", captor.getValue().getContent());
+        assertEquals(null, captor.getValue().getSourceUrl());
+    }
+
+    @Test
+    void createUrlStoresSourceUrlWithoutContent() {
+        CreateInboxItemRequest request = createRequest(
+                "URL",
+                "OpenAI Java",
+                null,
+                " https://github.com/openai/openai-java "
+        );
+        InboxItem savedItem = savedItem(
+                2L,
+                "URL",
+                "OpenAI Java",
+                null,
+                "https://github.com/openai/openai-java"
+        );
+        prepareInsert(savedItem);
+
+        InboxItem result = inboxService.create(request);
+
+        assertEquals(savedItem, result);
+        ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
+        verify(inboxItemMapper).insert(captor.capture());
+        assertEquals("URL", captor.getValue().getType());
+        assertEquals("OpenAI Java", captor.getValue().getTitle());
+        assertEquals(null, captor.getValue().getContent());
+        assertEquals("https://github.com/openai/openai-java", captor.getValue().getSourceUrl());
+    }
+
+    @Test
+    void createUrlRejectsMissingSourceUrl() {
+        CreateInboxItemRequest request = createRequest("URL", null, null, " ");
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.create(request)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+    }
+
+    @Test
+    void createUrlRejectsInvalidSourceUrl() {
+        CreateInboxItemRequest request = createRequest("URL", null, null, "javascript:alert(1)");
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.create(request)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+    }
+
+    @Test
+    void createTextRejectsMissingContent() {
+        CreateInboxItemRequest request = createRequest("TEXT", null, " ", null);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.create(request)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+    }
+
+    @Test
+    void createRejectsUnsupportedType() {
+        CreateInboxItemRequest request = createRequest("IMAGE", null, null, null);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.create(request)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+    }
 
     @Test
     void deleteRemovesExistingItem() {
@@ -119,5 +220,44 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+    }
+
+    private CreateInboxItemRequest createRequest(
+            String type,
+            String title,
+            String content,
+            String sourceUrl
+    ) {
+        CreateInboxItemRequest request = new CreateInboxItemRequest();
+        request.setType(type);
+        request.setTitle(title);
+        request.setContent(content);
+        request.setSourceUrl(sourceUrl);
+        return request;
+    }
+
+    private InboxItem savedItem(
+            Long id,
+            String type,
+            String title,
+            String content,
+            String sourceUrl
+    ) {
+        InboxItem inboxItem = new InboxItem();
+        inboxItem.setId(id);
+        inboxItem.setType(type);
+        inboxItem.setTitle(title);
+        inboxItem.setContent(content);
+        inboxItem.setSourceUrl(sourceUrl);
+        return inboxItem;
+    }
+
+    private void prepareInsert(InboxItem savedItem) {
+        when(inboxItemMapper.insert(any(InboxItem.class))).thenAnswer(invocation -> {
+            InboxItem itemToInsert = invocation.getArgument(0);
+            itemToInsert.setId(savedItem.getId());
+            return 1;
+        });
+        when(inboxItemMapper.selectById(savedItem.getId())).thenReturn(savedItem);
     }
 }

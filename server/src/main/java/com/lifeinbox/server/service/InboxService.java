@@ -8,6 +8,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.List;
 
 @Service
@@ -15,6 +17,8 @@ public class InboxService {
 
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_ARCHIVED = "ARCHIVED";
+    private static final String TYPE_TEXT = "TEXT";
+    private static final String TYPE_URL = "URL";
 
     private final InboxItemMapper inboxItemMapper;
 
@@ -32,10 +36,48 @@ public class InboxService {
         InboxItem inboxItem = new InboxItem();
         inboxItem.setType(request.getType());
         inboxItem.setTitle(request.getTitle());
-        inboxItem.setContent(request.getContent());
+
+        if (TYPE_TEXT.equals(request.getType())) {
+            if (isBlank(request.getContent())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "TEXT 类型的 content 不能为空");
+            }
+            inboxItem.setContent(request.getContent());
+        } else if (TYPE_URL.equals(request.getType())) {
+            String sourceUrl = validateAndNormalizeUrl(request.getSourceUrl());
+            inboxItem.setSourceUrl(sourceUrl);
+        } else {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "暂不支持该 InboxItem 类型");
+        }
 
         inboxItemMapper.insert(inboxItem);
         return inboxItemMapper.selectById(inboxItem.getId());
+    }
+
+    private String validateAndNormalizeUrl(String sourceUrl) {
+        if (isBlank(sourceUrl)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL 类型的 sourceUrl 不能为空");
+        }
+
+        String normalizedUrl = sourceUrl.trim();
+        try {
+            URI uri = new URI(normalizedUrl);
+            String scheme = uri.getScheme();
+            if (scheme == null
+                    || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    || uri.getHost() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sourceUrl 必须是合法的 HTTP 或 HTTPS URL");
+            }
+            return normalizedUrl;
+        } catch (URISyntaxException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "sourceUrl 必须是合法的 HTTP 或 HTTPS URL"
+            );
+        }
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public void delete(Long id) {

@@ -41,6 +41,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   box-shadow: 0 12px 30px rgba(24, 50, 40, 0.06);
 }
 .capture-card h2, .section-heading h2 { margin: 0; color: #183228; }
+.capture-type-switch { display: flex; gap: 8px; margin-top: 20px; }
+.type-button {
+  margin: 0;
+  padding: 7px 14px;
+  border: 1px solid #cad5ce;
+  color: #52615a;
+  background: #fff;
+  font-size: 0.88rem;
+}
+.type-button:hover,
+.type-button.active {
+  border-color: #2f745b;
+  color: #fff;
+  background: #2f745b;
+}
 form { display: grid; gap: 10px; margin-top: 22px; }
 label { margin-top: 6px; color: #34483f; font-size: 0.9rem; font-weight: 650; }
 input, textarea {
@@ -114,6 +129,14 @@ button:disabled { cursor: wait; opacity: 0.65; }
 }
 .delete-button:hover { background: #fff1f0; }
 .inbox-item h3 { margin: 10px 0 6px; color: #1b3027; font-size: 1.05rem; }
+.source-link {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 10px;
+  color: #2f745b;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .inbox-item > p {
   margin: 10px 0 0;
   line-height: 1.65;
