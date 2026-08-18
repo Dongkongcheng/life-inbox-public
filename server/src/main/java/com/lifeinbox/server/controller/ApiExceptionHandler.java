@@ -11,11 +11,15 @@ import java.util.Map;
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
+    /**
+     * multipart 大小限制由 Spring MVC 在进入 Controller 前检查，
+     * 因此需要在全局异常处理器中把框架异常转换成清晰的 API 响应。
+     */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<Map<String, String>> handleMaxUploadSizeExceeded() {
         return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE).body(Map.of(
-                "title", "文件过大",
-                "detail", "文件大小不能超过 20MB"
+                "title", "上传内容过大",
+                "detail", "普通文件最大 20MB，图片最大 10MB"
         ));
     }
 }

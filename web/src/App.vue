@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
+// Capture 表单状态由四种类型共用，切换类型时只展示该类型需要的字段。
 const title = ref('')
 const content = ref('')
 const sourceUrl = ref('')
@@ -17,6 +18,7 @@ const favoritingId = ref(null)
 const errorMessage = ref('')
 
 const clearSelectedUpload = () => {
+  // createObjectURL 占用浏览器内存，切换类型和离开页面时都需要主动释放。
   if (imagePreviewUrl.value) {
     URL.revokeObjectURL(imagePreviewUrl.value)
     imagePreviewUrl.value = ''
@@ -26,6 +28,7 @@ const clearSelectedUpload = () => {
 }
 
 const changeCaptureType = (type) => {
+  // 文件选择器不能跨 FILE/IMAGE 复用旧选择，切换时同时清理预览和文件状态。
   if (captureType.value !== type) clearSelectedUpload()
   captureType.value = type
   errorMessage.value = ''
@@ -38,11 +41,13 @@ const handleFileChange = (event) => {
   }
   selectedFile.value = event.target.files?.[0] || null
   if (captureType.value === 'IMAGE' && selectedFile.value) {
+    // 本地预览不上传文件，只让用户在提交前确认选择是否正确。
     imagePreviewUrl.value = URL.createObjectURL(selectedFile.value)
   }
 }
 
 const loadInbox = async () => {
+  // 所有写操作成功后都重新查询一次，避免前端自行拼装状态而与后端不一致。
   loading.value = true
   errorMessage.value = ''
   try {
@@ -74,6 +79,7 @@ const saveItem = async () => {
   let endpoint = '/api/inbox'
   let requestOptions
   if (captureType.value === 'FILE' || captureType.value === 'IMAGE') {
+    // 二进制 Capture 使用 FormData；不要手动设置 Content-Type，让浏览器生成 boundary。
     const formData = new FormData()
     formData.append('file', selectedFile.value)
     if (title.value.trim()) formData.append('title', title.value.trim())
@@ -83,6 +89,7 @@ const saveItem = async () => {
       body: formData
     }
   } else {
+    // TEXT 与 URL 继续使用统一的 JSON 接口，由后端根据 type 做条件校验。
     const requestBody = captureType.value === 'TEXT'
       ? {
         type: 'TEXT',
@@ -111,7 +118,8 @@ const saveItem = async () => {
         : '保存失败，请稍后重试。'
       try {
         const problem = await response.json()
-        if (problem.detail) message = problem.detail
+        // 框架层的 413 无法判断 FILE/IMAGE，前端保留当前 Capture 类型对应的明确提示。
+        if (problem.detail && response.status !== 413) message = problem.detail
       } catch {
         // 响应不一定包含 JSON 错误正文。
       }
@@ -147,6 +155,7 @@ const deleteItem = async (id) => {
       throw new Error('DELETE_FAILED')
     }
 
+    // 成功后统一重新加载，确保页面状态与数据库结果一致。
     await loadInbox()
   } catch (error) {
     console.error(error)
@@ -174,6 +183,7 @@ const archiveItem = async (id) => {
       throw new Error('ARCHIVE_FAILED')
     }
 
+    // GET 只返回 ACTIVE，刷新后已归档条目会自然从主 Inbox 消失。
     await loadInbox()
   } catch (error) {
     console.error(error)
@@ -202,6 +212,7 @@ const toggleFavorite = async (item) => {
       throw new Error('FAVORITE_FAILED')
     }
 
+    // 用后端返回的最新列表刷新 favorite，避免乐观更新失败后的回滚复杂度。
     await loadInbox()
   } catch (error) {
     console.error(error)
@@ -292,8 +303,8 @@ onBeforeUnmount(clearSelectedUpload)
 
         <template v-if="captureType === 'TEXT'">
           <label for="content">内容</label>
-        <textarea id="content" v-model="content" rows="6" required
-          placeholder="例如：今天准备学习 Agent Memory"></textarea>
+          <textarea id="content" v-model="content" rows="6" required
+            placeholder="例如：今天准备学习 Agent Memory"></textarea>
         </template>
 
         <template v-else-if="captureType === 'URL'">

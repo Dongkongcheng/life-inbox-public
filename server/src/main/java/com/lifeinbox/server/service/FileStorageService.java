@@ -22,6 +22,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+/**
+ * FILE 与 IMAGE 共用的本地存储组件，集中处理类型、大小、命名和路径安全校验。
+ */
 @Service
 public class FileStorageService {
 
@@ -71,6 +74,7 @@ public class FileStorageService {
 
     public FileStorageService(@Value("${life-inbox.storage.upload-dir:uploads}") String uploadDirectory) {
         Path configuredPath = Path.of(uploadDirectory);
+        // 相对路径以后端启动目录为基准，统一转成绝对路径后再做边界校验。
         this.uploadDirectory = (configuredPath.isAbsolute()
                 ? configuredPath
                 : Path.of("").toAbsolutePath().resolve(configuredPath)).normalize();
@@ -110,9 +114,11 @@ public class FileStorageService {
         }
         validateContentType(extension, file.getContentType(), allowOctetStream);
         if (validateImageContent) {
+            // Content-Type 来自客户端，图片再检查常见文件头，降低伪装上传风险。
             validateImageSignature(file, extension);
         }
 
+        // 磁盘名不使用原文件名，避免重名覆盖、特殊字符和路径穿越问题。
         String storedName = UUID.randomUUID() + "." + extension;
         Path destination = resolveStoredPath(storedName);
 
@@ -133,6 +139,7 @@ public class FileStorageService {
     }
 
     public Resource loadAsResource(String storedName) {
+        // 禁止跟随符号链接，避免合法文件名最终指向 uploads 之外。
         Path filePath = resolveStoredPath(storedName);
         if (!Files.isRegularFile(filePath, LinkOption.NOFOLLOW_LINKS)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文件不存在");
@@ -196,6 +203,7 @@ public class FileStorageService {
 
         String normalizedContentType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
         if (allowOctetStream && MediaType.APPLICATION_OCTET_STREAM_VALUE.equals(normalizedContentType)) {
+            // 普通文件上传允许浏览器无法识别类型时使用通用二进制 MIME；图片不放宽。
             return;
         }
 
@@ -250,6 +258,7 @@ public class FileStorageService {
     }
 
     private Path resolveStoredPath(String storedName) {
+        // 先限制为系统生成的 UUID 文件名，再校验 normalize 后仍在上传目录内。
         if (storedName == null || !STORED_NAME_PATTERN.matcher(storedName).matches()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件名不合法");
         }
@@ -265,6 +274,7 @@ public class FileStorageService {
         try {
             Files.deleteIfExists(path);
         } catch (IOException exception) {
+            // 补偿删除不能覆盖原始业务异常，但必须记录失败供后续排查。
             LOGGER.warn("Unable to delete uploaded file {}", path, exception);
         }
     }

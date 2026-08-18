@@ -6,6 +6,10 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
+/**
+ * 所有 Capture 类型共用的核心模型。
+ * 不同 type 只使用与自身相关的内容字段，避免拆成多套业务表。
+ */
 @TableName("inbox_item")
 public class InboxItem {
 
@@ -14,18 +18,24 @@ public class InboxItem {
 
     private Long userId;
 
+    /** TEXT、URL、FILE 或 IMAGE。 */
     private String type;
 
     private String title;
 
+    /** TEXT 正文。 */
     private String content;
 
+    /** URL 类型的原始网页地址。 */
     private String sourceUrl;
 
+    /** FILE/IMAGE 的受控访问地址，不保存客户端本地路径。 */
     private String fileUrl;
 
+    /** ACTIVE 条目显示在主 Inbox，ARCHIVED 条目暂不显示。 */
     private String status;
 
+    /** 数据库使用 0/1 表示未收藏/已收藏。 */
     private Integer favorite;
 
     private LocalDateTime createdTime;
