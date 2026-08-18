@@ -14,7 +14,7 @@ import java.util.Map;
 public class ApiExceptionHandler {
 
     /**
-     * Python 不可用时只让当前 AI 健康请求返回 503，Spring Boot 和原有 Capture 接口继续运行。
+     * Python 或 LLM 不可用时只让当前 AI 请求返回 503，Spring Boot 和 Capture 接口继续运行。
      */
     @ExceptionHandler(AiServiceUnavailableException.class)
     public ResponseEntity<AiHealthErrorResponse> handleAiServiceUnavailable() {

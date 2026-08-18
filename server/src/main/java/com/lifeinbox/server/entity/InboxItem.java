@@ -26,6 +26,9 @@ public class InboxItem {
     /** TEXT 正文。 */
     private String content;
 
+    /** AI 为 TEXT 生成的摘要；原始正文仍然是业务事实来源。 */
+    private String summary;
+
     /** URL 类型的原始网页地址。 */
     private String sourceUrl;
 
@@ -80,6 +83,14 @@ public class InboxItem {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getSummary() {
+        return summary;
+    }
+
+    public void setSummary(String summary) {
+        this.summary = summary;
     }
 
     public String getSourceUrl() {

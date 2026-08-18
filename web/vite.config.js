@@ -8,7 +8,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        // 默认仍指向 8080；本地联调可覆盖目标，避免与正在运行的后端端口冲突。
+        target: process.env.VITE_API_TARGET || 'http://localhost:8080',
         changeOrigin: true
       }
     }
