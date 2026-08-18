@@ -3,7 +3,9 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -28,5 +30,12 @@ public class InboxService {
 
         inboxItemMapper.insert(inboxItem);
         return inboxItemMapper.selectById(inboxItem.getId());
+    }
+
+    public void delete(Long id) {
+        int deletedRows = inboxItemMapper.deleteById(id);
+        if (deletedRows == 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+        }
     }
 }
