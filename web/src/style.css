@@ -85,14 +85,24 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .item-meta { color: #75827c; font-size: 0.76rem; }
 .item-meta { justify-content: flex-start; }
 .item-meta span { color: #2f745b; font-weight: 750; letter-spacing: 0.08em; }
+.item-actions { display: flex; gap: 8px; }
+.archive-button,
 .delete-button {
   flex: 0 0 auto;
   margin: 0;
   padding: 6px 10px;
+  font-size: 0.8rem;
+}
+.archive-button {
+  border: 1px solid #b9d8cc;
+  color: #2f745b;
+  background: #fff;
+}
+.archive-button:hover { background: #eff8f4; }
+.delete-button {
   border: 1px solid #f0c7c3;
   color: #b42318;
   background: #fff;
-  font-size: 0.8rem;
 }
 .delete-button:hover { background: #fff1f0; }
 .inbox-item h3 { margin: 10px 0 6px; color: #1b3027; font-size: 1.05rem; }
@@ -107,5 +117,6 @@ button:disabled { cursor: wait; opacity: 0.65; }
   .page-shell { width: min(100% - 20px, 760px); padding: 36px 0; }
   .capture-card, .inbox-section { padding: 20px; border-radius: 14px; }
   button { width: 100%; }
+  .archive-button,
   .delete-button { width: auto; }
 }
