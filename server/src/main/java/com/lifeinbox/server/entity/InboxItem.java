@@ -1,10 +1,12 @@
 package com.lifeinbox.server.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 所有 Capture 类型共用的核心模型。
@@ -28,6 +30,13 @@ public class InboxItem {
 
     /** AI 为 TEXT 生成的摘要；原始正文仍然是业务事实来源。 */
     private String summary;
+
+    /** AI 从有限集合中选择的粗粒度分类。 */
+    private String category;
+
+    /** 标签存放在关系表中，这个字段只用于 API 返回，不映射 inbox_item 列。 */
+    @TableField(exist = false)
+    private List<String> tags = List.of();
 
     /** URL 类型的原始网页地址。 */
     private String sourceUrl;
@@ -91,6 +100,22 @@ public class InboxItem {
 
     public void setSummary(String summary) {
         this.summary = summary;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
+    }
+
+    public List<String> getTags() {
+        return tags;
+    }
+
+    public void setTags(List<String> tags) {
+        this.tags = tags == null ? List.of() : List.copyOf(tags);
     }
 
     public String getSourceUrl() {

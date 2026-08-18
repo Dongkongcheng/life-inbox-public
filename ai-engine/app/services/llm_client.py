@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from app.config import LlmSettings
-from app.prompts import SUMMARY_SYSTEM_PROMPT, build_summary_user_prompt
+from app.prompts import ANALYZE_SYSTEM_PROMPT, build_analyze_user_prompt
 
 
 class LlmServiceError(RuntimeError):
@@ -16,7 +16,7 @@ class LlmTimeoutError(LlmServiceError):
 
 
 class LlmInvalidResponseError(LlmServiceError):
-    """LLM 返回的 JSON 结构或摘要内容不合法。"""
+    """LLM 返回的外层响应或 Analyze JSON 不合法。"""
 
 
 class LlmClient:
@@ -30,15 +30,16 @@ class LlmClient:
         self._settings_loader = settings_loader
         self._transport = transport
 
-    def generate_summary(self, title: str | None, text: str) -> str:
+    def generate_analysis(self, title: str | None, text: str) -> str:
         settings = self._settings_loader()
         request_body: dict[str, Any] = {
             "model": settings.model,
             "messages": [
-                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                {"role": "user", "content": build_summary_user_prompt(title, text)},
+                {"role": "system", "content": ANALYZE_SYSTEM_PROMPT},
+                {"role": "user", "content": build_analyze_user_prompt(title, text)},
             ],
-            "max_tokens": 400,
+            # 千问等 OpenAI-compatible 服务用 JSON Mode 保证输出可直接解析。
+            "response_format": {"type": "json_object"},
         }
 
         try:
@@ -67,5 +68,5 @@ class LlmClient:
         except (ValueError, KeyError, IndexError, TypeError) as exception:
             raise LlmInvalidResponseError("LLM 返回结构不合法") from exception
         if not isinstance(content, str) or not content.strip():
-            raise LlmInvalidResponseError("LLM 返回了空摘要")
+            raise LlmInvalidResponseError("LLM 返回了空分析结果")
         return content.strip()

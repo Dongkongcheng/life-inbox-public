@@ -1,15 +1,13 @@
-from app.schemas.summary import MAX_SUMMARY_OUTPUT_CHARS, SummaryRequest, SummaryResponse
-from app.services.llm_client import LlmClient, LlmInvalidResponseError
+from app.schemas.summary import SummaryRequest, SummaryResponse
+from app.services.analyze_service import AnalyzeService
 
 
 class SummaryService:
-    """编排摘要生成，并在返回 Java 前再次校验模型输出。"""
+    """保留旧 /summarize 契约，真正的 LLM 处理统一委托给 Analyze。"""
 
-    def __init__(self, llm_client: LlmClient) -> None:
-        self._llm_client = llm_client
+    def __init__(self, analyze_service: AnalyzeService) -> None:
+        self._analyze_service = analyze_service
 
     def summarize(self, request: SummaryRequest) -> SummaryResponse:
-        summary = self._llm_client.generate_summary(request.title, request.text).strip()
-        if not summary or len(summary) > MAX_SUMMARY_OUTPUT_CHARS:
-            raise LlmInvalidResponseError("LLM 摘要为空或过长")
-        return SummaryResponse(summary=summary)
+        result = self._analyze_service.analyze(request)
+        return SummaryResponse(summary=result.summary)

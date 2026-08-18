@@ -1,6 +1,8 @@
 package com.lifeinbox.server.client;
 
 import com.lifeinbox.server.dto.AiHealthResponse;
+import com.lifeinbox.server.dto.AiAnalyzeRequest;
+import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiSummaryRequest;
 import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -23,16 +25,17 @@ public class AiServiceClient {
     private static final String EXPECTED_SERVICE = "life-inbox-ai";
 
     private final RestClient healthRestClient;
-    private final RestClient summaryRestClient;
+    private final RestClient analysisRestClient;
 
     public AiServiceClient(
             @Value("${life-inbox.ai.base-url:http://localhost:8000}") String baseUrl,
             @Value("${life-inbox.ai.connect-timeout:2s}") Duration connectTimeout,
             @Value("${life-inbox.ai.read-timeout:5s}") Duration readTimeout,
-            @Value("${life-inbox.ai.summary-read-timeout:30s}") Duration summaryReadTimeout
+            @Value("${life-inbox.ai.analysis-read-timeout:${life-inbox.ai.summary-read-timeout:30s}}")
+            Duration analysisReadTimeout
     ) {
         this.healthRestClient = createRestClient(baseUrl, connectTimeout, readTimeout);
-        this.summaryRestClient = createRestClient(baseUrl, connectTimeout, summaryReadTimeout);
+        this.analysisRestClient = createRestClient(baseUrl, connectTimeout, analysisReadTimeout);
     }
 
     private RestClient createRestClient(String baseUrl, Duration connectTimeout, Duration readTimeout) {
@@ -73,7 +76,7 @@ public class AiServiceClient {
     /** 将 TEXT 的必要字段发送给 Python，并解析明确的 summary 响应。 */
     public AiSummaryResponse summarize(String title, String text) {
         try {
-            AiSummaryResponse response = summaryRestClient.post()
+            AiSummaryResponse response = analysisRestClient.post()
                     .uri("/summarize")
                     .body(new AiSummaryRequest(title, text))
                     .retrieve()
@@ -87,6 +90,26 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // Python 或 LLM 的任何失败都只终止本次摘要请求，不进入 Capture 流程。
             throw new AiServiceUnavailableException("AI 摘要服务暂不可用", exception);
+        }
+    }
+
+    /** 一次调用 Python Analyze API，获得 Summary、Category 和 Tags。 */
+    public AiAnalyzeResponse analyze(String title, String text) {
+        try {
+            AiAnalyzeResponse response = analysisRestClient.post()
+                    .uri("/analyze")
+                    .body(new AiAnalyzeRequest(title, text))
+                    .retrieve()
+                    .body(AiAnalyzeResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回分析结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // Python/LLM 失败只终止本次 Analyze，不会进入 Java 的持久化事务。
+            throw new AiServiceUnavailableException("AI 分析服务暂不可用", exception);
         }
     }
 }

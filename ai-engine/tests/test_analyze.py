@@ -1,0 +1,314 @@
+import json
+from typing import get_args
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import LlmSettings
+from app.main import app, get_analyze_service
+from app.schemas.analyze import (
+    ALLOWED_CATEGORIES,
+    AnalyzeCategory,
+    AnalyzeRequest,
+    AnalyzeResult,
+)
+from app.services.analyze_service import AnalyzeService
+from app.services.llm_client import (
+    LlmClient,
+    LlmInvalidResponseError,
+    LlmServiceError,
+    LlmTimeoutError,
+)
+
+
+client = TestClient(app)
+
+
+class SuccessfulAnalyzeService:
+    def analyze(self, request) -> AnalyzeResult:
+        return AnalyzeResult(
+            summary=f"摘要：{request.text}",
+            category="技术学习",
+            tags=["Java", "Spring AI"],
+        )
+
+
+class FailedAnalyzeService:
+    def analyze(self, request) -> AnalyzeResult:
+        raise LlmServiceError("mock provider unavailable")
+
+
+class InvalidAnalyzeService:
+    def analyze(self, request) -> AnalyzeResult:
+        raise LlmInvalidResponseError("mock invalid result")
+
+
+class TimedOutAnalyzeService:
+    def analyze(self, request) -> AnalyzeResult:
+        raise LlmTimeoutError("mock provider timeout")
+
+
+class StaticLlmClient:
+    def __init__(self, content: str) -> None:
+        self._content = content
+
+    def generate_analysis(self, title: str | None, text: str) -> str:
+        return self._content
+
+
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    yield
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("text", ["", "   "])
+def test_analyze_rejects_empty_text(text: str) -> None:
+    response = client.post("/analyze", json={"text": text})
+
+    assert response.status_code == 422
+
+
+def test_analyze_rejects_text_over_character_limit() -> None:
+    response = client.post("/analyze", json={"text": "x" * 20_001})
+
+    assert response.status_code == 422
+
+
+def test_analyze_returns_structured_result() -> None:
+    app.dependency_overrides[get_analyze_service] = lambda: SuccessfulAnalyzeService()
+
+    response = client.post("/analyze", json={"title": "学习", "text": "Spring AI 入门"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "summary": "摘要：Spring AI 入门",
+        "category": "技术学习",
+        "tags": ["Java", "Spring AI"],
+    }
+
+
+def test_analyze_maps_llm_failure_to_service_unavailable() -> None:
+    app.dependency_overrides[get_analyze_service] = lambda: FailedAnalyzeService()
+
+    response = client.post("/analyze", json={"text": "需要分析的正文"})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "LLM 服务暂不可用"}
+
+
+def test_analyze_maps_invalid_llm_result_to_bad_gateway() -> None:
+    app.dependency_overrides[get_analyze_service] = lambda: InvalidAnalyzeService()
+
+    response = client.post("/analyze", json={"text": "需要分析的正文"})
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "LLM 返回的分析结果无效"}
+
+
+def test_analyze_maps_llm_timeout_to_gateway_timeout() -> None:
+    app.dependency_overrides[get_analyze_service] = lambda: TimedOutAnalyzeService()
+
+    response = client.post("/analyze", json={"text": "需要分析的正文"})
+
+    assert response.status_code == 504
+    assert response.json() == {"detail": "LLM 请求超时"}
+
+
+def test_analyze_service_parses_and_normalizes_valid_json() -> None:
+    raw_result = json.dumps(
+        {
+            "summary": "  一段简洁摘要。  ",
+            "category": "技术学习",
+            "tags": ["  Java  ", "Spring AI"],
+        },
+        ensure_ascii=False,
+    )
+    service = AnalyzeService(StaticLlmClient(raw_result))
+
+    parsed = service.analyze(AnalyzeRequest(text="正文"))
+
+    assert parsed == AnalyzeResult(
+        summary="一段简洁摘要。",
+        category="技术学习",
+        tags=["Java", "Spring AI"],
+    )
+
+
+def test_category_contract_and_prompt_use_the_same_finite_set() -> None:
+    assert get_args(AnalyzeCategory) == ALLOWED_CATEGORIES
+
+    for category in ALLOWED_CATEGORIES:
+        result = AnalyzeResult(summary="摘要", category=category, tags=["标签"])
+        assert result.category == category
+
+
+@pytest.mark.parametrize(
+    "result_body",
+    [
+        {"summary": "摘要", "category": "编程", "tags": ["Java"]},
+        {"summary": "摘要", "category": "技术学习", "tags": "Java"},
+        {"summary": "摘要", "category": "技术学习", "tags": [" "]},
+        {
+            "summary": "摘要",
+            "category": "技术学习",
+            "tags": ["1", "2", "3", "4", "5", "6"],
+        },
+        {"summary": "摘要", "category": "技术学习", "tags": ["Java", "java"]},
+        {"summary": "摘要", "category": "技术学习", "tags": [123]},
+        {"summary": "摘要", "category": "技术学习", "tags": ["x" * 65]},
+    ],
+    ids=[
+        "invalid-category",
+        "tags-not-list",
+        "blank-tag",
+        "too-many-tags",
+        "duplicate-tags",
+        "tag-not-string",
+        "tag-too-long",
+    ],
+)
+def test_analyze_service_rejects_invalid_result(result_body) -> None:
+    raw_result = json.dumps(result_body, ensure_ascii=False)
+    service = AnalyzeService(StaticLlmClient(raw_result))
+
+    with pytest.raises(LlmInvalidResponseError):
+        service.analyze(AnalyzeRequest(text="正文"))
+
+
+def test_analyze_service_rejects_non_json_and_extra_fields() -> None:
+    non_json_service = AnalyzeService(StaticLlmClient("```json\n{}\n```"))
+    extra_field_service = AnalyzeService(
+        StaticLlmClient(
+            json.dumps(
+                {
+                    "summary": "摘要",
+                    "category": "其他",
+                    "tags": ["记录"],
+                    "keywords": ["不应提前实现"],
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+    request = AnalyzeRequest(text="正文")
+
+    with pytest.raises(LlmInvalidResponseError):
+        non_json_service.analyze(request)
+    with pytest.raises(LlmInvalidResponseError):
+        extra_field_service.analyze(request)
+
+
+def test_llm_client_sends_qwen_compatible_json_mode_request() -> None:
+    captured_request: httpx.Request | None = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_request
+        captured_request = request
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "summary": "结构化摘要",
+                                    "category": "技术学习",
+                                    "tags": ["Java"],
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    settings = LlmSettings(
+        api_key="test-key",
+        model="qwen-plus",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        timeout_seconds=3,
+    )
+    llm_client = LlmClient(
+        settings_loader=lambda: settings,
+        transport=httpx.MockTransport(handler),
+    )
+
+    raw_result = llm_client.generate_analysis("测试标题", "测试正文")
+
+    assert json.loads(raw_result)["summary"] == "结构化摘要"
+    assert captured_request is not None
+    assert str(captured_request.url) == (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    )
+    assert captured_request.headers["Authorization"] == "Bearer test-key"
+    body = json.loads(captured_request.content)
+    assert body["model"] == "qwen-plus"
+    assert body["response_format"] == {"type": "json_object"}
+    assert "max_tokens" not in body
+    assert "JSON" in body["messages"][0]["content"]
+    assert "测试正文" in body["messages"][1]["content"]
+    for category in ALLOWED_CATEGORIES:
+        assert category in body["messages"][0]["content"]
+
+
+def test_llm_client_maps_http_timeout() -> None:
+    settings = LlmSettings("test-key", "test-model", "http://llm.test/v1", 3)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("mock timeout", request=request)
+
+    llm_client = LlmClient(
+        settings_loader=lambda: settings,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(LlmTimeoutError):
+        llm_client.generate_analysis(None, "测试正文")
+
+
+def test_llm_client_maps_non_success_status_without_exposing_body() -> None:
+    settings = LlmSettings("test-key", "test-model", "http://llm.test/v1", 3)
+    llm_client = LlmClient(
+        settings_loader=lambda: settings,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(500, json={"message": "upstream-secret"})
+        ),
+    )
+
+    with pytest.raises(LlmServiceError) as exception_info:
+        llm_client.generate_analysis(None, "测试正文")
+
+    assert "upstream-secret" not in str(exception_info.value)
+
+
+def test_llm_client_rejects_malformed_provider_response() -> None:
+    settings = LlmSettings("test-key", "test-model", "http://llm.test/v1", 3)
+    llm_client = LlmClient(
+        settings_loader=lambda: settings,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"not-json")
+        ),
+    )
+
+    with pytest.raises(LlmInvalidResponseError):
+        llm_client.generate_analysis(None, "测试正文")
+
+
+def test_llm_client_rejects_empty_provider_content() -> None:
+    settings = LlmSettings("test-key", "test-model", "http://llm.test/v1", 3)
+    llm_client = LlmClient(
+        settings_loader=lambda: settings,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": " "}}]},
+            )
+        ),
+    )
+
+    with pytest.raises(LlmInvalidResponseError):
+        llm_client.generate_analysis(None, "测试正文")

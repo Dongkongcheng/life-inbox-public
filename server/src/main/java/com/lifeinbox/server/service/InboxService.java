@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import com.lifeinbox.server.mapper.InboxTagMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,15 +31,18 @@ public class InboxService {
     private static final int MAX_TITLE_LENGTH = 255;
 
     private final InboxItemMapper inboxItemMapper;
+    private final InboxTagMapper inboxTagMapper;
     private final UrlMetadataService urlMetadataService;
     private final FileStorageService fileStorageService;
 
     public InboxService(
             InboxItemMapper inboxItemMapper,
+            InboxTagMapper inboxTagMapper,
             UrlMetadataService urlMetadataService,
             FileStorageService fileStorageService
     ) {
         this.inboxItemMapper = inboxItemMapper;
+        this.inboxTagMapper = inboxTagMapper;
         this.urlMetadataService = urlMetadataService;
         this.fileStorageService = fileStorageService;
     }
@@ -47,7 +51,12 @@ public class InboxService {
         // 归档只是修改状态而不是删除；主 Inbox 因此只查询 ACTIVE 数据。
         LambdaQueryWrapper<InboxItem> query = new LambdaQueryWrapper<>();
         query.eq(InboxItem::getStatus, STATUS_ACTIVE);
-        return inboxItemMapper.selectList(query);
+        List<InboxItem> items = inboxItemMapper.selectList(query);
+        // 当前数据量很小，逐条加载关系表保持实现直观；API 始终返回 tags 数组而不是关系实体。
+        for (InboxItem item : items) {
+            item.setTags(inboxTagMapper.selectTagNamesByInboxItemId(item.getId()));
+        }
+        return items;
     }
 
     public InboxItem create(CreateInboxItemRequest request) {

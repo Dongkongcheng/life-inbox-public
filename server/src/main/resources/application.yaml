@@ -25,5 +25,5 @@ life-inbox:
     # 跨服务调用必须有连接和读取超时，Python 不可用时 Java 才能快速失败。
     connect-timeout: 2s
     read-timeout: 5s
-    # Summary 内部还要等待 LLM，Java 上限应略大于 Python 的默认 20 秒超时。
-    summary-read-timeout: 30s
+    # Analyze 内部还要等待 LLM，Java 上限应略大于 Python 的默认 20 秒超时。
+    analysis-read-timeout: 30s
