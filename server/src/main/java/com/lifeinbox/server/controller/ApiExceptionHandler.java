@@ -1,5 +1,7 @@
 package com.lifeinbox.server.controller;
 
+import com.lifeinbox.server.dto.AiHealthErrorResponse;
+import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -10,6 +12,20 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    /**
+     * Python 不可用时只让当前 AI 健康请求返回 503，Spring Boot 和原有 Capture 接口继续运行。
+     */
+    @ExceptionHandler(AiServiceUnavailableException.class)
+    public ResponseEntity<AiHealthErrorResponse> handleAiServiceUnavailable() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(
+                new AiHealthErrorResponse(
+                        "unavailable",
+                        "life-inbox-ai",
+                        "AI 服务暂不可用"
+                )
+        );
+    }
 
     /**
      * multipart 大小限制由 Spring MVC 在进入 Controller 前检查，
