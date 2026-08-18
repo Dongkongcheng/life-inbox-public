@@ -14,6 +14,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
 
+/**
+ * Inbox 核心业务入口：统一处理不同 Capture 类型，并保持 Controller 只负责 HTTP 协议转换。
+ */
 @Service
 public class InboxService {
 
@@ -41,6 +44,7 @@ public class InboxService {
     }
 
     public List<InboxItem> list() {
+        // 归档只是修改状态而不是删除；主 Inbox 因此只查询 ACTIVE 数据。
         LambdaQueryWrapper<InboxItem> query = new LambdaQueryWrapper<>();
         query.eq(InboxItem::getStatus, STATUS_ACTIVE);
         return inboxItemMapper.selectList(query);
@@ -60,6 +64,7 @@ public class InboxService {
             String sourceUrl = validateAndNormalizeUrl(request.getSourceUrl());
             inboxItem.setSourceUrl(sourceUrl);
             if (isBlank(request.getTitle())) {
+                // 只有用户未填写标题时才抓取网页，避免覆盖用户主动输入的标题。
                 inboxItem.setTitle(urlMetadataService.resolveTitle(sourceUrl));
             }
         } else {
@@ -115,6 +120,7 @@ public class InboxService {
             }
             return savedItem;
         } catch (RuntimeException | Error exception) {
+            // 磁盘写入先于数据库 INSERT；后续任一步失败时删除文件，避免留下孤儿文件。
             fileStorageService.delete(storedFile.storedName());
             throw exception;
         }
@@ -135,6 +141,7 @@ public class InboxService {
         try {
             URI uri = new URI(normalizedUrl);
             String scheme = uri.getScheme();
+            // 当前只允许可由 Metadata 服务安全处理的 HTTP(S) 地址。
             if (scheme == null
                     || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
                     || uri.getHost() == null) {

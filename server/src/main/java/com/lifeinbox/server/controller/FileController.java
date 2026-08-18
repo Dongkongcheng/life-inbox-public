@@ -22,6 +22,10 @@ public class FileController {
         this.fileStorageService = fileStorageService;
     }
 
+    /**
+     * 文件名虽然来自 URL，仍会在存储层重新校验格式和目录边界。
+     * nosniff 用于避免浏览器把普通文件误判成可执行的 HTML 等内容。
+     */
     @GetMapping("/{storedName}")
     public ResponseEntity<Resource> getFile(@PathVariable String storedName) {
         Resource resource = fileStorageService.loadAsResource(storedName);

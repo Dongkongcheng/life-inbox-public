@@ -15,6 +15,9 @@ import java.net.URI;
 import java.net.URLConnection;
 import java.util.Locale;
 
+/**
+ * 尝试读取 URL 的 HTML title；它是 Capture 的增强能力，失败时必须安全降级而非阻断保存。
+ */
 @Service
 public class UrlMetadataService {
 
@@ -55,6 +58,7 @@ public class UrlMetadataService {
             String fetchedTitle = fetchTitle(uri);
             return fetchedTitle == null ? fallbackTitle : truncate(fetchedTitle);
         } catch (Exception exception) {
+            // 网络超时、非 HTML 或安全校验失败都不应让 URL Capture 失败。
             LOGGER.debug("Unable to fetch URL title for {}", sourceUrl, exception);
             return fallbackTitle;
         }
@@ -64,6 +68,7 @@ public class UrlMetadataService {
         URI currentUri = initialUri;
 
         for (int redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+            // 每一次跳转都重新校验目标，防止公开地址重定向到本机或私有网络。
             ensureSafePublicUri(currentUri);
             HttpURLConnection connection = openConnection(currentUri);
             int statusCode = connection.getResponseCode();
@@ -84,6 +89,7 @@ public class UrlMetadataService {
             }
 
             try (InputStream inputStream = connection.getInputStream()) {
+                // title 通常位于文档头部，只读取有限字节，避免下载整个超大页面。
                 byte[] body = inputStream.readNBytes(MAX_RESPONSE_BYTES);
                 String title = Jsoup.parse(
                         new ByteArrayInputStream(body),
@@ -123,6 +129,7 @@ public class UrlMetadataService {
             throw new IOException("Local hosts are not allowed");
         }
 
+        // 域名可能同时解析出多个地址，只要其中一个不可访问就拒绝本次抓取。
         InetAddress[] addresses = InetAddress.getAllByName(host);
         if (addresses.length == 0) {
             throw new IOException("URL host did not resolve");
