@@ -20,6 +20,17 @@ const analysisErrorItemId = ref(null)
 const analysisErrorMessage = ref('')
 const errorMessage = ref('')
 
+// Entity Type 由 Analyze 契约限制为有限集合，前端只负责转换成便于阅读的中文标签。
+const entityTypeLabels = {
+  PERSON: '人物',
+  ORGANIZATION: '组织',
+  LOCATION: '地点',
+  TECHNOLOGY: '技术',
+  PRODUCT: '产品',
+  EVENT: '事件',
+  OTHER: '其他'
+}
+
 const clearSelectedUpload = () => {
   // createObjectURL 占用浏览器内存，切换类型和离开页面时都需要主动释放。
   if (imagePreviewUrl.value) {
@@ -263,7 +274,13 @@ const analyzeItem = async (item) => {
 }
 
 const hasTags = (item) => Array.isArray(item.tags) && item.tags.length > 0
-const hasAnalysis = (item) => Boolean(item.summary || item.category || hasTags(item))
+// Tags 面向整理，Keywords 面向内容理解；两者保持独立展示，不在前端互相推导。
+const hasKeywords = (item) => Array.isArray(item.keywords) && item.keywords.length > 0
+const hasEntities = (item) => Array.isArray(item.entities) && item.entities.length > 0
+const entityTypeLabel = (type) => entityTypeLabels[type] ?? type
+const hasAnalysis = (item) => Boolean(
+  item.summary || item.category || hasTags(item) || hasKeywords(item) || hasEntities(item)
+)
 
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
@@ -502,6 +519,31 @@ onBeforeUnmount(clearSelectedUpload)
                     class="analysis-tag"
                   >
                     {{ tag }}
+                  </li>
+                </ul>
+              </div>
+              <div v-if="hasKeywords(item)" class="analysis-field">
+                <strong class="analysis-label">关键词</strong>
+                <ul class="analysis-keywords" aria-label="AI 关键词">
+                  <li
+                    v-for="(keyword, index) in item.keywords"
+                    :key="`${item.id}-keyword-${index}-${keyword}`"
+                    class="analysis-keyword"
+                  >
+                    {{ keyword }}
+                  </li>
+                </ul>
+              </div>
+              <div v-if="hasEntities(item)" class="analysis-field">
+                <strong class="analysis-label">实体</strong>
+                <ul class="analysis-entities" aria-label="AI 实体">
+                  <li
+                    v-for="(entity, index) in item.entities"
+                    :key="`${item.id}-entity-${index}-${entity.type}-${entity.name}`"
+                    class="analysis-entity"
+                  >
+                    <span class="analysis-entity-name">{{ entity.name }}</span>
+                    <span class="analysis-entity-type">{{ entityTypeLabel(entity.type) }}</span>
                   </li>
                 </ul>
               </div>

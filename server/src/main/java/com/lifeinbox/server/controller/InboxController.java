@@ -62,7 +62,7 @@ public class InboxController {
         return inboxService.createImage(file, title);
     }
 
-    /** 一次显式分析生成 Summary、Category 和 Tags；Capture 本身仍不依赖 AI。 */
+    /** 一次显式分析生成完整结果；不会为 Keyword 或 Entity 再调用额外 AI 接口。 */
     @PostMapping("/{id}/ai/analyze")
     public InboxItem analyze(@PathVariable Long id) {
         return inboxAnalyzeService.analyze(id);

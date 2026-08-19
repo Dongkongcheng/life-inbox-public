@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-V0.2 Task 3 将 TEXT 摘要升级为统一 Analyze：一次 LLM 调用返回 `summary`、有限 `category` 和受限 `tags`。Python 不连接 MySQL；InboxItem 和分析结果仍由 Java 持久化。
+V0.2 Task 4 在统一 TEXT Analyze 中增加 `keywords` 和 `entities`。一次 LLM 调用返回完整结构化结果；Python 不连接 MySQL，InboxItem 和分析结果仍由 Java 持久化。
 
 ## 安装依赖
 
@@ -52,15 +52,21 @@ Invoke-RestMethod -Method Post `
 {
   "summary": "这段内容介绍了 Spring AI 的基本定位。",
   "category": "技术学习",
-  "tags": ["Spring AI", "AI开发"]
+  "tags": ["Spring AI", "AI开发"],
+  "keywords": ["ChatModel", "EmbeddingModel"],
+  "entities": [
+    {"name": "Spring AI", "type": "TECHNOLOGY"}
+  ]
 }
 ```
 
 允许的 Category 为：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 必须有 1～5 个，每个最长 64 个字符，不能是空字符串或大小写不同的重复标签。
 
-`text` 去除首尾空白后不能为空，最大 20,000 个字符；摘要最大 2,000 个字符。Prompt 集中在 `app/prompts.py`。LLM 请求使用 OpenAI-compatible JSON Mode，Python 还会使用 Pydantic 严格验证所有字段，异常结果不会交给 Java。
+Keywords 允许 0～8 个，每项最长 64 个字符。Python 会执行 NFKC 和空白清理，并按大小写不敏感规则去重。Entities 允许 0～10 个，每项包含最长 128 个字符的 `name`，以及固定类型：`PERSON`、`ORGANIZATION`、`LOCATION`、`TECHNOLOGY`、`PRODUCT`、`EVENT`、`OTHER`。相同名称和类型的实体只保留第一项。
 
-旧 `POST /summarize` 暂时保留相同请求和 `{ "summary": "..." }` 响应，用于兼容已有调用方；它内部复用 Analyze Service，不会维护第二套 Prompt 或再次调用 LLM。
+`text` 去除首尾空白后不能为空，最大 20,000 个字符；摘要最大 2,000 个字符。Prompt 集中在 `app/prompts.py`。LLM 请求使用 OpenAI-compatible JSON Mode；针对千问的结构化抽取场景，请求会关闭思考模式以减少等待和 Token 消耗。Python 还会使用 Pydantic 严格验证所有字段，异常结果不会交给 Java。
+
+旧 `POST /summarize` 暂时保留相同请求和 `{ "summary": "..." }` 响应，用于兼容已有调用方；它内部复用包含全部五个字段的 Analyze Service，不会维护第二套 Prompt 或再次调用 LLM。
 
 ## 运行测试
 

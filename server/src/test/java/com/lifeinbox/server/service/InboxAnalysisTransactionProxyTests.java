@@ -1,6 +1,8 @@
 package com.lifeinbox.server.service;
 
+import com.lifeinbox.server.mapper.InboxEntityMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
 import com.lifeinbox.server.mapper.TagMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,11 +43,24 @@ class InboxAnalysisTransactionProxyTests {
     private InboxTagMapper inboxTagMapper;
 
     @Autowired
+    private InboxKeywordMapper inboxKeywordMapper;
+
+    @Autowired
+    private InboxEntityMapper inboxEntityMapper;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void resetMocks() {
-        reset(inboxItemMapper, tagMapper, inboxTagMapper, transactionManager);
+        reset(
+                inboxItemMapper,
+                tagMapper,
+                inboxTagMapper,
+                inboxKeywordMapper,
+                inboxEntityMapper,
+                transactionManager
+        );
     }
 
     @Test
@@ -63,10 +78,42 @@ class InboxAnalysisTransactionProxyTests {
                         1L,
                         "新摘要",
                         "工作",
-                        List.of(new NormalizedTag("Java", "java"))
+                        List.of(new NormalizedTag("Java", "java")),
+                        List.of("并发"),
+                        List.of(new NormalizedEntity("Java", "TECHNOLOGY"))
                 )
         );
 
+        verify(transactionManager).rollback(transactionStatus);
+        verify(transactionManager, never()).commit(transactionStatus);
+    }
+
+    @Test
+    void lateEntityFailureRollsBackEarlierSummaryTagsAndKeywords() {
+        SimpleTransactionStatus transactionStatus = new SimpleTransactionStatus();
+        when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(transactionStatus);
+        when(inboxItemMapper.updateAnalysis(1L, "新摘要", "技术学习")).thenReturn(1);
+        when(tagMapper.selectIdByNormalizedName("java")).thenReturn(10L);
+        when(inboxTagMapper.insertRelation(1L, 10L)).thenReturn(1);
+        when(inboxKeywordMapper.insertKeyword(1L, "ChatModel")).thenReturn(1);
+        when(inboxEntityMapper.insertEntity(1L, "Spring AI", "TECHNOLOGY"))
+                .thenThrow(new IllegalStateException("mock entity failure"));
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> persistenceService.replaceAnalysis(
+                        1L,
+                        "新摘要",
+                        "技术学习",
+                        List.of(new NormalizedTag("Java", "java")),
+                        List.of("ChatModel"),
+                        List.of(new NormalizedEntity("Spring AI", "TECHNOLOGY"))
+                )
+        );
+
+        verify(inboxTagMapper).insertRelation(1L, 10L);
+        verify(inboxKeywordMapper).insertKeyword(1L, "ChatModel");
         verify(transactionManager).rollback(transactionStatus);
         verify(transactionManager, never()).commit(transactionStatus);
     }
@@ -96,12 +143,30 @@ class InboxAnalysisTransactionProxyTests {
         }
 
         @Bean
+        InboxKeywordMapper inboxKeywordMapper() {
+            return mock(InboxKeywordMapper.class);
+        }
+
+        @Bean
+        InboxEntityMapper inboxEntityMapper() {
+            return mock(InboxEntityMapper.class);
+        }
+
+        @Bean
         InboxAnalysisPersistenceService persistenceService(
                 InboxItemMapper inboxItemMapper,
                 TagMapper tagMapper,
-                InboxTagMapper inboxTagMapper
+                InboxTagMapper inboxTagMapper,
+                InboxKeywordMapper inboxKeywordMapper,
+                InboxEntityMapper inboxEntityMapper
         ) {
-            return new InboxAnalysisPersistenceService(inboxItemMapper, tagMapper, inboxTagMapper);
+            return new InboxAnalysisPersistenceService(
+                    inboxItemMapper,
+                    tagMapper,
+                    inboxTagMapper,
+                    inboxKeywordMapper,
+                    inboxEntityMapper
+            );
         }
     }
 }

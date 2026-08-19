@@ -155,8 +155,8 @@ V0.2 的目标是：
   * ✅ Summary
   * ✅ Category
   * ✅ Tags
-* ⏳ Keyword Extraction
-* ⏳ Entity Extraction
+  * ✅ Keywords
+  * ✅ Entities
 * ⏳ AI Processing Status
 * ⏳ AI Failure Handling
 
@@ -416,6 +416,13 @@ tag
 inbox_tag
 ```
 
+Keywords 和 Entities 是每条 InboxItem 的分析结果，分别使用简单的一对多表：
+
+```text
+inbox_keyword
+inbox_entity
+```
+
 其中：
 
 ```text
@@ -504,9 +511,10 @@ inbox_item
 ```text
 docs/sql/v0.2-task2-add-summary.sql
 docs/sql/v0.2-task3-add-analysis.sql
+docs/sql/v0.2-task4-add-keywords-entities.sql
 ```
 
-请按 Task 顺序执行。Task 2 增加可空的 `summary`；Task 3 增加可空的 `category`，并创建统一的 `tag`、`inbox_tag` 标签关系表。迁移不会自动分析或回填历史数据。
+请按 Task 顺序执行。Task 2 增加可空的 `summary`；Task 3 增加可空的 `category`，并创建统一的 `tag`、`inbox_tag` 标签关系表；Task 4 创建 `inbox_keyword` 和 `inbox_entity`。迁移不会自动分析或回填历史数据。
 
 ---
 
@@ -624,7 +632,7 @@ ai-engine
 
 Python 服务。
 
-V0.2 Task 3 已将 TEXT 摘要升级为显式 AI Analyze。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；一次调用返回 `summary`、有限 `category` 和最多 5 个 `tags`，Java 二次校验后在短事务中统一持久化。
+V0.2 Task 4 在现有 TEXT AI Analyze 上增加了 Keywords 和 Entities。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
 
 进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
@@ -661,11 +669,15 @@ Request:  { "title": "可选标题", "text": "需要分析的正文" }
 Response: {
   "summary": "生成后的摘要",
   "category": "技术学习",
-  "tags": ["Spring AI", "Java"]
+  "tags": ["Spring AI", "Java"],
+  "keywords": ["ChatModel", "Tool Calling"],
+  "entities": [
+    { "name": "Spring AI", "type": "TECHNOLOGY" }
+  ]
 }
 ```
 
-允许的 Category 为：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 必须有 1～5 个，每个最长 64 个字符。旧 `POST /summarize` 暂时保留原请求和 `{ "summary": "..." }` 响应，但底层复用同一次 Analyze，不维护第二套 Prompt。
+允许的 Category 为：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 必须有 1～5 个，每个最长 64 个字符；Keywords 可以有 0～8 个；Entities 可以有 0～10 个，类型只能是 `PERSON`、`ORGANIZATION`、`LOCATION`、`TECHNOLOGY`、`PRODUCT`、`EVENT`、`OTHER`。旧 `POST /summarize` 暂时保留原请求和 `{ "summary": "..." }` 响应，但底层复用同一次 Analyze，不维护第二套 Prompt。
 
 产品接口：
 
@@ -693,7 +705,7 @@ Invoke-RestMethod -Method Post `
   -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/analyze"
 ```
 
-随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category` 和 `tags` 数组。再次调用会把三项作为一组替换，而不是追加旧标签。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python `/analyze` 会把无效结果映射为 502、上游故障映射为 503；Java 产品接口统一返回安全的结构化 503。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
+随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category`、`tags`、`keywords` 和 `entities`。再次调用会把五项作为一组原子替换，而不是追加旧结果。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python `/analyze` 会把无效结果映射为 502、上游故障映射为 503；Java 产品接口统一返回安全的结构化 503。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
 
 目标架构：
 
@@ -748,8 +760,7 @@ Python AI Engine
         ↓
 TEXT AI Analyze
 Summary + Category + Tags
-        ↓
-Keyword / Entity Extraction
+  + Keywords + Entities
 ```
 
 ---
