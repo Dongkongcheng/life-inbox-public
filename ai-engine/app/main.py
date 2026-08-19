@@ -99,7 +99,7 @@ def analyze(
     request: AnalyzeRequest,
     service: AnalyzeService = Depends(get_analyze_service),
 ) -> AnalyzeResult:
-    """一次分析 TEXT 并返回 Summary、有限 Category 和受限 Tags。"""
+    """一次分析 TEXT 并返回 Summary、Category、Tags、Keywords 和 Entities。"""
 
     return service.analyze(request)
 

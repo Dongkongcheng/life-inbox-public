@@ -2,6 +2,7 @@ package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
+import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
@@ -95,13 +96,24 @@ class InboxAnalyzeServiceTests {
                 new AiAnalyzeResponse(
                         "  新的摘要  ",
                         "技术学习",
-                        List.of("Java", " java ", "Spring　AI")
+                        List.of("Java", " java ", "Spring　AI"),
+                        List.of(" ChatModel ", "chatmodel", "Tool　Calling"),
+                        List.of(
+                                new AiEntityResponse(" Spring　AI ", "TECHNOLOGY"),
+                                new AiEntityResponse("spring AI", "TECHNOLOGY"),
+                                new AiEntityResponse(" OpenAI ", "ORGANIZATION")
+                        )
                 )
         );
         InboxItem updated = item("TEXT", "原始正文");
         updated.setSummary("新的摘要");
         updated.setCategory("技术学习");
         updated.setTags(List.of("Java", "Spring AI"));
+        updated.setKeywords(List.of("ChatModel", "Tool Calling"));
+        updated.setEntities(List.of(
+                new AiEntityResponse("Spring AI", "TECHNOLOGY"),
+                new AiEntityResponse("OpenAI", "ORGANIZATION")
+        ));
         List<NormalizedTag> expectedTags = List.of(
                 new NormalizedTag("Java", "java"),
                 new NormalizedTag("Spring AI", "spring ai")
@@ -110,7 +122,12 @@ class InboxAnalyzeServiceTests {
                 1L,
                 "新的摘要",
                 "技术学习",
-                expectedTags
+                expectedTags,
+                List.of("ChatModel", "Tool Calling"),
+                List.of(
+                        new NormalizedEntity("Spring AI", "TECHNOLOGY"),
+                        new NormalizedEntity("OpenAI", "ORGANIZATION")
+                )
         )).thenReturn(updated);
 
         InboxItem result = analyzeService.analyze(1L);
@@ -121,57 +138,157 @@ class InboxAnalyzeServiceTests {
                 1L,
                 "新的摘要",
                 "技术学习",
-                expectedTags
+                expectedTags,
+                List.of("ChatModel", "Tool Calling"),
+                List.of(
+                        new NormalizedEntity("Spring AI", "TECHNOLOGY"),
+                        new NormalizedEntity("OpenAI", "ORGANIZATION")
+                )
         );
     }
 
     @Test
     void rejectsCategoryOutsideFiniteSet() {
-        prepareResponse(new AiAnalyzeResponse("摘要", "Java后端", List.of("Java")));
+        prepareResponse(response("摘要", "Java后端", List.of("Java")));
 
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        verify(persistenceService, never()).replaceAnalysis(anyLong(), any(), any(), any());
+        verifyPersistenceNeverStarted();
     }
 
     @Test
     void rejectsBlankOrOverlongSummary() {
-        prepareResponse(new AiAnalyzeResponse("  ", "其他", List.of("记录")));
+        prepareResponse(response("  ", "其他", List.of("记录")));
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        prepareResponse(new AiAnalyzeResponse("x".repeat(2_001), "其他", List.of("记录")));
+        prepareResponse(response("x".repeat(2_001), "其他", List.of("记录")));
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        verify(persistenceService, never()).replaceAnalysis(anyLong(), any(), any(), any());
+        verifyPersistenceNeverStarted();
     }
 
     @Test
     void rejectsMissingOrTooManyTags() {
-        prepareResponse(new AiAnalyzeResponse("摘要", "其他", null));
+        prepareResponse(response("摘要", "其他", null));
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        prepareResponse(new AiAnalyzeResponse("摘要", "其他", List.of()));
+        prepareResponse(response("摘要", "其他", List.of()));
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        prepareResponse(new AiAnalyzeResponse(
+        prepareResponse(response(
                 "摘要",
                 "其他",
                 List.of("一", "二", "三", "四", "五", "六")
         ));
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        verify(persistenceService, never()).replaceAnalysis(anyLong(), any(), any(), any());
+        verifyPersistenceNeverStarted();
     }
 
     @Test
     void rejectsBlankOrOverlongTag() {
-        prepareResponse(new AiAnalyzeResponse("摘要", "其他", List.of("  ")));
+        prepareResponse(response("摘要", "其他", List.of("  ")));
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        prepareResponse(new AiAnalyzeResponse("摘要", "其他", List.of("x".repeat(65))));
+        prepareResponse(response("摘要", "其他", List.of("x".repeat(65))));
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
-        verify(persistenceService, never()).replaceAnalysis(anyLong(), any(), any(), any());
+        verifyPersistenceNeverStarted();
+    }
+
+    @Test
+    void rejectsMissingBlankOverlongOrTooManyKeywords() {
+        prepareResponse(new AiAnalyzeResponse("摘要", "其他", List.of("记录"), null, List.of()));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        prepareResponse(new AiAnalyzeResponse(
+                "摘要",
+                "其他",
+                List.of("记录"),
+                List.of("一", "二", "三", "四", "五", "六", "七", "八", "九"),
+                List.of()
+        ));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        prepareResponse(new AiAnalyzeResponse("摘要", "其他", List.of("记录"), List.of("  "), List.of()));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        prepareResponse(new AiAnalyzeResponse(
+                "摘要",
+                "其他",
+                List.of("记录"),
+                List.of("x".repeat(65)),
+                List.of()
+        ));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        verifyPersistenceNeverStarted();
+    }
+
+    @Test
+    void rejectsMissingInvalidOrTooManyEntities() {
+        prepareResponse(new AiAnalyzeResponse("摘要", "其他", List.of("记录"), List.of(), null));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        prepareResponse(new AiAnalyzeResponse(
+                "摘要",
+                "其他",
+                List.of("记录"),
+                List.of(),
+                java.util.stream.IntStream.range(0, 11)
+                        .mapToObj(index -> new AiEntityResponse("实体" + index, "OTHER"))
+                        .toList()
+        ));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        prepareResponse(new AiAnalyzeResponse(
+                "摘要",
+                "其他",
+                List.of("记录"),
+                List.of(),
+                List.of(new AiEntityResponse("  ", "OTHER"))
+        ));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        prepareResponse(new AiAnalyzeResponse(
+                "摘要",
+                "其他",
+                List.of("记录"),
+                List.of(),
+                List.of(new AiEntityResponse("OpenAI", "COMPANY"))
+        ));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        prepareResponse(new AiAnalyzeResponse(
+                "摘要",
+                "其他",
+                List.of("记录"),
+                List.of(),
+                List.of(new AiEntityResponse("x".repeat(129), "OTHER"))
+        ));
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        verifyPersistenceNeverStarted();
+    }
+
+    @Test
+    void allowsEmptyKeywordsAndEntitiesForVeryShortText() {
+        InboxItem original = item("TEXT", "你好");
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        when(aiServiceClient.analyze(null, "你好")).thenReturn(
+                new AiAnalyzeResponse("一句问候。", "其他", List.of("问候"), List.of(), List.of())
+        );
+        InboxItem updated = item("TEXT", "你好");
+        when(persistenceService.replaceAnalysis(
+                1L,
+                "一句问候。",
+                "其他",
+                List.of(new NormalizedTag("问候", "问候")),
+                List.of(),
+                List.of()
+        )).thenReturn(updated);
+
+        assertEquals(updated, analyzeService.analyze(1L));
     }
 
     @Test
@@ -180,6 +297,8 @@ class InboxAnalyzeServiceTests {
         original.setSummary("旧摘要");
         original.setCategory("工作");
         original.setTags(List.of("旧标签"));
+        original.setKeywords(List.of("旧关键词"));
+        original.setEntities(List.of(new AiEntityResponse("旧实体", "OTHER")));
         when(inboxItemMapper.selectById(1L)).thenReturn(original);
         when(aiServiceClient.analyze(null, "原始正文"))
                 .thenThrow(new AiServiceUnavailableException("mock AI failure"));
@@ -189,7 +308,24 @@ class InboxAnalyzeServiceTests {
         assertEquals("旧摘要", original.getSummary());
         assertEquals("工作", original.getCategory());
         assertEquals(List.of("旧标签"), original.getTags());
+        assertEquals(List.of("旧关键词"), original.getKeywords());
+        assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), original.getEntities());
         verifyNoInteractions(persistenceService);
+    }
+
+    private AiAnalyzeResponse response(String summary, String category, List<String> tags) {
+        return new AiAnalyzeResponse(summary, category, tags, List.of("关键词"), List.of());
+    }
+
+    private void verifyPersistenceNeverStarted() {
+        verify(persistenceService, never()).replaceAnalysis(
+                anyLong(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any()
+        );
     }
 
     private void prepareResponse(AiAnalyzeResponse response) {

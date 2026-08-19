@@ -34,6 +34,8 @@ class LlmClient:
         settings = self._settings_loader()
         request_body: dict[str, Any] = {
             "model": settings.model,
+            # Analyze 只做结构化抽取；关闭千问默认思考可显著减少等待和 Token 消耗。
+            "enable_thinking": False,
             "messages": [
                 {"role": "system", "content": ANALYZE_SYSTEM_PROMPT},
                 {"role": "user", "content": build_analyze_user_prompt(title, text)},

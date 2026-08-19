@@ -26,6 +26,8 @@ class RecordingAnalyzeService:
             summary="统一分析生成的摘要",
             category="技术学习",
             tags=["Java"],
+            keywords=["ChatModel"],
+            entities=[{"name": "Spring AI", "type": "TECHNOLOGY"}],
         )
 
 

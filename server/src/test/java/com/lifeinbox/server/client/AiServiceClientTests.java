@@ -1,6 +1,7 @@
 package com.lifeinbox.server.client;
 
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
+import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -135,7 +136,16 @@ class AiServiceClientTests {
         server.createContext("/analyze", exchange -> {
             requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] body = ("""
-                    {"summary":"结构化摘要","category":"技术学习","tags":["Java","Spring AI"]}
+                    {
+                      "summary":"结构化摘要",
+                      "category":"技术学习",
+                      "tags":["Java","Spring AI"],
+                      "keywords":["ChatModel","Tool Calling"],
+                      "entities":[
+                        {"name":"Spring AI","type":"TECHNOLOGY"},
+                        {"name":"OpenAI","type":"ORGANIZATION"}
+                      ]
+                    }
                     """).strip().getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length);
@@ -156,7 +166,12 @@ class AiServiceClientTests {
                     new AiAnalyzeResponse(
                             "结构化摘要",
                             "技术学习",
-                            List.of("Java", "Spring AI")
+                            List.of("Java", "Spring AI"),
+                            List.of("ChatModel", "Tool Calling"),
+                            List.of(
+                                    new AiEntityResponse("Spring AI", "TECHNOLOGY"),
+                                    new AiEntityResponse("OpenAI", "ORGANIZATION")
+                            )
                     ),
                     client.analyze("学习", "Spring AI 正文")
             );

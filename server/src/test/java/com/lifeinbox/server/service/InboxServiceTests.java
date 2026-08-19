@@ -1,8 +1,12 @@
 package com.lifeinbox.server.service;
 
+import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
+import com.lifeinbox.server.entity.InboxEntity;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.mapper.InboxEntityMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -25,26 +29,43 @@ class InboxServiceTests {
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
     private final InboxTagMapper inboxTagMapper = mock(InboxTagMapper.class);
+    private final InboxKeywordMapper inboxKeywordMapper = mock(InboxKeywordMapper.class);
+    private final InboxEntityMapper inboxEntityMapper = mock(InboxEntityMapper.class);
     private final UrlMetadataService urlMetadataService = mock(UrlMetadataService.class);
     private final FileStorageService fileStorageService = mock(FileStorageService.class);
     private final InboxService inboxService = new InboxService(
             inboxItemMapper,
             inboxTagMapper,
+            inboxKeywordMapper,
+            inboxEntityMapper,
             urlMetadataService,
             fileStorageService
     );
 
     @Test
-    void listReturnsTagNamesForEachInboxItem() {
+    void listReturnsAllAnalysisCollectionsForEachInboxItem() {
         InboxItem item = savedItem(1L, "TEXT", "标题", "正文", null);
         when(inboxItemMapper.selectList(any())).thenReturn(List.of(item));
         when(inboxTagMapper.selectTagNamesByInboxItemId(1L))
                 .thenReturn(List.of("Java", "Spring AI"));
+        when(inboxKeywordMapper.selectKeywordsByInboxItemId(1L))
+                .thenReturn(List.of("ChatModel", "Tool Calling"));
+        when(inboxEntityMapper.selectEntitiesByInboxItemId(1L)).thenReturn(List.of(
+                entity("Spring AI", "TECHNOLOGY"),
+                entity("OpenAI", "ORGANIZATION")
+        ));
 
         List<InboxItem> result = inboxService.list();
 
         assertEquals(List.of("Java", "Spring AI"), result.getFirst().getTags());
+        assertEquals(List.of("ChatModel", "Tool Calling"), result.getFirst().getKeywords());
+        assertEquals(List.of(
+                new AiEntityResponse("Spring AI", "TECHNOLOGY"),
+                new AiEntityResponse("OpenAI", "ORGANIZATION")
+        ), result.getFirst().getEntities());
         verify(inboxTagMapper).selectTagNamesByInboxItemId(1L);
+        verify(inboxKeywordMapper).selectKeywordsByInboxItemId(1L);
+        verify(inboxEntityMapper).selectEntitiesByInboxItemId(1L);
     }
 
     @Test
@@ -397,5 +418,12 @@ class InboxServiceTests {
             return 1;
         });
         when(inboxItemMapper.selectById(savedItem.getId())).thenReturn(savedItem);
+    }
+
+    private InboxEntity entity(String name, String type) {
+        InboxEntity entity = new InboxEntity();
+        entity.setName(name);
+        entity.setType(type);
+        return entity;
     }
 }

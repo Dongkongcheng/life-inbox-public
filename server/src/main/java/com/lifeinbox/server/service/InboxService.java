@@ -1,9 +1,13 @@
 package com.lifeinbox.server.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
+import com.lifeinbox.server.entity.InboxEntity;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.mapper.InboxEntityMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -32,17 +36,23 @@ public class InboxService {
 
     private final InboxItemMapper inboxItemMapper;
     private final InboxTagMapper inboxTagMapper;
+    private final InboxKeywordMapper inboxKeywordMapper;
+    private final InboxEntityMapper inboxEntityMapper;
     private final UrlMetadataService urlMetadataService;
     private final FileStorageService fileStorageService;
 
     public InboxService(
             InboxItemMapper inboxItemMapper,
             InboxTagMapper inboxTagMapper,
+            InboxKeywordMapper inboxKeywordMapper,
+            InboxEntityMapper inboxEntityMapper,
             UrlMetadataService urlMetadataService,
             FileStorageService fileStorageService
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.inboxTagMapper = inboxTagMapper;
+        this.inboxKeywordMapper = inboxKeywordMapper;
+        this.inboxEntityMapper = inboxEntityMapper;
         this.urlMetadataService = urlMetadataService;
         this.fileStorageService = fileStorageService;
     }
@@ -52,11 +62,21 @@ public class InboxService {
         LambdaQueryWrapper<InboxItem> query = new LambdaQueryWrapper<>();
         query.eq(InboxItem::getStatus, STATUS_ACTIVE);
         List<InboxItem> items = inboxItemMapper.selectList(query);
-        // 当前数据量很小，逐条加载关系表保持实现直观；API 始终返回 tags 数组而不是关系实体。
+        // 当前数据量很小，逐条聚合三类分析子表；API 始终返回数组而不是数据库关系实体。
         for (InboxItem item : items) {
             item.setTags(inboxTagMapper.selectTagNamesByInboxItemId(item.getId()));
+            item.setKeywords(inboxKeywordMapper.selectKeywordsByInboxItemId(item.getId()));
+            item.setEntities(
+                    inboxEntityMapper.selectEntitiesByInboxItemId(item.getId()).stream()
+                            .map(this::toEntityResponse)
+                            .toList()
+            );
         }
         return items;
+    }
+
+    private AiEntityResponse toEntityResponse(InboxEntity entity) {
+        return new AiEntityResponse(entity.getName(), entity.getType());
     }
 
     public InboxItem create(CreateInboxItemRequest request) {

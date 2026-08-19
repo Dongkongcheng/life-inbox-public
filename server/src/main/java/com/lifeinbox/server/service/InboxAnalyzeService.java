@@ -2,6 +2,7 @@ package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
+import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
@@ -19,7 +20,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 编排 TEXT 的统一 AI Analyze：一次 LLM 调用得到 Summary、Category 和 Tags。
+ * 编排 TEXT 的统一 AI Analyze：一次 LLM 调用得到全部结构化理解结果。
  */
 @Service
 public class InboxAnalyzeService {
@@ -29,6 +30,10 @@ public class InboxAnalyzeService {
     private static final int MAX_SUMMARY_CHARS = 2_000;
     private static final int MAX_TAGS = 5;
     private static final int MAX_TAG_CHARS = 64;
+    private static final int MAX_KEYWORDS = 8;
+    private static final int MAX_KEYWORD_CHARS = 64;
+    private static final int MAX_ENTITIES = 10;
+    private static final int MAX_ENTITY_NAME_CHARS = 128;
     private static final Pattern INTERNAL_WHITESPACE = Pattern.compile(
             "\\s+",
             Pattern.UNICODE_CHARACTER_CLASS
@@ -43,6 +48,15 @@ public class InboxAnalyzeService {
             "想法",
             "资讯",
             "其他"
+    );
+    private static final Set<String> ALLOWED_ENTITY_TYPES = Set.of(
+            "PERSON",
+            "ORGANIZATION",
+            "LOCATION",
+            "TECHNOLOGY",
+            "PRODUCT",
+            "EVENT",
+            "OTHER"
     );
 
     private final InboxItemMapper inboxItemMapper;
@@ -76,7 +90,9 @@ public class InboxAnalyzeService {
                 id,
                 analysis.summary(),
                 analysis.category(),
-                analysis.tags()
+                analysis.tags(),
+                analysis.keywords(),
+                analysis.entities()
         );
     }
 
@@ -124,7 +140,7 @@ public class InboxAnalyzeService {
             if (rawTag == null) {
                 throw invalidAnalysis();
             }
-            String name = normalizeTagName(rawTag);
+            String name = normalizeResultText(rawTag);
             if (name.isBlank() || name.length() > MAX_TAG_CHARS) {
                 throw invalidAnalysis();
             }
@@ -138,14 +154,54 @@ public class InboxAnalyzeService {
             throw invalidAnalysis();
         }
 
+        List<String> rawKeywords = response.keywords();
+        if (rawKeywords == null || rawKeywords.size() > MAX_KEYWORDS) {
+            throw invalidAnalysis();
+        }
+        // Keyword 更贴近原文关键术语，不复用全局 Tag 字典；这里只做稳定的文本去重。
+        Map<String, String> uniqueKeywords = new LinkedHashMap<>();
+        for (String rawKeyword : rawKeywords) {
+            if (rawKeyword == null) {
+                throw invalidAnalysis();
+            }
+            String keyword = normalizeResultText(rawKeyword);
+            if (keyword.isBlank() || keyword.length() > MAX_KEYWORD_CHARS) {
+                throw invalidAnalysis();
+            }
+            uniqueKeywords.putIfAbsent(keyword.toLowerCase(Locale.ROOT), keyword);
+        }
+
+        List<AiEntityResponse> rawEntities = response.entities();
+        if (rawEntities == null || rawEntities.size() > MAX_ENTITIES) {
+            throw invalidAnalysis();
+        }
+        Map<String, NormalizedEntity> uniqueEntities = new LinkedHashMap<>();
+        for (AiEntityResponse rawEntity : rawEntities) {
+            if (rawEntity == null || rawEntity.name() == null || rawEntity.type() == null) {
+                throw invalidAnalysis();
+            }
+            String name = normalizeResultText(rawEntity.name());
+            String type = rawEntity.type().trim();
+            if (name.isBlank()
+                    || name.length() > MAX_ENTITY_NAME_CHARS
+                    || !ALLOWED_ENTITY_TYPES.contains(type)) {
+                throw invalidAnalysis();
+            }
+            // 同名但不同有限类型可能代表不同对象，因此使用 name + type 作为简单去重键。
+            String uniqueKey = name.toLowerCase(Locale.ROOT) + "\u0000" + type;
+            uniqueEntities.putIfAbsent(uniqueKey, new NormalizedEntity(name, type));
+        }
+
         return new ValidatedAnalysis(
                 summary,
                 category,
-                new ArrayList<>(uniqueTags.values())
+                new ArrayList<>(uniqueTags.values()),
+                new ArrayList<>(uniqueKeywords.values()),
+                new ArrayList<>(uniqueEntities.values())
         );
     }
 
-    private String normalizeTagName(String value) {
+    private String normalizeResultText(String value) {
         String normalized = Normalizer.normalize(value, Normalizer.Form.NFKC).strip();
         return INTERNAL_WHITESPACE.matcher(normalized).replaceAll(" ");
     }
@@ -157,7 +213,9 @@ public class InboxAnalyzeService {
     private record ValidatedAnalysis(
             String summary,
             String category,
-            List<NormalizedTag> tags
+            List<NormalizedTag> tags,
+            List<String> keywords,
+            List<NormalizedEntity> entities
     ) {
     }
 }

@@ -93,7 +93,7 @@ public class AiServiceClient {
         }
     }
 
-    /** 一次调用 Python Analyze API，获得 Summary、Category 和 Tags。 */
+    /** 一次调用 Python Analyze API，获得完整的五类结构化理解结果。 */
     public AiAnalyzeResponse analyze(String title, String text) {
         try {
             AiAnalyzeResponse response = analysisRestClient.post()

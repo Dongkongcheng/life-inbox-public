@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.lifeinbox.server.dto.AiEntityResponse;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -37,6 +38,14 @@ public class InboxItem {
     /** 标签存放在关系表中，这个字段只用于 API 返回，不映射 inbox_item 列。 */
     @TableField(exist = false)
     private List<String> tags = List.of();
+
+    /** 关键词属于单条分析结果，这个聚合字段只用于 API 返回。 */
+    @TableField(exist = false)
+    private List<String> keywords = List.of();
+
+    /** Entity 单独存表；这里只返回前端需要的 name/type，不暴露关系表字段。 */
+    @TableField(exist = false)
+    private List<AiEntityResponse> entities = List.of();
 
     /** URL 类型的原始网页地址。 */
     private String sourceUrl;
@@ -116,6 +125,22 @@ public class InboxItem {
 
     public void setTags(List<String> tags) {
         this.tags = tags == null ? List.of() : List.copyOf(tags);
+    }
+
+    public List<String> getKeywords() {
+        return keywords;
+    }
+
+    public void setKeywords(List<String> keywords) {
+        this.keywords = keywords == null ? List.of() : List.copyOf(keywords);
+    }
+
+    public List<AiEntityResponse> getEntities() {
+        return entities;
+    }
+
+    public void setEntities(List<AiEntityResponse> entities) {
+        this.entities = entities == null ? List.of() : List.copyOf(entities);
     }
 
     public String getSourceUrl() {
