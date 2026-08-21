@@ -26,7 +26,7 @@ class SearchControllerTests {
         item.setId(1L);
         item.setTitle("Redis 分布式锁");
         item.setSummary("介绍 Redis 在高并发环境下的使用方式。");
-        when(inboxService.search(" Redis ")).thenReturn(List.of(item));
+        when(inboxService.search(" Redis ", null, null, null)).thenReturn(List.of(item));
         MockMvc mockMvc = MockMvcBuilders
                 .standaloneSetup(new SearchController(inboxService))
                 .build();
@@ -36,13 +36,31 @@ class SearchControllerTests {
                 .andExpect(jsonPath("$[0].id").value(1))
                 .andExpect(jsonPath("$[0].title").value("Redis 分布式锁"))
                 .andExpect(jsonPath("$[0].summary").value("介绍 Redis 在高并发环境下的使用方式。"));
-        verify(inboxService).search(" Redis ");
+        verify(inboxService).search(" Redis ", null, null, null);
+    }
+
+    @Test
+    void searchForwardsOptionalFiltersToTheExistingSearchService() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        when(inboxService.search("Redis", "URL", "技术", true)).thenReturn(List.of());
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(new SearchController(inboxService))
+                .build();
+
+        mockMvc.perform(get("/api/search")
+                        .param("q", "Redis")
+                        .param("type", "URL")
+                        .param("category", "技术")
+                        .param("favorite", "true"))
+                .andExpect(status().isOk());
+
+        verify(inboxService).search("Redis", "URL", "技术", true);
     }
 
     @Test
     void blankQueryReturnsControlledBadRequest() throws Exception {
         InboxService inboxService = mock(InboxService.class);
-        when(inboxService.search(" ")).thenThrow(
+        when(inboxService.search(" ", null, null, null)).thenThrow(
                 new ResponseStatusException(HttpStatus.BAD_REQUEST, "搜索关键词不能为空")
         );
         MockMvc mockMvc = MockMvcBuilders
@@ -50,6 +68,19 @@ class SearchControllerTests {
                 .build();
 
         mockMvc.perform(get("/api/search").param("q", " "))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void malformedFavoriteFilterReturnsBadRequest() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(new SearchController(inboxService))
+                .build();
+
+        mockMvc.perform(get("/api/search")
+                        .param("q", "Redis")
+                        .param("favorite", "not-a-boolean"))
                 .andExpect(status().isBadRequest());
     }
 }

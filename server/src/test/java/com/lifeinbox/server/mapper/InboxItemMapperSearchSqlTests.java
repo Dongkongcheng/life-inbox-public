@@ -31,8 +31,22 @@ class InboxItemMapperSearchSqlTests {
 
     @Test
     void activeFilterWrapsEveryOrPathIncludingAiRelations() {
-        assertTrue(searchSql.contains("WHERE i.status = 'ACTIVE' AND ( i.title LIKE"));
+        assertTrue(searchSql.contains("WHERE i.status = 'ACTIVE'"));
+        assertTrue(searchSql.contains("AND (#{favorite,jdbcType=TINYINT} IS NULL"
+                + " OR i.favorite = #{favorite,jdbcType=TINYINT}) AND ( i.title LIKE"));
         assertTrue(searchSql.indexOf("WHERE i.status = 'ACTIVE'") < searchSql.indexOf("OR EXISTS"));
+    }
+
+    @Test
+    void optionalFiltersUseExistingColumnsAndRemainParameterized() {
+        assertAll(
+                () -> assertTrue(searchSql.contains("AND (#{type,jdbcType=VARCHAR} IS NULL"
+                        + " OR i.type = #{type,jdbcType=VARCHAR})")),
+                () -> assertTrue(searchSql.contains("AND (#{category,jdbcType=VARCHAR} IS NULL"
+                        + " OR i.category = #{category,jdbcType=VARCHAR})")),
+                () -> assertTrue(searchSql.contains("AND (#{favorite,jdbcType=TINYINT} IS NULL"
+                        + " OR i.favorite = #{favorite,jdbcType=TINYINT})"))
+        );
     }
 
     @Test
@@ -46,14 +60,46 @@ class InboxItemMapperSearchSqlTests {
 
     @Test
     void allFieldsReuseParameterizedLiteralLikePolicyAndTask21Ordering() {
-        assertEquals(7, occurrences(searchSql, "#{escapedQuery}"));
-        assertEquals(7, occurrences(searchSql, "ESCAPE '!'"));
-        assertTrue(searchSql.endsWith("ORDER BY i.created_time DESC, i.id DESC"));
+        assertEquals(14, occurrences(searchSql, "#{escapedQuery}"));
+        assertEquals(14, occurrences(searchSql, "ESCAPE '!'"));
+        assertEquals(1, occurrences(searchSql, "#{query}"));
+        assertTrue(searchSql.endsWith("END DESC, i.created_time DESC, i.id DESC"));
+    }
+
+    @Test
+    void rankingUsesDocumentedPriorityAndCreatedTimeTieBreak() {
+        int exactTitle = searchSql.indexOf("WHEN i.title = #{query} THEN 8");
+        int title = searchSql.indexOf("WHEN i.title LIKE", exactTitle);
+        int keyword = searchSql.indexOf("FROM inbox_keyword ik_rank");
+        int tag = searchSql.indexOf("FROM inbox_tag it_rank");
+        int entity = searchSql.indexOf("FROM inbox_entity ie_rank");
+        int summary = searchSql.indexOf("WHEN i.summary LIKE", exactTitle);
+        int content = searchSql.indexOf("WHEN i.content LIKE", exactTitle);
+        int category = searchSql.indexOf("WHEN i.category LIKE", exactTitle);
+
+        assertAll(
+                () -> assertTrue(exactTitle >= 0),
+                () -> assertTrue(exactTitle < title),
+                () -> assertTrue(title < keyword),
+                () -> assertTrue(keyword < tag),
+                () -> assertTrue(tag < entity),
+                () -> assertTrue(entity < summary),
+                () -> assertTrue(summary < content),
+                () -> assertTrue(content < category),
+                () -> assertTrue(searchSql.endsWith("END DESC, i.created_time DESC, i.id DESC"))
+        );
     }
 
     private String normalizedSearchSql() {
         try {
-            Method method = InboxItemMapper.class.getMethod("searchActiveByKeyword", String.class);
+            Method method = InboxItemMapper.class.getMethod(
+                    "searchActiveByKeyword",
+                    String.class,
+                    String.class,
+                    String.class,
+                    String.class,
+                    Integer.class
+            );
             Select select = method.getAnnotation(Select.class);
             return String.join(" ", select.value()).replaceAll("\\s+", " ").trim();
         } catch (NoSuchMethodException exception) {

@@ -1,5 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import HighlightedText from './components/HighlightedText.vue'
 
 // Capture 表单状态由四种类型共用，切换类型时只展示该类型需要的字段。
 const title = ref('')
@@ -13,6 +14,12 @@ const inboxItems = ref([])
 const loading = ref(false)
 const searchQuery = ref('')
 const activeSearchQuery = ref('')
+const searchType = ref('')
+const searchCategory = ref('')
+const searchFavorite = ref('')
+const activeSearchType = ref('')
+const activeSearchCategory = ref('')
+const activeSearchFavorite = ref('')
 const searchErrorMessage = ref('')
 const saving = ref(false)
 const deletingId = ref(null)
@@ -116,9 +123,15 @@ const refreshCurrentView = async ({ background = false } = {}) => {
     else errorMessage.value = ''
   }
   try {
-    const endpoint = searching
-      ? `/api/search?q=${encodeURIComponent(activeSearchQuery.value)}`
-      : '/api/inbox'
+    let endpoint = '/api/inbox'
+    if (searching) {
+      // 所有后台刷新和条目操作都从已执行的搜索状态生成 URL，避免丢失筛选条件。
+      const params = new URLSearchParams({ q: activeSearchQuery.value })
+      if (activeSearchType.value) params.set('type', activeSearchType.value)
+      if (activeSearchCategory.value) params.set('category', activeSearchCategory.value)
+      if (activeSearchFavorite.value) params.set('favorite', activeSearchFavorite.value)
+      endpoint = `/api/search?${params.toString()}`
+    }
     const response = await fetch(endpoint)
     if (!response.ok) {
       let message = searching ? '搜索失败，请稍后重试。' : '加载 Inbox 失败，请稍后重试。'
@@ -158,12 +171,21 @@ const searchInbox = async () => {
   }
 
   activeSearchQuery.value = normalizedQuery
+  activeSearchType.value = searchType.value
+  activeSearchCategory.value = searchCategory.value.trim()
+  activeSearchFavorite.value = searchFavorite.value
   await refreshCurrentView()
 }
 
 const clearSearch = async () => {
   searchQuery.value = ''
   activeSearchQuery.value = ''
+  searchType.value = ''
+  searchCategory.value = ''
+  searchFavorite.value = ''
+  activeSearchType.value = ''
+  activeSearchCategory.value = ''
+  activeSearchFavorite.value = ''
   searchErrorMessage.value = ''
   await refreshCurrentView()
 }
@@ -561,6 +583,35 @@ onBeforeUnmount(() => {
             清除搜索
           </button>
         </div>
+        <div class="search-filter-controls">
+          <label>
+            类型
+            <select v-model="searchType">
+              <option value="">全部</option>
+              <option value="TEXT">TEXT</option>
+              <option value="URL">URL</option>
+              <option value="FILE">FILE</option>
+              <option value="IMAGE">IMAGE</option>
+            </select>
+          </label>
+          <label>
+            分类
+            <input
+              v-model="searchCategory"
+              type="text"
+              maxlength="32"
+              placeholder="全部分类"
+            />
+          </label>
+          <label>
+            收藏
+            <select v-model="searchFavorite">
+              <option value="">全部</option>
+              <option value="true">已收藏</option>
+              <option value="false">未收藏</option>
+            </select>
+          </label>
+        </div>
       </form>
       <p v-if="searchErrorMessage" class="search-error" role="alert">
         {{ searchErrorMessage }}
@@ -571,6 +622,11 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="activeSearchQuery" class="search-context">
         关键词：{{ activeSearchQuery }}
+        <span v-if="activeSearchType"> · 类型：{{ activeSearchType }}</span>
+        <span v-if="activeSearchCategory"> · 分类：{{ activeSearchCategory }}</span>
+        <span v-if="activeSearchFavorite">
+          · 收藏：{{ activeSearchFavorite === 'true' ? '已收藏' : '未收藏' }}
+        </span>
       </p>
 
       <p v-if="loading" class="empty-state">
@@ -629,20 +685,26 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <template v-if="item.type === 'URL'">
-            <h3 v-if="item.title">{{ item.title }}</h3>
+            <h3 v-if="item.title">
+              <HighlightedText :text="item.title" :query="activeSearchQuery" />
+            </h3>
             <a class="source-link" :href="item.sourceUrl" target="_blank" rel="noopener noreferrer">
               {{ item.sourceUrl }}
             </a>
           </template>
           <template v-else-if="item.type === 'FILE'">
-            <h3>📄 {{ item.title || '未命名文件' }}</h3>
+            <h3>
+              📄 <HighlightedText :text="item.title || '未命名文件'" :query="activeSearchQuery" />
+            </h3>
             <div class="file-links">
               <a :href="item.fileUrl" target="_blank" rel="noopener noreferrer">查看</a>
               <a :href="item.fileUrl" :download="item.title || 'download'">下载</a>
             </div>
           </template>
           <template v-else-if="item.type === 'IMAGE'">
-            <h3 v-if="item.title">{{ item.title }}</h3>
+            <h3 v-if="item.title">
+              <HighlightedText :text="item.title" :query="activeSearchQuery" />
+            </h3>
             <a class="image-link" :href="item.fileUrl" target="_blank" rel="noopener noreferrer">
               <img
                 class="image-thumbnail"
@@ -653,8 +715,10 @@ onBeforeUnmount(() => {
             </a>
           </template>
           <template v-else>
-            <h3 v-if="item.title">{{ item.title }}</h3>
-            <p>{{ item.content }}</p>
+            <h3 v-if="item.title">
+              <HighlightedText :text="item.title" :query="activeSearchQuery" />
+            </h3>
+            <p><HighlightedText :text="item.content" :query="activeSearchQuery" /></p>
           </template>
           <section
             v-if="isAnalyzableItem(item) && hasAnalysis(item)"
@@ -665,11 +729,13 @@ onBeforeUnmount(() => {
             <h4>AI 分析</h4>
             <div v-if="item.summary" class="analysis-field">
               <strong class="analysis-label">摘要</strong>
-              <p>{{ item.summary }}</p>
+              <p><HighlightedText :text="item.summary" :query="activeSearchQuery" /></p>
             </div>
             <div v-if="item.category" class="analysis-field">
               <strong class="analysis-label">分类</strong>
-              <span class="analysis-category">{{ item.category }}</span>
+              <span class="analysis-category">
+                <HighlightedText :text="item.category" :query="activeSearchQuery" />
+              </span>
             </div>
             <div v-if="hasTags(item)" class="analysis-field">
               <strong class="analysis-label">标签</strong>
@@ -679,7 +745,7 @@ onBeforeUnmount(() => {
                   :key="`${item.id}-${index}-${tag}`"
                   class="analysis-tag"
                 >
-                  {{ tag }}
+                  <HighlightedText :text="tag" :query="activeSearchQuery" />
                 </li>
               </ul>
             </div>
@@ -691,7 +757,7 @@ onBeforeUnmount(() => {
                   :key="`${item.id}-keyword-${index}-${keyword}`"
                   class="analysis-keyword"
                 >
-                  {{ keyword }}
+                  <HighlightedText :text="keyword" :query="activeSearchQuery" />
                 </li>
               </ul>
             </div>
@@ -703,7 +769,9 @@ onBeforeUnmount(() => {
                   :key="`${item.id}-entity-${index}-${entity.type}-${entity.name}`"
                   class="analysis-entity"
                 >
-                  <span class="analysis-entity-name">{{ entity.name }}</span>
+                  <span class="analysis-entity-name">
+                    <HighlightedText :text="entity.name" :query="activeSearchQuery" />
+                  </span>
                   <span class="analysis-entity-type">{{ entityTypeLabel(entity.type) }}</span>
                 </li>
               </ul>

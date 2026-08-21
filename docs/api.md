@@ -7,7 +7,7 @@
 | Method | Path | 说明 |
 | --- | --- | --- |
 | GET | `/api/inbox` | 查询 ACTIVE InboxItem，并聚合 AI 状态与五类结果 |
-| GET | `/api/search?q={keyword}` | Basic Keyword Search；查询 ACTIVE InboxItem |
+| GET | `/api/search?q={keyword}` | Keyword Search；支持可选过滤、基础相关性排序，查询 ACTIVE InboxItem |
 | POST | `/api/inbox` | JSON Capture；当前支持 TEXT、URL |
 | POST | `/api/inbox/file` | multipart FILE Capture |
 | POST | `/api/inbox/image` | multipart IMAGE Capture |
@@ -20,18 +20,30 @@
 | DELETE | `/api/inbox/{id}` | 删除条目；FILE/IMAGE 同时尽力清理本地文件 |
 | GET | `/api/ai/health` | Browser/Client → Java → Python 健康链路 |
 
-### Basic Keyword Search
+### Keyword Search
 
-`GET /api/search?q={keyword}` 由 Spring Boot 直接查询 MySQL，不调用 FastAPI，也不会触发 AI Analyze。
+`GET /api/search?q={keyword}` 由 Spring Boot 直接查询 MySQL，不调用 FastAPI，也不会触发 AI Analyze。已有只传 `q` 的调用保持兼容。
+
+可选参数：
+
+| 参数 | 取值 | 行为 |
+| --- | --- | --- |
+| `type` | `TEXT` / `URL` / `FILE` / `IMAGE` | 精确过滤 InboxItem 类型；非法类型返回 400 |
+| `category` | 最长 32 个字符 | 去除首尾空白后精确过滤已持久化分类；空值等同未提供 |
+| `favorite` | `true` / `false` | 分别只返回已收藏 / 未收藏条目；未提供时不过滤 |
 
 - `q` 会先去除首尾空白，空白查询返回 400；
 - 最长 200 个 Java 字符，超长查询返回 400；
-- 仅匹配 ACTIVE InboxItem 的 `title`、`content`、`summary`、`category`、`tags`、`keywords`、`entities`，七类信息使用 OR 语义；
+- `status = ACTIVE`、全部已提供过滤参数与七类 OR 匹配同时生效，归档项不能通过任一匹配路径返回；
+- 匹配字段为 `title`、`content`、`summary`、`category`、`tags`、`keywords`、`entities`，七类信息使用 OR 语义；
 - tags、keywords、entities 通过现有关系表或子表查询；同一条目有多个匹配值时仍只返回一次；
 - `%`、`_` 按普通搜索文本处理，不作为用户可控的 LIKE 通配符；
-- 结果按 `created_time DESC, id DESC` 排序；
+- 基础相关性顺序为：标题精确匹配、标题包含、keyword、tag、entity、summary、content、category；
+- 同一相关性按 `created_time DESC, id DESC` 确定顺序；
 - 响应仍是与 `GET /api/inbox` 相同的 InboxItem 数组，合法查询无结果时返回空数组；
-- 当前不搜索 `sourceUrl` 或 `fileUrl`，也不返回匹配分数、原因或高亮。
+- 相关性只用于数据库运行时排序，不持久化或返回 Search score；
+- 后端不返回高亮 HTML。Vue 将可见字段分为普通文本节点与 `<mark>` 节点，查询和内容均由 Vue 转义；
+- 当前不搜索 `sourceUrl` 或 `fileUrl`，也不返回匹配原因。
 
 ### JSON Capture
 

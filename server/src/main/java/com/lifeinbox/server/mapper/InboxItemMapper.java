@@ -17,13 +17,18 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
      * V0.2 已持久化的 Tags、Keywords、Entities 现在直接参与 Retrieve，搜索过程不调用 AI。
      * ACTIVE 条件包住全部 OR 路径，归档项不能通过 AI 关系表绕过过滤。
      * 三个 EXISTS 在数据库内完成候选判断且不会扩增主表行，避免多条分析结果产生重复 InboxItem。
-     * 没有 AI 元数据时 EXISTS 只会返回 false，原有四个字段仍可独立命中；排序继续沿用 Task 21，暂不评分。
+     * 没有 AI 元数据时 EXISTS 只会返回 false，原有四个字段仍可独立命中。
+     * 过滤条件与 ACTIVE 一起位于 OR 匹配之外，所有匹配路径都必须满足当前筛选。
+     * CASE 集中表达基础相关性优先级，值只参与本次排序，不写入数据库也不暴露给前端。
      * ESCAPE 使用固定的 !，让用户输入按普通文本匹配，而不是控制 LIKE 通配范围。
      */
     @Select("""
             SELECT i.*
             FROM inbox_item i
             WHERE i.status = 'ACTIVE'
+              AND (#{type,jdbcType=VARCHAR} IS NULL OR i.type = #{type,jdbcType=VARCHAR})
+              AND (#{category,jdbcType=VARCHAR} IS NULL OR i.category = #{category,jdbcType=VARCHAR})
+              AND (#{favorite,jdbcType=TINYINT} IS NULL OR i.favorite = #{favorite,jdbcType=TINYINT})
               AND (
                     i.title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
                     OR i.content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
@@ -49,9 +54,43 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
                           AND ie.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
                     )
               )
-            ORDER BY i.created_time DESC, i.id DESC
+            ORDER BY CASE
+                WHEN i.title = #{query} THEN 8
+                WHEN i.title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 7
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM inbox_keyword ik_rank
+                    WHERE ik_rank.inbox_item_id = i.id
+                      AND ik_rank.keyword LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                ) THEN 6
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM inbox_tag it_rank
+                    INNER JOIN tag t_rank ON t_rank.id = it_rank.tag_id
+                    WHERE it_rank.inbox_item_id = i.id
+                      AND t_rank.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                ) THEN 5
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM inbox_entity ie_rank
+                    WHERE ie_rank.inbox_item_id = i.id
+                      AND ie_rank.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                ) THEN 4
+                WHEN i.summary LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 3
+                WHEN i.content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 2
+                WHEN i.category LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 1
+                ELSE 0
+            END DESC,
+            i.created_time DESC,
+            i.id DESC
             """)
-    List<InboxItem> searchActiveByKeyword(@Param("escapedQuery") String escapedQuery);
+    List<InboxItem> searchActiveByKeyword(
+            @Param("query") String query,
+            @Param("escapedQuery") String escapedQuery,
+            @Param("type") String type,
+            @Param("category") String category,
+            @Param("favorite") Integer favorite
+    );
 
     /**
      * 只更新本次 AI 分析拥有的列；同时取得该 InboxItem 的行锁，串行化并发重分析。

@@ -17,6 +17,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Inbox 核心业务入口：统一处理不同 Capture 类型，并保持 Controller 只负责 HTTP 协议转换。
@@ -33,6 +35,13 @@ public class InboxService {
     private static final String FILE_URL_PREFIX = "/api/files/";
     private static final int MAX_TITLE_LENGTH = 255;
     private static final int MAX_SEARCH_QUERY_LENGTH = 200;
+    private static final int MAX_SEARCH_CATEGORY_LENGTH = 32;
+    private static final Set<String> SEARCHABLE_TYPES = Set.of(
+            TYPE_TEXT,
+            TYPE_URL,
+            TYPE_FILE,
+            TYPE_IMAGE
+    );
 
     private final InboxItemMapper inboxItemMapper;
     private final InboxTagMapper inboxTagMapper;
@@ -71,9 +80,18 @@ public class InboxService {
     }
 
     /**
-     * Basic Keyword Search 只协调 MySQL 主表检索，不依赖 FastAPI 或触发新的 AI 分析。
+     * Search 只协调 MySQL 主表与已有 AI 元数据检索，不依赖 FastAPI 或触发新的 AI 分析。
      */
     public List<InboxItem> search(String query) {
+        return search(query, null, null, null);
+    }
+
+    public List<InboxItem> search(
+            String query,
+            String type,
+            String category,
+            Boolean favorite
+    ) {
         String normalizedQuery = query == null ? "" : query.trim();
         if (normalizedQuery.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "搜索关键词不能为空");
@@ -85,7 +103,38 @@ public class InboxService {
             );
         }
 
-        return enrichItems(inboxItemMapper.searchActiveByKeyword(escapeLikeLiteral(normalizedQuery)));
+        String normalizedType = normalizeOptionalFilter(type);
+        if (normalizedType != null) {
+            normalizedType = normalizedType.toUpperCase(Locale.ROOT);
+            if (!SEARCHABLE_TYPES.contains(normalizedType)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的搜索类型");
+            }
+        }
+
+        String normalizedCategory = normalizeOptionalFilter(category);
+        if (normalizedCategory != null && normalizedCategory.length() > MAX_SEARCH_CATEGORY_LENGTH) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "搜索分类长度不能超过 " + MAX_SEARCH_CATEGORY_LENGTH
+            );
+        }
+
+        Integer favoriteValue = favorite == null ? null : (favorite ? 1 : 0);
+        return enrichItems(inboxItemMapper.searchActiveByKeyword(
+                normalizedQuery,
+                escapeLikeLiteral(normalizedQuery),
+                normalizedType,
+                normalizedCategory,
+                favoriteValue
+        ));
+    }
+
+    private String normalizeOptionalFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private String escapeLikeLiteral(String query) {
