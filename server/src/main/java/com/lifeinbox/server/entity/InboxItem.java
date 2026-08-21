@@ -29,7 +29,7 @@ public class InboxItem {
     /** TEXT 正文。 */
     private String content;
 
-    /** AI 为 TEXT/URL 生成的摘要；原始正文或 sourceUrl 仍然是业务事实来源。 */
+    /** AI 为 TEXT/URL/FILE 生成的摘要；原始内容仍然是业务事实来源。 */
     private String summary;
 
     /** AI 从有限集合中选择的粗粒度分类。 */

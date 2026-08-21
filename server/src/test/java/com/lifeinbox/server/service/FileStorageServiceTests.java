@@ -1,5 +1,6 @@
 package com.lifeinbox.server.service;
 
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.Resource;
@@ -244,5 +245,75 @@ class FileStorageServiceTests {
         );
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+    }
+
+    @Test
+    void safelyLoadsManagedTxtFileForAnalysis() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.txt";
+        byte[] content = "LifeInbox analyze".getBytes();
+        Files.write(tempDirectory.resolve(storedName), content);
+
+        FileStorageService.AnalyzableFile file = service.loadForAnalysis(
+                "/api/files/" + storedName
+        );
+
+        assertEquals(storedName, file.resource().getFilename());
+        assertEquals("text/plain", file.mediaType().toString());
+        assertEquals(content.length, file.size());
+        assertArrayEquals(content, file.resource().getInputStream().readAllBytes());
+    }
+
+    @Test
+    void fileAnalysisRejectsMissingAndUnsafeManagedUrls() {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+
+        FileAnalyzeException missing = assertThrows(
+                FileAnalyzeException.class,
+                () -> service.loadForAnalysis(
+                        "/api/files/550e8400-e29b-41d4-a716-446655440000.pdf"
+                )
+        );
+        FileAnalyzeException unsafe = assertThrows(
+                FileAnalyzeException.class,
+                () -> service.loadForAnalysis("/api/files/../application.yaml")
+        );
+
+        assertEquals("FILE_NOT_FOUND", missing.getCode());
+        assertEquals(HttpStatus.NOT_FOUND, missing.getStatus());
+        assertEquals("FILE_NOT_FOUND", unsafe.getCode());
+    }
+
+    @Test
+    void fileAnalysisRejectsUnsupportedStoredExtension() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.docx";
+        Files.write(tempDirectory.resolve(storedName), new byte[]{1});
+
+        FileAnalyzeException exception = assertThrows(
+                FileAnalyzeException.class,
+                () -> service.loadForAnalysis("/api/files/" + storedName)
+        );
+
+        assertEquals("FILE_TYPE_UNSUPPORTED", exception.getCode());
+        assertEquals(HttpStatus.UNSUPPORTED_MEDIA_TYPE, exception.getStatus());
+    }
+
+    @Test
+    void fileAnalysisRejectsFileOverTenMegabytes() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.pdf";
+        Files.write(
+                tempDirectory.resolve(storedName),
+                new byte[(int) FileStorageService.MAX_AI_ANALYZE_FILE_SIZE + 1]
+        );
+
+        FileAnalyzeException exception = assertThrows(
+                FileAnalyzeException.class,
+                () -> service.loadForAnalysis("/api/files/" + storedName)
+        );
+
+        assertEquals("FILE_TOO_LARGE", exception.getCode());
+        assertEquals(HttpStatus.CONTENT_TOO_LARGE, exception.getStatus());
     }
 }

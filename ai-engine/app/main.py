@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile, status
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -9,6 +9,11 @@ from app.schemas.analyze import AnalyzeRequest, AnalyzeResult
 from app.schemas.summary import SummaryRequest, SummaryResponse
 from app.schemas.url_analyze import UrlAnalyzeRequest
 from app.services.analyze_service import AnalyzeService
+from app.services.document_text_extractor import (
+    DocumentExtractionError,
+    DocumentTextExtractor,
+)
+from app.services.file_analyze_service import FileAnalyzeService
 from app.services.llm_client import (
     LlmClient,
     LlmInvalidResponseError,
@@ -34,6 +39,8 @@ analyze_service = AnalyzeService(llm_client)
 summary_service = SummaryService(analyze_service)
 url_content_extractor = UrlContentExtractor()
 url_analyze_service = UrlAnalyzeService(url_content_extractor, analyze_service)
+document_text_extractor = DocumentTextExtractor()
+file_analyze_service = FileAnalyzeService(document_text_extractor, analyze_service)
 
 
 def get_analyze_service() -> AnalyzeService:
@@ -52,6 +59,12 @@ def get_url_analyze_service() -> UrlAnalyzeService:
     """提供 URL Analyze 编排服务，测试可以同时替换网页抓取和 LLM。"""
 
     return url_analyze_service
+
+
+def get_file_analyze_service() -> FileAnalyzeService:
+    """提供 FILE Analyze 编排服务，测试可以替换文档解析和 LLM。"""
+
+    return file_analyze_service
 
 
 @app.exception_handler(LlmConfigurationError)
@@ -111,6 +124,19 @@ def handle_url_content_error(
     )
 
 
+@app.exception_handler(DocumentExtractionError)
+def handle_document_extraction_error(
+    request: Request,
+    exception: DocumentExtractionError,
+) -> JSONResponse:
+    """只返回固定文档错误码，不暴露文件内容或 PDF 解析器内部异常。"""
+
+    return JSONResponse(
+        status_code=exception.status_code,
+        content={"code": exception.code, "detail": exception.detail},
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     """提供轻量健康检查，为 Java 与 Python 的第一条通信链路服务。"""
@@ -136,6 +162,17 @@ def analyze_url(
     """安全读取 URL 正文，再复用 TEXT 的统一 Analyze Pipeline。"""
 
     return service.analyze(request)
+
+
+@app.post("/analyze/file", response_model=AnalyzeResult)
+def analyze_file(
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form(max_length=255)] = None,
+    service: FileAnalyzeService = Depends(get_file_analyze_service),
+) -> AnalyzeResult:
+    """接收 Java 管理的文件内容，提取文本后复用统一 Analyze Pipeline。"""
+
+    return service.analyze(file, title)
 
 
 @app.post("/summarize", response_model=SummaryResponse)

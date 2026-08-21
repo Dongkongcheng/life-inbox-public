@@ -2,6 +2,7 @@ package com.lifeinbox.server.controller;
 
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.service.InboxAnalyzeService;
 import com.lifeinbox.server.service.InboxService;
@@ -59,5 +60,25 @@ class InboxControllerTests {
                 .andExpect(status().isGatewayTimeout())
                 .andExpect(jsonPath("$.code").value("URL_FETCH_TIMEOUT"))
                 .andExpect(jsonPath("$.detail").value("网页读取超时"));
+    }
+
+    @Test
+    void analyzeEndpointReturnsSafeStructuredFileFailure() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        InboxAnalyzeService analyzeService = mock(InboxAnalyzeService.class);
+        InboxController controller = new InboxController(inboxService, analyzeService);
+        FileAnalyzeException noText = FileAnalyzeException.fromUpstream(
+                "FILE_PDF_NO_TEXT",
+                422
+        ).orElseThrow();
+        when(analyzeService.analyze(9L)).thenThrow(noText);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(post("/api/inbox/9/ai/analyze"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("FILE_PDF_NO_TEXT"))
+                .andExpect(jsonPath("$.detail").value("无法从 PDF 提取有效文本，文件可能需要 OCR"));
     }
 }
