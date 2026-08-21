@@ -4,6 +4,8 @@ import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiImageErrorResponse;
 import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
+import com.lifeinbox.server.dto.AiEmbeddingRequest;
+import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiFileErrorResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
@@ -103,6 +105,28 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // Python/LLM 失败只终止本次 Analyze，不会进入 Java 的持久化事务。
             throw new AiServiceUnavailableException("AI 分析服务暂不可用", exception);
+        }
+    }
+
+    /**
+     * 调用 Python 的瞬时 Embedding 能力；生成时机与向量保存由后续索引生命周期统一决定。
+     */
+    public AiEmbeddingResponse embed(String text) {
+        try {
+            AiEmbeddingResponse response = analysisRestClient.post()
+                    .uri("/embedding")
+                    .body(new AiEmbeddingRequest(text))
+                    .retrieve()
+                    .body(AiEmbeddingResponse.class);
+            if (!isValidEmbedding(response)) {
+                throw new AiServiceUnavailableException("AI 服务返回了无效的 Embedding 结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // 不透传 Python 或 Provider 的响应正文，Embedding 故障也不影响既有产品流程。
+            throw new AiServiceUnavailableException("AI Embedding 服务暂不可用", exception);
         }
     }
 
@@ -293,6 +317,20 @@ public class AiServiceClient {
             multipart.add("title", title.trim());
         }
         return multipart;
+    }
+
+    private boolean isValidEmbedding(AiEmbeddingResponse response) {
+        if (response == null
+                || response.model() == null
+                || response.model().isBlank()
+                || response.dimension() <= 0
+                || response.embedding() == null
+                || response.embedding().size() != response.dimension()) {
+            return false;
+        }
+        return response.embedding().stream().allMatch(
+                value -> value != null && Double.isFinite(value)
+        );
     }
 
     private UrlAnalyzeException parseKnownUrlFailure(RestClientResponseException exception) {

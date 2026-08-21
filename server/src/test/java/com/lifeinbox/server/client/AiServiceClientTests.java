@@ -2,6 +2,7 @@ package com.lifeinbox.server.client;
 
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -617,6 +618,93 @@ class AiServiceClientTests {
             assertEquals("OCR 正文", image.text());
             assertEquals(true, fileBody.get().contains("name=\"file\""));
             assertEquals(true, imageBody.get().contains("name=\"file\""));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void embedPostsTextAndParsesValidatedVector() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/embedding", exchange -> {
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = """
+                    {"model":"embedding-model","dimension":3,"embedding":[0.1,-0.2,0.3]}
+                    """.strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiEmbeddingResponse result = clientFor(server).embed("Redis 分布式锁");
+
+            assertEquals("embedding-model", result.model());
+            assertEquals(3, result.dimension());
+            assertEquals(List.of(0.1, -0.2, 0.3), result.embedding());
+            assertEquals("{\"text\":\"Redis 分布式锁\"}", requestBody.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void embedRejectsMalformedModelDimensionAndValues() throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        String[] responses = {
+                "{\"model\":\" \" ,\"dimension\":1,\"embedding\":[0.1]}",
+                "{\"model\":\"m\",\"dimension\":2,\"embedding\":[0.1]}",
+                "{\"model\":\"m\",\"dimension\":1,\"embedding\":[null]}"
+        };
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/embedding", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = responses[requestIndex.getAndIncrement()]
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            for (int index = 0; index < responses.length; index++) {
+                assertThrows(AiServiceUnavailableException.class, () -> client.embed("正文"));
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void embedMapsFastApiFailureWithoutExposingResponseBody() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/embedding", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = "{\"detail\":\"provider-secret-response\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(503, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceUnavailableException exception = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> clientFor(server).embed("正文")
+            );
+
+            assertEquals("AI Embedding 服务暂不可用", exception.getMessage());
         } finally {
             server.stop(0);
         }

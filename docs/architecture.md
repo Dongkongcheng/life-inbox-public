@@ -264,13 +264,13 @@ Tags
 Keywords
 Entities
 Structured Analyze
+Embedding Generation
 ```
 
 未来可以逐渐加入：
 
 ```text
 Vision
-Embedding
 Semantic Retrieval
 Rerank
 Relation Discovery
@@ -723,7 +723,7 @@ Hybrid Search
 Rerank
 ```
 
-已实现前四步：
+已实现前五步：
 
 ```text
 Basic Keyword Search
@@ -733,6 +733,8 @@ AI-derived Field Search
 Filter / Ranking / Highlight
         ↓
 Searchable Content
+        ↓
+Embedding Pipeline
 ```
 
 只是 V0.3 的起点，
@@ -790,17 +792,23 @@ FastAPI /analyze 生成结构化 AI 结果
 查询由 Spring Boot 参数化调用 MySQL，限制为 ACTIVE，并使用确定性的字段优先级排序返回现有 InboxItem 表示。
 tags、keywords、entities 使用相关 EXISTS 子查询，既在数据库内判断候选，也不会因多个匹配关系产生重复主表行。
 
-当前仍是条目级统一正文，不拆分 document chunk，也不生成 Embedding 或调用 Vector Store。
+当前仍是条目级统一正文，不拆分 document chunk。Task 25 只增加按需 Embedding Generation：
+Python 从独立配置的 Embedding Model 生成并校验瞬时向量，Java 具备最小内部 Client，但当前流程不会自动调用或保存结果。
 
 ```text
 InboxItem 原始数据 / 受管文件 / URL
                 ↓
 Searchable Content（可重建派生数据）
                 ↓
-Future Embedding（可重建派生索引）
+Embedding Service（可重建派生数据）
+                ↓
+EmbeddingResult：model + dimension + vector
                 ↓
 Future Vector Index（可重建派生索引）
 ```
+
+Embedding 配置缺失或 Provider 故障只影响本次内部调用，不影响 Capture、Analyze 或当前 MySQL Keyword Search。
+向量何时生成、保存、更新和删除属于 Task 26；当前没有 Vector Store、Collection、自动索引或 Backfill。
 
 ---
 
@@ -1426,12 +1434,13 @@ Basic Keyword Search
 AI-derived Field Search
 Search Filter / Ranking / Highlight
 Searchable Content Preparation
+Embedding Pipeline
 ```
 
 后续目标：
 
 ```text
-Embedding
+Vector Storage / Indexing
 Semantic Search
 Hybrid Search
 Rerank

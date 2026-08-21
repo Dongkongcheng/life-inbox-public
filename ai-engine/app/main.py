@@ -4,8 +4,9 @@ from fastapi import Depends, FastAPI, File, Form, Request, UploadFile, status
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from app.config import LlmConfigurationError
+from app.config import EmbeddingConfigurationError, LlmConfigurationError
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
+from app.schemas.embedding import EmbeddingRequest, EmbeddingResult
 from app.schemas.summary import SummaryRequest, SummaryResponse
 from app.schemas.url_analyze import UrlAnalyzeRequest
 from app.services.analyze_service import AnalyzeService
@@ -13,6 +14,13 @@ from app.services.document_text_extractor import (
     DocumentExtractionError,
     DocumentTextExtractor,
 )
+from app.services.embedding_client import (
+    EmbeddingClient,
+    EmbeddingInvalidResponseError,
+    EmbeddingServiceError,
+    EmbeddingTimeoutError,
+)
+from app.services.embedding_service import EmbeddingService
 from app.services.file_analyze_service import FileAnalyzeService
 from app.services.image_analyze_service import ImageAnalyzeService
 from app.services.image_text_extractor import ImageExtractionError, ImageTextExtractor
@@ -45,6 +53,8 @@ document_text_extractor = DocumentTextExtractor()
 file_analyze_service = FileAnalyzeService(document_text_extractor, analyze_service)
 image_text_extractor = ImageTextExtractor()
 image_analyze_service = ImageAnalyzeService(image_text_extractor, analyze_service)
+embedding_client = EmbeddingClient()
+embedding_service = EmbeddingService(embedding_client)
 
 
 def get_analyze_service() -> AnalyzeService:
@@ -77,6 +87,12 @@ def get_image_analyze_service() -> ImageAnalyzeService:
     return image_analyze_service
 
 
+def get_embedding_service() -> EmbeddingService:
+    """Embedding 配置按请求读取，未配置时不阻止 FastAPI 与既有能力启动。"""
+
+    return embedding_service
+
+
 @app.exception_handler(LlmConfigurationError)
 def handle_llm_configuration_error(
     request: Request,
@@ -85,6 +101,50 @@ def handle_llm_configuration_error(
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "LLM 配置不完整"},
+    )
+
+
+@app.exception_handler(EmbeddingConfigurationError)
+def handle_embedding_configuration_error(
+    request: Request,
+    exception: EmbeddingConfigurationError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Embedding 配置不完整"},
+    )
+
+
+@app.exception_handler(EmbeddingTimeoutError)
+def handle_embedding_timeout(
+    request: Request,
+    exception: EmbeddingTimeoutError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content={"detail": "Embedding 请求超时"},
+    )
+
+
+@app.exception_handler(EmbeddingInvalidResponseError)
+def handle_invalid_embedding_response(
+    request: Request,
+    exception: EmbeddingInvalidResponseError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": "Embedding 返回的向量无效"},
+    )
+
+
+@app.exception_handler(EmbeddingServiceError)
+def handle_embedding_service_error(
+    request: Request,
+    exception: EmbeddingServiceError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Embedding 服务暂不可用"},
     )
 
 
@@ -175,6 +235,16 @@ def analyze(
     """一次分析 TEXT 并返回 Summary、Category、Tags、Keywords 和 Entities。"""
 
     return service.analyze(request)
+
+
+@app.post("/embedding", response_model=EmbeddingResult)
+def embedding(
+    request: EmbeddingRequest,
+    service: EmbeddingService = Depends(get_embedding_service),
+) -> EmbeddingResult:
+    """内部能力仅执行 Text → Vector；不保存向量，也不触发索引或搜索。"""
+
+    return service.embed(request)
 
 
 @app.post("/analyze/url", response_model=AnalyzeResult)

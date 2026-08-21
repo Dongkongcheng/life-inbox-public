@@ -95,6 +95,7 @@ fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，�
 | --- | --- | --- | --- |
 | GET | `/health` | 无 | `{status, service}` |
 | POST | `/analyze` | JSON `{title?, text}` | AnalyzeResult |
+| POST | `/embedding` | JSON `{text}` | `{model, dimension, embedding}`；只生成并校验瞬时向量 |
 | POST | `/prepare/url` | JSON `{title?, url}` | `{title?, text}`；只复用安全网页提取，不调用 LLM |
 | POST | `/prepare/file` | multipart `file`, `title?` | `{title?, text}`；只复用文档提取，不调用 LLM |
 | POST | `/prepare/image` | multipart `file`, `title?` | `{title?, text}`；只复用 OCR，不调用 LLM |
@@ -121,6 +122,26 @@ URL、FILE、IMAGE 提取失败使用有限的 `code/detail` 协议。Java 只�
 
 Java 的当前 Analyze 流程对 URL/FILE/IMAGE 先调用对应 `/prepare/*`，以 Attempt Guard 保存可重建正文，再把正文交给 `/analyze`。
 因此 LLM 失败时已成功提取的 Searchable Content 仍可保留；`/prepare/*` 是内部协议，不是浏览器产品 API。
+
+### Embedding 内部协议
+
+`POST /embedding` 只接收 Task 24 已准备好的文本：
+
+```json
+{"text": "Redis 分布式锁需要避免误释放。"}
+```
+
+成功响应中的 `dimension` 由 Provider 返回向量的真实长度计算：
+
+```json
+{"model": "configured-model", "dimension": 3, "embedding": [0.1, -0.2, 0.3]}
+```
+
+输入去除首尾空白后不能为空，最多 20,000 字符，不会被静默截断或分块。Python 拒绝空向量、多个向量、
+缺失模型、非法数值、NaN 和 Infinity。未配置 Embedding Model 返回 503；超时返回 504；Provider 状态错误返回 503；
+畸形响应返回 502。错误不会包含 API Key、完整输入、Provider 正文或完整向量。
+
+这是 Java → Python 的内部能力，不是浏览器产品 API。Task 25 不保存向量、不自动处理 InboxItem，也不修改 Keyword Search。
 
 ## 主要限制
 
