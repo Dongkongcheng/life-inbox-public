@@ -1,6 +1,6 @@
 from fastapi import UploadFile
 
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResult
+from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
 from app.services.analyze_service import AnalyzeService
 from app.services.document_text_extractor import DocumentTextExtractor
 
@@ -17,6 +17,14 @@ class FileAnalyzeService:
         self._analyze_service = analyze_service
 
     def analyze(self, file: UploadFile, title: str | None) -> AnalyzeResult:
+        prepared = self.prepare(file, title)
+        return self._analyze_service.analyze(
+            AnalyzeRequest(title=prepared.title, text=prepared.text)
+        )
+
+    def prepare(self, file: UploadFile, title: str | None) -> PreparedContent:
+        """只解析受限文档，不调用 LLM，也不在 Python 保存业务数据。"""
+
         text = self._text_extractor.extract(
             file.filename,
             file.content_type,
@@ -24,6 +32,7 @@ class FileAnalyzeService:
         )
         normalized_title = title.strip() if title and title.strip() else None
         fallback_title = (file.filename or "文档")[:255]
-        return self._analyze_service.analyze(
-            AnalyzeRequest(title=normalized_title or fallback_title, text=text)
+        return PreparedContent(
+            title=normalized_title or fallback_title,
+            text=text,
         )

@@ -94,8 +94,8 @@ EntityName = Annotated[
 ]
 
 
-class AnalyzeRequest(BaseModel):
-    """只接收 TEXT 分析真正需要的标题和正文，不传递完整 InboxItem。"""
+class PreparedContent(BaseModel):
+    """Parser/OCR 产生的统一纯文本；不包含 LLM 派生字段或 Java 业务状态。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -117,6 +117,10 @@ class AnalyzeRequest(BaseModel):
         if not normalized:
             raise ValueError("text 不能为空或全为空白")
         return normalized
+
+
+class AnalyzeRequest(PreparedContent):
+    """只接收 Analyze 真正需要的已准备标题和正文，不传递完整 InboxItem。"""
 
 
 class Entity(BaseModel):

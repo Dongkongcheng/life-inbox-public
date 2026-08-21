@@ -35,7 +35,8 @@ class SearchControllerTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(1))
                 .andExpect(jsonPath("$[0].title").value("Redis 分布式锁"))
-                .andExpect(jsonPath("$[0].summary").value("介绍 Redis 在高并发环境下的使用方式。"));
+                .andExpect(jsonPath("$[0].summary").value("介绍 Redis 在高并发环境下的使用方式。"))
+                .andExpect(jsonPath("$[0].searchableContent").doesNotExist());
         verify(inboxService).search(" Redis ", null, null, null);
     }
 

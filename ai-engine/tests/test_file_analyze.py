@@ -8,7 +8,7 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from starlette.datastructures import Headers
 
 from app.main import app, get_file_analyze_service
-from app.schemas.analyze import MAX_ANALYZE_INPUT_CHARS, AnalyzeResult
+from app.schemas.analyze import MAX_ANALYZE_INPUT_CHARS, AnalyzeResult, PreparedContent
 from app.services.document_text_extractor import (
     MAX_FILE_ANALYZE_BYTES,
     MAX_PDF_PAGES,
@@ -66,12 +66,18 @@ class StaticFileAnalyzeService:
     def analyze(self, file: UploadFile, title: str | None) -> AnalyzeResult:
         return successful_result()
 
+    def prepare(self, file: UploadFile, title: str | None) -> PreparedContent:
+        return PreparedContent(title=title or file.filename, text="提取后的文档正文")
+
 
 class FailedFileAnalyzeService:
     def __init__(self, error: Exception) -> None:
         self.error = error
 
     def analyze(self, file: UploadFile, title: str | None) -> AnalyzeResult:
+        raise self.error
+
+    def prepare(self, file: UploadFile, title: str | None) -> PreparedContent:
         raise self.error
 
 
@@ -276,6 +282,20 @@ def test_file_analyze_reuses_one_existing_analyze_call() -> None:
     assert analyze_service.requests[0].text == "提取后的文档正文"
 
 
+def test_file_prepare_returns_extracted_content_without_calling_llm() -> None:
+    extractor = StaticDocumentExtractor("提取后的文档正文")
+    analyze_service = RecordingAnalyzeService()
+    service = FileAnalyzeService(extractor, analyze_service)
+
+    prepared = service.prepare(
+        upload_file("stored.md", b"ignored", "text/markdown"),
+        None,
+    )
+
+    assert prepared == PreparedContent(title="stored.md", text="提取后的文档正文")
+    assert analyze_service.requests == []
+
+
 def test_file_analyze_propagates_llm_failure_after_extraction() -> None:
     extractor = StaticDocumentExtractor("提取后的文档正文")
     analyze_service = RecordingAnalyzeService(LlmServiceError("mock LLM failure"))
@@ -304,6 +324,19 @@ def test_file_analyze_endpoint_accepts_multipart_and_returns_analyze_result() ->
         "keywords": ["FastAPI"],
         "entities": [],
     }
+
+
+def test_file_prepare_endpoint_returns_plain_content() -> None:
+    app.dependency_overrides[get_file_analyze_service] = lambda: StaticFileAnalyzeService()
+
+    response = client.post(
+        "/prepare/file",
+        files={"file": ("notes.txt", b"LifeInbox", "text/plain")},
+        data={"title": "学习笔记"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"title": "学习笔记", "text": "提取后的文档正文"}
 
 
 @pytest.mark.parametrize(

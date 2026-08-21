@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
@@ -74,19 +75,22 @@ public class InboxAnalyzeService {
     private final FileStorageService fileStorageService;
     private final InboxAnalysisStatusService statusService;
     private final InboxAnalysisPersistenceService persistenceService;
+    private final InboxSearchableContentService searchableContentService;
 
     public InboxAnalyzeService(
             InboxItemMapper inboxItemMapper,
             AiServiceClient aiServiceClient,
             FileStorageService fileStorageService,
             InboxAnalysisStatusService statusService,
-            InboxAnalysisPersistenceService persistenceService
+            InboxAnalysisPersistenceService persistenceService,
+            InboxSearchableContentService searchableContentService
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.aiServiceClient = aiServiceClient;
         this.fileStorageService = fileStorageService;
         this.statusService = statusService;
         this.persistenceService = persistenceService;
+        this.searchableContentService = searchableContentService;
     }
 
     /**
@@ -104,7 +108,11 @@ public class InboxAnalyzeService {
 
         ValidatedAnalysis analysis;
         try {
-            AiAnalyzeResponse aiResponse = requestAnalysis(inboxItem);
+            PreparedAnalysisInput prepared = prepareAnalysisInput(id, inboxItem, attemptId);
+            AiAnalyzeResponse aiResponse = aiServiceClient.analyze(
+                    prepared.title(),
+                    prepared.text()
+            );
             analysis = validateAnalysis(aiResponse);
         } catch (RuntimeException exception) {
             recordFailure(id, attemptId, safeProcessingFailureMessage(exception), exception);
@@ -151,43 +159,69 @@ public class InboxAnalyzeService {
         );
     }
 
-    private AiAnalyzeResponse requestAnalysis(InboxItem inboxItem) {
+    private PreparedAnalysisInput prepareAnalysisInput(
+            Long inboxItemId,
+            InboxItem inboxItem,
+            String attemptId
+    ) {
         if (TYPE_TEXT.equals(inboxItem.getType())) {
-            return aiServiceClient.analyze(inboxItem.getTitle(), inboxItem.getContent());
+            return new PreparedAnalysisInput(
+                    inboxItem.getTitle(),
+                    searchableContentService.prepareText(inboxItem.getContent())
+            );
         }
         if (TYPE_URL.equals(inboxItem.getType())) {
-            // Java 不抓取网页正文；Python 完成 SSRF 校验、正文提取后再复用统一 Analyze。
-            return aiServiceClient.analyzeUrl(
+            // Java 不抓网页；Python 保留 SSRF 防护，正文回到 Java 后用当前 Attempt 单独短写入。
+            AiPreparedContentResponse prepared = aiServiceClient.prepareUrl(
                     inboxItem.getTitle(),
                     inboxItem.getSourceUrl().trim()
             );
+            return persistPreparedContent(inboxItemId, attemptId, prepared);
         }
         if (TYPE_FILE.equals(inboxItem.getType())) {
             // 文件仍由 Java 存储层管理；只发送安全读取的内容，不向 Python 暴露磁盘路径。
             FileStorageService.AnalyzableFile file = fileStorageService.loadForAnalysis(
                     inboxItem.getFileUrl()
             );
-            return aiServiceClient.analyzeFile(
+            AiPreparedContentResponse prepared = aiServiceClient.prepareFile(
                     inboxItem.getTitle(),
                     file.resource(),
                     file.mediaType()
             );
+            return persistPreparedContent(inboxItemId, attemptId, prepared);
         }
         if (TYPE_IMAGE.equals(inboxItem.getType())) {
             // OCR 属于 Python 内容理解职责；Java 仍只发送受管图片内容，不暴露磁盘路径。
             FileStorageService.AnalyzableFile image = fileStorageService.loadImageForAnalysis(
                     inboxItem.getFileUrl()
             );
-            return aiServiceClient.analyzeImage(
+            AiPreparedContentResponse prepared = aiServiceClient.prepareImage(
                     inboxItem.getTitle(),
                     image.resource(),
                     image.mediaType()
             );
+            return persistPreparedContent(inboxItemId, attemptId, prepared);
         }
         throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "当前只支持分析 TEXT、URL、FILE 或 IMAGE"
         );
+    }
+
+    private PreparedAnalysisInput persistPreparedContent(
+            Long inboxItemId,
+            String attemptId,
+            AiPreparedContentResponse prepared
+    ) {
+        if (prepared == null) {
+            throw new AiServiceUnavailableException("AI 服务没有返回内容准备结果");
+        }
+        String normalized = searchableContentService.replaceExtractedContent(
+                inboxItemId,
+                attemptId,
+                prepared.text()
+        );
+        return new PreparedAnalysisInput(prepared.title(), normalized);
     }
 
     private String safeProcessingFailureMessage(RuntimeException exception) {
@@ -335,5 +369,8 @@ public class InboxAnalyzeService {
             List<String> keywords,
             List<NormalizedEntity> entities
     ) {
+    }
+
+    private record PreparedAnalysisInput(String title, String text) {
     }
 }

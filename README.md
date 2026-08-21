@@ -157,14 +157,17 @@ Current implementation status:
 V0.3 Task 1 — Basic Keyword Search  ✅ Completed
 V0.3 Task 2 — AI-derived Field Search  ✅ Completed
 V0.3 Task 3 — Search Filter + Ranking + Highlight  ✅ Completed
+V0.3 Task 4 — Searchable Content Preparation  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
 `category`, and `favorite` filters. MySQL matches ACTIVE InboxItems on persisted `title`, `content`,
-`summary`, `category`, `tags`, `keywords`, or `entities`. Relation-table matches use `EXISTS`, so
+`summary`, `category`, `tags`, `keywords`, `entities`, or prepared Searchable Content. TEXT reuses
+its original `content`; URL, FILE, and IMAGE store normalized, rebuildable extracted text in
+`inbox_item.searchable_content`. Relation-table matches use `EXISTS`, so
 one item remains one result even when several AI-derived values match. Results use deterministic
 field-based ranking, and Vue safely highlights matching plain text without backend highlight HTML.
-Searchable Content, semantic retrieval, hybrid retrieval, and reranking remain future work.
+Embedding, vector retrieval, semantic retrieval, hybrid retrieval, and reranking remain future work.
 
 It is not the final definition of V0.3.
 

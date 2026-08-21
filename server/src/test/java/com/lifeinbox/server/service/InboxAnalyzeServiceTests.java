@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
@@ -45,18 +46,27 @@ class InboxAnalyzeServiceTests {
     private final InboxAnalysisPersistenceService persistenceService = mock(
             InboxAnalysisPersistenceService.class
     );
+    private final InboxSearchableContentService searchableContentService = mock(
+            InboxSearchableContentService.class
+    );
     private final InboxAnalyzeService analyzeService = new InboxAnalyzeService(
             inboxItemMapper,
             aiServiceClient,
             fileStorageService,
             statusService,
-            persistenceService
+            persistenceService,
+            searchableContentService
     );
 
     @BeforeEach
     void prepareAttempt() {
         when(statusService.markProcessing(anyLong())).thenReturn(ATTEMPT_ID);
         when(statusService.markFailed(anyLong(), any(), any())).thenReturn(true);
+        when(searchableContentService.prepareText(any())).thenAnswer(
+                invocation -> invocation.getArgument(0)
+        );
+        when(searchableContentService.replaceExtractedContent(anyLong(), any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(2));
     }
 
     @Test
@@ -85,10 +95,11 @@ class InboxAnalyzeServiceTests {
                 List.of(" ChatModel "),
                 List.of(new AiEntityResponse(" Spring　AI ", "TECHNOLOGY"))
         );
-        when(aiServiceClient.analyzeUrl(
+        when(aiServiceClient.prepareUrl(
                 "Spring AI 文档",
                 "https://example.com/spring-ai"
-        )).thenReturn(response);
+        )).thenReturn(new AiPreparedContentResponse("Spring AI 文档", "URL 正文"));
+        when(aiServiceClient.analyze("Spring AI 文档", "URL 正文")).thenReturn(response);
         InboxItem updated = item("URL", null);
         updated.setSourceUrl("https://example.com/spring-ai");
         when(persistenceService.replaceAnalysis(
@@ -104,11 +115,16 @@ class InboxAnalyzeServiceTests {
         assertEquals(updated, analyzeService.analyze(1L));
 
         verify(statusService).markProcessing(1L);
-        verify(aiServiceClient).analyzeUrl(
+        verify(aiServiceClient).prepareUrl(
                 "Spring AI 文档",
                 "https://example.com/spring-ai"
         );
-        verify(aiServiceClient, never()).analyze(any(), any());
+        verify(searchableContentService).replaceExtractedContent(
+                1L,
+                ATTEMPT_ID,
+                "URL 正文"
+        );
+        verify(aiServiceClient).analyze("Spring AI 文档", "URL 正文");
         verify(persistenceService).replaceAnalysis(
                 1L,
                 ATTEMPT_ID,
@@ -160,11 +176,12 @@ class InboxAnalyzeServiceTests {
                 List.of("文档解析"),
                 List.of()
         );
-        when(aiServiceClient.analyzeFile(
+        when(aiServiceClient.prepareFile(
                 "架构说明.pdf",
                 resource,
                 MediaType.APPLICATION_PDF
-        )).thenReturn(response);
+        )).thenReturn(new AiPreparedContentResponse("架构说明.pdf", "PDF 正文"));
+        when(aiServiceClient.analyze("架构说明.pdf", "PDF 正文")).thenReturn(response);
         InboxItem updated = item("FILE", null);
         when(persistenceService.replaceAnalysis(
                 1L,
@@ -180,11 +197,17 @@ class InboxAnalyzeServiceTests {
 
         verify(statusService).markProcessing(1L);
         verify(fileStorageService).loadForAnalysis(original.getFileUrl());
-        verify(aiServiceClient).analyzeFile(
+        verify(aiServiceClient).prepareFile(
                 "架构说明.pdf",
                 resource,
                 MediaType.APPLICATION_PDF
         );
+        verify(searchableContentService).replaceExtractedContent(
+                1L,
+                ATTEMPT_ID,
+                "PDF 正文"
+        );
+        verify(aiServiceClient).analyze("架构说明.pdf", "PDF 正文");
         verify(persistenceService).replaceAnalysis(
                 1L,
                 ATTEMPT_ID,
@@ -218,8 +241,9 @@ class InboxAnalyzeServiceTests {
                 List.of("课程通知"),
                 List.of()
         );
-        when(aiServiceClient.analyzeImage("课程通知.png", resource, MediaType.IMAGE_PNG))
-                .thenReturn(response);
+        when(aiServiceClient.prepareImage("课程通知.png", resource, MediaType.IMAGE_PNG))
+                .thenReturn(new AiPreparedContentResponse("课程通知.png", "OCR 正文"));
+        when(aiServiceClient.analyze("课程通知.png", "OCR 正文")).thenReturn(response);
         InboxItem updated = item("IMAGE", null);
         when(persistenceService.replaceAnalysis(
                 2L,
@@ -235,7 +259,13 @@ class InboxAnalyzeServiceTests {
 
         verify(statusService).markProcessing(2L);
         verify(fileStorageService).loadImageForAnalysis(original.getFileUrl());
-        verify(aiServiceClient).analyzeImage("课程通知.png", resource, MediaType.IMAGE_PNG);
+        verify(aiServiceClient).prepareImage("课程通知.png", resource, MediaType.IMAGE_PNG);
+        verify(searchableContentService).replaceExtractedContent(
+                2L,
+                ATTEMPT_ID,
+                "OCR 正文"
+        );
+        verify(aiServiceClient).analyze("课程通知.png", "OCR 正文");
         verify(persistenceService).replaceAnalysis(
                 2L,
                 ATTEMPT_ID,
@@ -535,15 +565,17 @@ class InboxAnalyzeServiceTests {
     @Test
     void urlExtractionFailureKeepsOldAnalysisAndNeverStartsPersistence() {
         InboxItem original = oldUrlAnalysis();
+        original.setSearchableContent("旧网页正文");
         when(inboxItemMapper.selectById(1L)).thenReturn(original);
         UrlAnalyzeException failure = UrlAnalyzeException.fromUpstream("URL_BLOCKED", 403)
                 .orElseThrow();
-        when(aiServiceClient.analyzeUrl("旧网页", "https://example.com/article"))
+        when(aiServiceClient.prepareUrl("旧网页", "https://example.com/article"))
                 .thenThrow(failure);
 
         assertThrows(UrlAnalyzeException.class, () -> analyzeService.analyze(1L));
 
         assertOldUrlAnalysis(original);
+        assertEquals("旧网页正文", original.getSearchableContent());
         verify(statusService).markFailed(1L, ATTEMPT_ID, "URL 被安全策略阻止");
         verifyNoInteractions(persistenceService);
     }
@@ -552,12 +584,19 @@ class InboxAnalyzeServiceTests {
     void urlLlmFailureKeepsOldAnalysisAndNeverStartsPersistence() {
         InboxItem original = oldUrlAnalysis();
         when(inboxItemMapper.selectById(1L)).thenReturn(original);
-        when(aiServiceClient.analyzeUrl("旧网页", "https://example.com/article"))
+        when(aiServiceClient.prepareUrl("旧网页", "https://example.com/article"))
+                .thenReturn(new AiPreparedContentResponse("旧网页", "新网页正文"));
+        when(aiServiceClient.analyze("旧网页", "新网页正文"))
                 .thenThrow(new AiServiceUnavailableException("mock LLM failure"));
 
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
         assertOldUrlAnalysis(original);
+        verify(searchableContentService).replaceExtractedContent(
+                1L,
+                ATTEMPT_ID,
+                "新网页正文"
+        );
         verifyNoInteractions(persistenceService);
     }
 
@@ -577,6 +616,7 @@ class InboxAnalyzeServiceTests {
     @Test
     void fileExtractionFailureKeepsOldAnalysisAndNeverStartsPersistence() {
         InboxItem original = oldFileAnalysis();
+        original.setSearchableContent("旧 PDF 正文");
         when(inboxItemMapper.selectById(1L)).thenReturn(original);
         Resource resource = new ByteArrayResource("pdf".getBytes()) {
             @Override
@@ -591,12 +631,13 @@ class InboxAnalyzeServiceTests {
                 "FILE_PDF_NO_TEXT",
                 422
         ).orElseThrow();
-        when(aiServiceClient.analyzeFile("旧文档", resource, MediaType.APPLICATION_PDF))
+        when(aiServiceClient.prepareFile("旧文档", resource, MediaType.APPLICATION_PDF))
                 .thenThrow(failure);
 
         assertThrows(FileAnalyzeException.class, () -> analyzeService.analyze(1L));
 
         assertOldFileAnalysis(original);
+        assertEquals("旧 PDF 正文", original.getSearchableContent());
         verifyNoInteractions(persistenceService);
     }
 
@@ -613,12 +654,19 @@ class InboxAnalyzeServiceTests {
         when(fileStorageService.loadForAnalysis(original.getFileUrl())).thenReturn(
                 new FileStorageService.AnalyzableFile(resource, MediaType.TEXT_PLAIN, 4)
         );
-        when(aiServiceClient.analyzeFile("旧文档", resource, MediaType.TEXT_PLAIN))
+        when(aiServiceClient.prepareFile("旧文档", resource, MediaType.TEXT_PLAIN))
+                .thenReturn(new AiPreparedContentResponse("旧文档", "新文档正文"));
+        when(aiServiceClient.analyze("旧文档", "新文档正文"))
                 .thenThrow(new AiServiceUnavailableException("mock LLM failure"));
 
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
         assertOldFileAnalysis(original);
+        verify(searchableContentService).replaceExtractedContent(
+                1L,
+                ATTEMPT_ID,
+                "新文档正文"
+        );
         verifyNoInteractions(persistenceService);
     }
 
@@ -638,6 +686,7 @@ class InboxAnalyzeServiceTests {
     @Test
     void imageOcrFailureKeepsOldAnalysisAndNeverStartsPersistence() {
         InboxItem original = oldImageAnalysis();
+        original.setSearchableContent("旧 OCR 正文");
         when(inboxItemMapper.selectById(1L)).thenReturn(original);
         Resource resource = new ByteArrayResource("png".getBytes()) {
             @Override
@@ -652,12 +701,13 @@ class InboxAnalyzeServiceTests {
                 "IMAGE_TEXT_EMPTY",
                 422
         ).orElseThrow();
-        when(aiServiceClient.analyzeImage("旧截图", resource, MediaType.IMAGE_PNG))
+        when(aiServiceClient.prepareImage("旧截图", resource, MediaType.IMAGE_PNG))
                 .thenThrow(failure);
 
         assertThrows(ImageAnalyzeException.class, () -> analyzeService.analyze(1L));
 
         assertOldImageAnalysis(original);
+        assertEquals("旧 OCR 正文", original.getSearchableContent());
         verifyNoInteractions(persistenceService);
     }
 
@@ -674,12 +724,19 @@ class InboxAnalyzeServiceTests {
         when(fileStorageService.loadImageForAnalysis(original.getFileUrl())).thenReturn(
                 new FileStorageService.AnalyzableFile(resource, MediaType.IMAGE_PNG, 3)
         );
-        when(aiServiceClient.analyzeImage("旧截图", resource, MediaType.IMAGE_PNG))
+        when(aiServiceClient.prepareImage("旧截图", resource, MediaType.IMAGE_PNG))
+                .thenReturn(new AiPreparedContentResponse("旧截图", "新 OCR 正文"));
+        when(aiServiceClient.analyze("旧截图", "新 OCR 正文"))
                 .thenThrow(new AiServiceUnavailableException("mock LLM failure"));
 
         assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
 
         assertOldImageAnalysis(original);
+        verify(searchableContentService).replaceExtractedContent(
+                1L,
+                ATTEMPT_ID,
+                "新 OCR 正文"
+        );
         verifyNoInteractions(persistenceService);
     }
 

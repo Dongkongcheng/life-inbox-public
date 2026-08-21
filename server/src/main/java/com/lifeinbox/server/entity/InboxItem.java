@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.lifeinbox.server.dto.AiEntityResponse;
 
 import java.time.LocalDateTime;
@@ -28,6 +29,10 @@ public class InboxItem {
 
     /** TEXT 正文。 */
     private String content;
+
+    /** URL/FILE/IMAGE 的可重建检索正文；TEXT 直接使用 content，避免复制业务源数据。 */
+    @JsonIgnore
+    private String searchableContent;
 
     /** AI 为 TEXT/URL/FILE/IMAGE 生成的摘要；原始内容仍然是业务事实来源。 */
     private String summary;
@@ -118,6 +123,14 @@ public class InboxItem {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getSearchableContent() {
+        return searchableContent;
+    }
+
+    public void setSearchableContent(String searchableContent) {
+        this.searchableContent = searchableContent;
     }
 
     public String getSummary() {

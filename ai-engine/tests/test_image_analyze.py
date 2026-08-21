@@ -9,7 +9,7 @@ from starlette.datastructures import Headers
 
 import app.services.image_text_extractor as image_extractor_module
 from app.main import app, get_image_analyze_service
-from app.schemas.analyze import MAX_ANALYZE_INPUT_CHARS, AnalyzeResult
+from app.schemas.analyze import MAX_ANALYZE_INPUT_CHARS, AnalyzeResult, PreparedContent
 from app.services.image_analyze_service import ImageAnalyzeService
 from app.services.image_text_extractor import (
     MAX_IMAGE_ANALYZE_BYTES,
@@ -78,12 +78,18 @@ class StaticImageAnalyzeService:
     def analyze(self, file: UploadFile, title: str | None) -> AnalyzeResult:
         return successful_result()
 
+    def prepare(self, file: UploadFile, title: str | None) -> PreparedContent:
+        return PreparedContent(title=title or file.filename, text="OCR 后的图片文字")
+
 
 class FailedImageAnalyzeService:
     def __init__(self, error: Exception) -> None:
         self.error = error
 
     def analyze(self, file: UploadFile, title: str | None) -> AnalyzeResult:
+        raise self.error
+
+    def prepare(self, file: UploadFile, title: str | None) -> PreparedContent:
         raise self.error
 
 
@@ -309,6 +315,20 @@ def test_image_analyze_reuses_one_existing_analyze_call() -> None:
     assert analyze_service.requests[0].text == "OCR 后的图片文字"
 
 
+def test_image_prepare_returns_ocr_text_without_calling_llm() -> None:
+    extractor = StaticImageExtractor("OCR 后的图片文字")
+    analyze_service = RecordingAnalyzeService()
+    service = ImageAnalyzeService(extractor, analyze_service)
+
+    prepared = service.prepare(
+        upload_file("screen.png", b"ignored", "image/png"),
+        None,
+    )
+
+    assert prepared == PreparedContent(title="screen.png", text="OCR 后的图片文字")
+    assert analyze_service.requests == []
+
+
 def test_image_analyze_propagates_llm_failure_after_ocr() -> None:
     analyze_service = RecordingAnalyzeService(LlmServiceError("mock LLM failure"))
     service = ImageAnalyzeService(
@@ -341,6 +361,21 @@ def test_image_endpoint_accepts_multipart_and_returns_analyze_result() -> None:
         "keywords": ["RapidOCR"],
         "entities": [],
     }
+
+
+def test_image_prepare_endpoint_returns_plain_content() -> None:
+    app.dependency_overrides[get_image_analyze_service] = (
+        lambda: StaticImageAnalyzeService()
+    )
+
+    response = client.post(
+        "/prepare/image",
+        files={"file": ("screen.png", create_image("PNG"), "image/png")},
+        data={"title": "课程通知"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"title": "课程通知", "text": "OCR 后的图片文字"}
 
 
 @pytest.mark.parametrize(

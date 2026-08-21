@@ -43,12 +43,16 @@ class InboxAutoAnalyzeWorkerTests {
         InboxAnalysisPersistenceService persistenceService = mock(
                 InboxAnalysisPersistenceService.class
         );
+        InboxSearchableContentService searchableContentService = mock(
+                InboxSearchableContentService.class
+        );
         InboxAnalyzeService analyzeService = new InboxAnalyzeService(
                 inboxItemMapper,
                 aiServiceClient,
                 fileStorageService,
                 statusService,
-                persistenceService
+                persistenceService,
+                searchableContentService
         );
         InboxAutoAnalyzeWorker worker = new InboxAutoAnalyzeWorker(analyzeService);
         InboxItem item = new InboxItem();
@@ -57,6 +61,8 @@ class InboxAutoAnalyzeWorkerTests {
         item.setContent("需要自动分析的正文");
         when(inboxItemMapper.selectById(12L)).thenReturn(item);
         when(statusService.markProcessing(12L)).thenReturn("attempt-12");
+        when(searchableContentService.prepareText("需要自动分析的正文"))
+                .thenReturn("需要自动分析的正文");
         when(aiServiceClient.analyze(null, "需要自动分析的正文"))
                 .thenThrow(new IllegalStateException("LLM unavailable"));
         when(statusService.markFailed(12L, "attempt-12", "AI 分析失败")).thenReturn(true);

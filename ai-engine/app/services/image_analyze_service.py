@@ -1,6 +1,6 @@
 from fastapi import UploadFile
 
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResult
+from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
 from app.services.analyze_service import AnalyzeService
 from app.services.image_text_extractor import ImageTextExtractor
 
@@ -17,6 +17,14 @@ class ImageAnalyzeService:
         self._analyze_service = analyze_service
 
     def analyze(self, file: UploadFile, title: str | None) -> AnalyzeResult:
+        prepared = self.prepare(file, title)
+        return self._analyze_service.analyze(
+            AnalyzeRequest(title=prepared.title, text=prepared.text)
+        )
+
+    def prepare(self, file: UploadFile, title: str | None) -> PreparedContent:
+        """只执行现有 OCR；Task 24 不增加 Vision 模型或图片描述生成。"""
+
         text = self._text_extractor.extract(
             file.filename,
             file.content_type,
@@ -24,7 +32,7 @@ class ImageAnalyzeService:
         )
         normalized_title = title.strip() if title and title.strip() else None
         fallback_title = (file.filename or "图片")[:255]
-        # OCR 原文仅作为本次 Analyze 输入，不在 Python 或 Java 中额外持久化。
-        return self._analyze_service.analyze(
-            AnalyzeRequest(title=normalized_title or fallback_title, text=text)
+        return PreparedContent(
+            title=normalized_title or fallback_title,
+            text=text,
         )

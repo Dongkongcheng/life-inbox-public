@@ -34,11 +34,11 @@
 
 - `q` 会先去除首尾空白，空白查询返回 400；
 - 最长 200 个 Java 字符，超长查询返回 400；
-- `status = ACTIVE`、全部已提供过滤参数与七类 OR 匹配同时生效，归档项不能通过任一匹配路径返回；
-- 匹配字段为 `title`、`content`、`summary`、`category`、`tags`、`keywords`、`entities`，七类信息使用 OR 语义；
+- `status = ACTIVE`、全部已提供过滤参数与八类 OR 匹配同时生效，归档项不能通过任一匹配路径返回；
+- 匹配字段为 `title`、`content`、`summary`、`category`、`tags`、`keywords`、`entities`、`searchable_content`，八类信息使用 OR 语义；
 - tags、keywords、entities 通过现有关系表或子表查询；同一条目有多个匹配值时仍只返回一次；
 - `%`、`_` 按普通搜索文本处理，不作为用户可控的 LIKE 通配符；
-- 基础相关性顺序为：标题精确匹配、标题包含、keyword、tag、entity、summary、content、category；
+- 基础相关性顺序为：标题精确匹配、标题包含、keyword、tag、entity、summary、searchable content、content、category；
 - 同一相关性按 `created_time DESC, id DESC` 确定顺序；
 - 响应仍是与 `GET /api/inbox` 相同的 InboxItem 数组，合法查询无结果时返回空数组；
 - 相关性只用于数据库运行时排序，不持久化或返回 Search score；
@@ -95,6 +95,9 @@ fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，�
 | --- | --- | --- | --- |
 | GET | `/health` | 无 | `{status, service}` |
 | POST | `/analyze` | JSON `{title?, text}` | AnalyzeResult |
+| POST | `/prepare/url` | JSON `{title?, url}` | `{title?, text}`；只复用安全网页提取，不调用 LLM |
+| POST | `/prepare/file` | multipart `file`, `title?` | `{title?, text}`；只复用文档提取，不调用 LLM |
+| POST | `/prepare/image` | multipart `file`, `title?` | `{title?, text}`；只复用 OCR，不调用 LLM |
 | POST | `/analyze/url` | JSON `{title?, url}` | AnalyzeResult |
 | POST | `/analyze/file` | multipart `file`, `title?` | AnalyzeResult |
 | POST | `/analyze/image` | multipart `file`, `title?` | AnalyzeResult |
@@ -115,6 +118,9 @@ AnalyzeResult 固定包含：
 Category 只能是：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 为 1～5 个，Keywords 为 0～8 个，Entities 为 0～10 个；Python 和 Java 都会校验。
 
 URL、FILE、IMAGE 提取失败使用有限的 `code/detail` 协议。Java 只允许已知 code 与预期 HTTP 状态组合进入产品响应，未知或畸形错误统一降级为安全的 AI 503。
+
+Java 的当前 Analyze 流程对 URL/FILE/IMAGE 先调用对应 `/prepare/*`，以 Attempt Guard 保存可重建正文，再把正文交给 `/analyze`。
+因此 LLM 失败时已成功提取的 Searchable Content 仍可保留；`/prepare/*` 是内部协议，不是浏览器产品 API。
 
 ## 主要限制
 
