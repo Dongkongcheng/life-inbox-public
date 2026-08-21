@@ -36,19 +36,19 @@ class InboxControllerTests {
         InboxController controller = new InboxController(inboxService, analyzeService);
         InboxItem item = new InboxItem();
         item.setId(1L);
-        item.setAiStatus(AiProcessingStatus.FAILED);
-        item.setAiErrorMessage("网页读取超时");
+        item.setAiStatus(AiProcessingStatus.PROCESSING);
+        item.setAiAttemptId("attempt-1");
         item.setAiStartedTime(LocalDateTime.of(2026, 8, 20, 21, 0));
-        item.setAiFinishedTime(LocalDateTime.of(2026, 8, 20, 21, 1));
+        item.setAiProcessingStale(true);
         when(inboxService.list()).thenReturn(List.of(item));
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mockMvc.perform(get("/api/inbox"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].aiStatus").value("FAILED"))
-                .andExpect(jsonPath("$[0].aiErrorMessage").value("网页读取超时"))
+                .andExpect(jsonPath("$[0].aiStatus").value("PROCESSING"))
+                .andExpect(jsonPath("$[0].aiAttemptId").value("attempt-1"))
                 .andExpect(jsonPath("$[0].aiStartedTime").value("2026-08-20T21:00:00"))
-                .andExpect(jsonPath("$[0].aiFinishedTime").value("2026-08-20T21:01:00"));
+                .andExpect(jsonPath("$[0].aiProcessingStale").value(true));
     }
 
     @Test

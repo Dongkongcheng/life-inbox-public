@@ -47,16 +47,23 @@ public class InboxAnalysisPersistenceService {
     @Transactional
     public InboxItem replaceAnalysis(
             Long inboxItemId,
+            String attemptId,
             String summary,
             String category,
             List<NormalizedTag> tags,
             List<String> keywords,
             List<NormalizedEntity> entities
     ) {
-        // 先更新主表取得行锁，使同一条记录的并发重分析按顺序完整替换，而不是混合子表结果。
-        int updatedRows = inboxItemMapper.updateAnalysis(inboxItemId, summary, category);
+        // 第一条写入同时取得行锁并校验 Attempt；旧请求不能碰主表或任何分析子表。
+        int updatedRows = inboxItemMapper.updateAnalysis(
+                inboxItemId,
+                attemptId,
+                AiProcessingStatus.PROCESSING,
+                summary,
+                category
+        );
         if (updatedRows != 1) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "AI 分析尝试已失效");
         }
 
         inboxTagMapper.deleteByInboxItemId(inboxItemId);
@@ -85,6 +92,7 @@ public class InboxAnalysisPersistenceService {
         // SUCCESS 必须最后写入并与五类结果一起提交；此前任一步失败都会整体回滚。
         int statusRows = inboxItemMapper.markAnalysisSuccess(
                 inboxItemId,
+                attemptId,
                 AiProcessingStatus.PROCESSING,
                 AiProcessingStatus.SUCCESS
         );

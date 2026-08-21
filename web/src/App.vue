@@ -295,12 +295,22 @@ const hasAnalysis = (item) => Boolean(
 const effectiveAiStatus = (item) => analyzingId.value === item.id
   ? 'PROCESSING'
   : item.aiStatus || 'NOT_PROCESSED'
-const aiStatusLabel = (item) => aiStatusLabels[effectiveAiStatus(item)] || '未分析'
+// stale 由 Java 按统一阈值计算；Vue 只负责展示，不能自行决定是否允许接管。
+const isStaleProcessing = (item) => analyzingId.value !== item.id
+  && item.aiStatus === 'PROCESSING'
+  && item.aiProcessingStale === true
+const isFreshProcessing = (item) => effectiveAiStatus(item) === 'PROCESSING'
+  && !isStaleProcessing(item)
+const aiStatusLabel = (item) => isStaleProcessing(item)
+  ? '可能已中断'
+  : aiStatusLabels[effectiveAiStatus(item)] || '未分析'
 const aiStatusClass = (item) => `ai-status-${effectiveAiStatus(item).toLowerCase()}`
 const analysisButtonLabel = (item) => {
+  if (isStaleProcessing(item)) return '恢复并重试'
   const status = effectiveAiStatus(item)
   if (status === 'PROCESSING') return '分析中…'
-  return status === 'SUCCESS' || status === 'FAILED' ? '重新分析' : 'AI 分析'
+  if (status === 'FAILED') return '重试分析'
+  return status === 'SUCCESS' ? '重新分析' : 'AI 分析'
 }
 
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
@@ -448,7 +458,7 @@ onBeforeUnmount(clearSelectedUpload)
           v-for="item in inboxItems"
           :key="item.id"
           class="inbox-item"
-          :aria-busy="effectiveAiStatus(item) === 'PROCESSING'"
+          :aria-busy="isFreshProcessing(item)"
         >
           <div class="item-top">
             <div class="item-meta">
@@ -586,11 +596,18 @@ onBeforeUnmount(clearSelectedUpload)
           >
             正在显示上一次成功的 AI 结果。
           </p>
+          <p
+            v-if="isStaleProcessing(item)"
+            class="analysis-status-note"
+            role="status"
+          >
+            上一次 AI 分析可能已异常中断。可以重新尝试。
+          </p>
           <div v-if="isAnalyzableItem(item)" class="analysis-actions" aria-live="polite">
             <button
               class="analysis-button"
               type="button"
-              :disabled="analyzingId !== null || effectiveAiStatus(item) === 'PROCESSING' || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
+              :disabled="analyzingId !== null || isFreshProcessing(item) || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
               @click="analyzeItem(item)"
             >
               {{ analysisButtonLabel(item) }}

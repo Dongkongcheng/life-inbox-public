@@ -172,8 +172,11 @@ V0.2 的目标是：
   * ✅ `PROCESSING`
   * ✅ `SUCCESS`
   * ✅ `FAILED`
-* ⏳ Retry / Failure Recovery
-* ⏳ Automatic AI Analyze
+* ✅ Manual AI Retry
+* ✅ Stale PROCESSING Recovery
+* ✅ AI Attempt Protection
+* ⏳ Automatic Analyze After Capture
+* ⏳ Background AI Processing
 
 > 注意：以上带有 `⏳` 的功能属于开发计划，目前尚未完成。
 
@@ -657,6 +660,14 @@ docs/sql/v0.2-task8-add-ai-processing-status.sql
 
 状态只有四种：`NOT_PROCESSED`、`PROCESSING`、`SUCCESS`、`FAILED`。新 Capture 仍立即保存为 `NOT_PROCESSED`，不会自动调用 AI；手工 Analyze 在基础校验后用数据库条件 UPDATE 原子领取任务并提交 `PROCESSING`，因此同一条记录的重复请求会返回 409。远程 Python/LLM 调用不处于数据库事务中；五类结果全部持久化成功后，才在同一个短事务中设置 `SUCCESS`。任何提取、OCR、LLM、校验或持久化失败都会另用短事务设置 `FAILED`，但不会清空上一次成功结果。
 
+V0.2 Task 9 增加手动 Retry、stale PROCESSING 恢复和 Attempt 并发保护。更新后端前还需执行：
+
+```text
+docs/sql/v0.2-task9-add-ai-attempt-id.sql
+```
+
+每次点击统一 Analyze 接口都会生成新的 `ai_attempt_id`。FAILED 和 SUCCESS 可直接开始新 Attempt；未超过阈值的 PROCESSING 仍返回 409，超过 `life-inbox.ai.processing-stale-after` 的 PROCESSING 可以由用户手动接管。默认阈值是 5 分钟，它明显大于当前 Java 30 秒 Analyze 读取超时，也为网页提取、PDF、OCR 和较慢 LLM 留出余量。成功与失败写入都必须匹配当前 attemptId，因此被接管的旧请求即使迟到也不能覆盖新结果或修改新状态。stale 是根据 `PROCESSING + aiStartedTime` 动态计算的 `aiProcessingStale`，不是第五种数据库状态。
+
 进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
 ```powershell
@@ -740,7 +751,7 @@ POST http://localhost:8080/api/inbox/{id}/ai/analyze
 
 该产品接口同时支持 TEXT、URL、FILE 和 IMAGE。前端不需要知道 Java 内部调用的是 Python `/analyze`、`/analyze/url`、`/analyze/file` 还是 `/analyze/image`；IMAGE 当前只做 OCR-based Analyze，不做通用 Vision。
 
-`GET /api/inbox` 和 Analyze 响应会直接返回 `aiStatus`、`aiErrorMessage`、`aiStartedTime`、`aiFinishedTime`，前端无需额外查询状态接口。`FAILED` 只表示最近一次尝试失败；如果条目已有旧结果，页面会继续展示并提示“正在显示上一次成功的 AI 结果”。当前 Analyze 仍是同步请求，不使用后台线程、Redis 或 MQ。若 Spring Boot 在 `PROCESSING` 后突然退出，状态可能暂时保留为 `PROCESSING`；stale PROCESSING 检测、Retry 和 Failure Recovery 留给后续 Task。
+`GET /api/inbox` 和 Analyze 响应会直接返回 `aiStatus`、`aiErrorMessage`、`aiStartedTime`、`aiFinishedTime`、`aiProcessingStale`，前端无需额外查询状态接口。`FAILED` 只表示最近一次尝试失败；如果条目已有旧结果，页面会继续展示并提示“正在显示上一次成功的 AI 结果”。FAILED 显示“重试分析”，fresh PROCESSING 禁止重复点击，stale PROCESSING 显示“恢复并重试”。当前 Analyze 仍是同步手工请求，不使用自动重试、Scheduler、后台线程、Redis 或 MQ。
 
 旧 `POST /api/inbox/{id}/ai/summary` 也暂时保留为兼容入口，并委托同一个 Analyze Service。
 
@@ -843,6 +854,8 @@ Summary + Category + Tags
   + Keywords + Entities
         ↓
 AI Processing Status
+        +
+Manual Retry + Stale Recovery + Attempt Protection
 ```
 
 ---

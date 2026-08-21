@@ -9,6 +9,7 @@ import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.core.io.ByteArrayResource;
@@ -33,6 +34,8 @@ import static org.mockito.Mockito.when;
 
 class InboxAnalyzeServiceTests {
 
+    private static final String ATTEMPT_ID = "attempt-1";
+
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
     private final AiServiceClient aiServiceClient = mock(AiServiceClient.class);
     private final FileStorageService fileStorageService = mock(FileStorageService.class);
@@ -49,6 +52,12 @@ class InboxAnalyzeServiceTests {
             statusService,
             persistenceService
     );
+
+    @BeforeEach
+    void prepareAttempt() {
+        when(statusService.markProcessing(anyLong())).thenReturn(ATTEMPT_ID);
+        when(statusService.markFailed(anyLong(), any(), any())).thenReturn(true);
+    }
 
     @Test
     void rejectsMissingInboxItem() {
@@ -84,6 +93,7 @@ class InboxAnalyzeServiceTests {
         updated.setSourceUrl("https://example.com/spring-ai");
         when(persistenceService.replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "URL 摘要",
                 "技术学习",
                 List.of(new NormalizedTag("Spring AI", "spring ai")),
@@ -101,6 +111,7 @@ class InboxAnalyzeServiceTests {
         verify(aiServiceClient, never()).analyze(any(), any());
         verify(persistenceService).replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "URL 摘要",
                 "技术学习",
                 List.of(new NormalizedTag("Spring AI", "spring ai")),
@@ -157,6 +168,7 @@ class InboxAnalyzeServiceTests {
         InboxItem updated = item("FILE", null);
         when(persistenceService.replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "FILE 摘要",
                 "技术学习",
                 List.of(new NormalizedTag("PDF", "pdf")),
@@ -175,6 +187,7 @@ class InboxAnalyzeServiceTests {
         );
         verify(persistenceService).replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "FILE 摘要",
                 "技术学习",
                 List.of(new NormalizedTag("PDF", "pdf")),
@@ -210,6 +223,7 @@ class InboxAnalyzeServiceTests {
         InboxItem updated = item("IMAGE", null);
         when(persistenceService.replaceAnalysis(
                 2L,
+                ATTEMPT_ID,
                 "IMAGE 摘要",
                 "学习成长",
                 List.of(new NormalizedTag("OCR", "ocr")),
@@ -224,6 +238,7 @@ class InboxAnalyzeServiceTests {
         verify(aiServiceClient).analyzeImage("课程通知.png", resource, MediaType.IMAGE_PNG);
         verify(persistenceService).replaceAnalysis(
                 2L,
+                ATTEMPT_ID,
                 "IMAGE 摘要",
                 "学习成长",
                 List.of(new NormalizedTag("OCR", "ocr")),
@@ -291,6 +306,7 @@ class InboxAnalyzeServiceTests {
         );
         when(persistenceService.replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "新的摘要",
                 "技术学习",
                 expectedTags,
@@ -307,6 +323,7 @@ class InboxAnalyzeServiceTests {
         verify(aiServiceClient).analyze("学习笔记", "原始正文");
         verify(persistenceService).replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "新的摘要",
                 "技术学习",
                 expectedTags,
@@ -452,6 +469,7 @@ class InboxAnalyzeServiceTests {
         InboxItem updated = item("TEXT", "你好");
         when(persistenceService.replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "一句问候。",
                 "其他",
                 List.of(new NormalizedTag("问候", "问候")),
@@ -466,6 +484,7 @@ class InboxAnalyzeServiceTests {
         order.verify(aiServiceClient).analyze(null, "你好");
         order.verify(persistenceService).replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "一句问候。",
                 "其他",
                 List.of(new NormalizedTag("问候", "问候")),
@@ -509,7 +528,7 @@ class InboxAnalyzeServiceTests {
         assertEquals(List.of("旧标签"), original.getTags());
         assertEquals(List.of("旧关键词"), original.getKeywords());
         assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), original.getEntities());
-        verify(statusService).markFailed(1L, "AI 服务暂时不可用");
+        verify(statusService).markFailed(1L, ATTEMPT_ID, "AI 服务暂时不可用");
         verifyNoInteractions(persistenceService);
     }
 
@@ -525,7 +544,7 @@ class InboxAnalyzeServiceTests {
         assertThrows(UrlAnalyzeException.class, () -> analyzeService.analyze(1L));
 
         assertOldUrlAnalysis(original);
-        verify(statusService).markFailed(1L, "URL 被安全策略阻止");
+        verify(statusService).markFailed(1L, ATTEMPT_ID, "URL 被安全策略阻止");
         verifyNoInteractions(persistenceService);
     }
 
@@ -684,6 +703,7 @@ class InboxAnalyzeServiceTests {
         );
         when(persistenceService.replaceAnalysis(
                 1L,
+                ATTEMPT_ID,
                 "新摘要",
                 "技术学习",
                 List.of(new NormalizedTag("Java", "java")),
@@ -698,7 +718,7 @@ class InboxAnalyzeServiceTests {
         assertEquals(List.of("旧标签"), original.getTags());
         assertEquals(List.of("旧关键词"), original.getKeywords());
         assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), original.getEntities());
-        verify(statusService).markFailed(1L, "AI 结果保存失败");
+        verify(statusService).markFailed(1L, ATTEMPT_ID, "AI 结果保存失败");
     }
 
     private AiAnalyzeResponse response(String summary, String category, List<String> tags) {
@@ -708,6 +728,7 @@ class InboxAnalyzeServiceTests {
     private void verifyPersistenceNeverStarted() {
         verify(persistenceService, never()).replaceAnalysis(
                 anyLong(),
+                any(),
                 any(),
                 any(),
                 any(),
