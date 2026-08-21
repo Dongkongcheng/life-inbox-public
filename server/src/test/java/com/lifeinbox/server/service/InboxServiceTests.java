@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxEntity;
+import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxEntityMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
@@ -83,6 +84,7 @@ class InboxServiceTests {
         assertEquals("文字标题", captor.getValue().getTitle());
         assertEquals("文字内容", captor.getValue().getContent());
         assertEquals(null, captor.getValue().getSourceUrl());
+        assertEquals(AiProcessingStatus.NOT_PROCESSED, captor.getValue().getAiStatus());
         verify(urlMetadataService, never()).resolveTitle(any());
     }
 
@@ -112,6 +114,7 @@ class InboxServiceTests {
         assertEquals("OpenAI Java", captor.getValue().getTitle());
         assertEquals(null, captor.getValue().getContent());
         assertEquals("https://github.com/openai/openai-java", captor.getValue().getSourceUrl());
+        assertEquals(AiProcessingStatus.NOT_PROCESSED, captor.getValue().getAiStatus());
         verify(urlMetadataService, never()).resolveTitle(any());
     }
 
@@ -213,6 +216,7 @@ class InboxServiceTests {
         assertEquals("/api/files/" + storedName, captor.getValue().getFileUrl());
         assertEquals("ACTIVE", captor.getValue().getStatus());
         assertEquals(0, captor.getValue().getFavorite());
+        assertEquals(AiProcessingStatus.NOT_PROCESSED, captor.getValue().getAiStatus());
         verify(fileStorageService, never()).delete(storedName);
     }
 
@@ -260,6 +264,7 @@ class InboxServiceTests {
         assertEquals("/api/files/" + storedName, captor.getValue().getFileUrl());
         assertEquals("ACTIVE", captor.getValue().getStatus());
         assertEquals(0, captor.getValue().getFavorite());
+        assertEquals(AiProcessingStatus.NOT_PROCESSED, captor.getValue().getAiStatus());
         verify(fileStorageService, never()).delete(storedName);
     }
 
@@ -305,12 +310,11 @@ class InboxServiceTests {
         inboxItem.setId(1L);
         inboxItem.setStatus("ACTIVE");
         when(inboxItemMapper.selectById(1L)).thenReturn(inboxItem);
-        when(inboxItemMapper.updateById(inboxItem)).thenReturn(1);
+        when(inboxItemMapper.updateInboxStatus(1L, "ARCHIVED")).thenReturn(1);
 
         assertDoesNotThrow(() -> inboxService.archive(1L));
 
-        assertEquals("ARCHIVED", inboxItem.getStatus());
-        verify(inboxItemMapper).updateById(inboxItem);
+        verify(inboxItemMapper).updateInboxStatus(1L, "ARCHIVED");
     }
 
     @Test
@@ -332,13 +336,12 @@ class InboxServiceTests {
         inboxItem.setStatus("ACTIVE");
         inboxItem.setFavorite(0);
         when(inboxItemMapper.selectById(1L)).thenReturn(inboxItem);
-        when(inboxItemMapper.updateById(inboxItem)).thenReturn(1);
+        when(inboxItemMapper.updateFavorite(1L, 1)).thenReturn(1);
 
         assertDoesNotThrow(() -> inboxService.favorite(1L));
 
-        assertEquals(1, inboxItem.getFavorite());
         assertEquals("ACTIVE", inboxItem.getStatus());
-        verify(inboxItemMapper).updateById(inboxItem);
+        verify(inboxItemMapper).updateFavorite(1L, 1);
     }
 
     @Test
@@ -348,13 +351,12 @@ class InboxServiceTests {
         inboxItem.setStatus("ACTIVE");
         inboxItem.setFavorite(1);
         when(inboxItemMapper.selectById(1L)).thenReturn(inboxItem);
-        when(inboxItemMapper.updateById(inboxItem)).thenReturn(1);
+        when(inboxItemMapper.updateFavorite(1L, 0)).thenReturn(1);
 
         assertDoesNotThrow(() -> inboxService.unfavorite(1L));
 
-        assertEquals(0, inboxItem.getFavorite());
         assertEquals("ACTIVE", inboxItem.getStatus());
-        verify(inboxItemMapper).updateById(inboxItem);
+        verify(inboxItemMapper).updateFavorite(1L, 0);
     }
 
     @Test

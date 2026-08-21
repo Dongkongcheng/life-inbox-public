@@ -29,11 +29,21 @@ public class InboxItem {
     /** TEXT 正文。 */
     private String content;
 
-    /** AI 为 TEXT/URL/FILE 生成的摘要；原始内容仍然是业务事实来源。 */
+    /** AI 为 TEXT/URL/FILE/IMAGE 生成的摘要；原始内容仍然是业务事实来源。 */
     private String summary;
 
     /** AI 从有限集合中选择的粗粒度分类。 */
     private String category;
+
+    /** 最近一次统一 AI Analyze 的业务状态；新 Capture 不会自动触发分析。 */
+    private AiProcessingStatus aiStatus = AiProcessingStatus.NOT_PROCESSED;
+
+    /** 最近一次分析失败的安全简短说明，不保存异常栈或上游原始响应。 */
+    private String aiErrorMessage;
+
+    private LocalDateTime aiStartedTime;
+
+    private LocalDateTime aiFinishedTime;
 
     /** 标签存放在关系表中，这个字段只用于 API 返回，不映射 inbox_item 列。 */
     @TableField(exist = false)
@@ -117,6 +127,38 @@ public class InboxItem {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    public AiProcessingStatus getAiStatus() {
+        return aiStatus;
+    }
+
+    public void setAiStatus(AiProcessingStatus aiStatus) {
+        this.aiStatus = aiStatus;
+    }
+
+    public String getAiErrorMessage() {
+        return aiErrorMessage;
+    }
+
+    public void setAiErrorMessage(String aiErrorMessage) {
+        this.aiErrorMessage = aiErrorMessage;
+    }
+
+    public LocalDateTime getAiStartedTime() {
+        return aiStartedTime;
+    }
+
+    public void setAiStartedTime(LocalDateTime aiStartedTime) {
+        this.aiStartedTime = aiStartedTime;
+    }
+
+    public LocalDateTime getAiFinishedTime() {
+        return aiFinishedTime;
+    }
+
+    public void setAiFinishedTime(LocalDateTime aiFinishedTime) {
+        this.aiFinishedTime = aiFinishedTime;
     }
 
     public List<String> getTags() {

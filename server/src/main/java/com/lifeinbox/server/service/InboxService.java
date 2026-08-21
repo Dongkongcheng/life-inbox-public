@@ -202,8 +202,8 @@ public class InboxService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }
 
-        inboxItem.setStatus(STATUS_ARCHIVED);
-        int updatedRows = inboxItemMapper.updateById(inboxItem);
+        // 只更新归档列，避免并发 Analyze 时用查询到的旧实体覆盖 AI 状态或结果。
+        int updatedRows = inboxItemMapper.updateInboxStatus(id, STATUS_ARCHIVED);
         if (updatedRows == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }
@@ -223,8 +223,7 @@ public class InboxService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }
 
-        inboxItem.setFavorite(favorite);
-        int updatedRows = inboxItemMapper.updateById(inboxItem);
+        int updatedRows = inboxItemMapper.updateFavorite(id, favorite);
         if (updatedRows == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }

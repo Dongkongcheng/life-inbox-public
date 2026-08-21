@@ -1,6 +1,7 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxEntity;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxEntityMapper;
@@ -79,6 +80,16 @@ public class InboxAnalysisPersistenceService {
             if (inboxEntityMapper.insertEntity(inboxItemId, entity.name(), entity.type()) != 1) {
                 throw new IllegalStateException("AI 实体保存失败");
             }
+        }
+
+        // SUCCESS 必须最后写入并与五类结果一起提交；此前任一步失败都会整体回滚。
+        int statusRows = inboxItemMapper.markAnalysisSuccess(
+                inboxItemId,
+                AiProcessingStatus.PROCESSING,
+                AiProcessingStatus.SUCCESS
+        );
+        if (statusRows != 1) {
+            throw new IllegalStateException("AI 成功状态保存失败");
         }
 
         InboxItem updatedItem = inboxItemMapper.selectById(inboxItemId);

@@ -1,6 +1,7 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxEntity;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxEntityMapper;
@@ -58,6 +59,11 @@ class InboxAnalysisPersistenceServiceTests {
         when(inboxKeywordMapper.insertKeyword(1L, "Tool Calling")).thenReturn(1);
         when(inboxEntityMapper.insertEntity(1L, "Spring AI", "TECHNOLOGY")).thenReturn(1);
         when(inboxEntityMapper.insertEntity(1L, "OpenAI", "ORGANIZATION")).thenReturn(1);
+        when(inboxItemMapper.markAnalysisSuccess(
+                1L,
+                AiProcessingStatus.PROCESSING,
+                AiProcessingStatus.SUCCESS
+        )).thenReturn(1);
         InboxItem updated = new InboxItem();
         updated.setId(1L);
         updated.setSummary("摘要");
@@ -111,6 +117,11 @@ class InboxAnalysisPersistenceServiceTests {
         order.verify(inboxEntityMapper).deleteByInboxItemId(1L);
         order.verify(inboxEntityMapper).insertEntity(1L, "Spring AI", "TECHNOLOGY");
         order.verify(inboxEntityMapper).insertEntity(1L, "OpenAI", "ORGANIZATION");
+        order.verify(inboxItemMapper).markAnalysisSuccess(
+                1L,
+                AiProcessingStatus.PROCESSING,
+                AiProcessingStatus.SUCCESS
+        );
     }
 
     @Test
@@ -182,6 +193,33 @@ class InboxAnalysisPersistenceServiceTests {
         verify(inboxTagMapper).insertRelation(1L, 10L);
         verify(inboxKeywordMapper).insertKeyword(1L, "ChatModel");
         verify(inboxEntityMapper).deleteByInboxItemId(1L);
+        verify(inboxItemMapper, never()).selectById(anyLong());
+    }
+
+    @Test
+    void successStatusFailureEscapesAndSkipsReload() {
+        when(inboxItemMapper.updateAnalysis(1L, "新摘要", "技术学习")).thenReturn(1);
+        when(tagMapper.selectIdByNormalizedName("java")).thenReturn(10L);
+        when(inboxTagMapper.insertRelation(1L, 10L)).thenReturn(1);
+        when(inboxItemMapper.markAnalysisSuccess(
+                1L,
+                AiProcessingStatus.PROCESSING,
+                AiProcessingStatus.SUCCESS
+        )).thenReturn(0);
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> persistenceService.replaceAnalysis(
+                        1L,
+                        "新摘要",
+                        "技术学习",
+                        List.of(new NormalizedTag("Java", "java")),
+                        List.of(),
+                        List.of()
+                )
+        );
+
+        assertEquals("AI 成功状态保存失败", exception.getMessage());
         verify(inboxItemMapper, never()).selectById(anyLong());
     }
 

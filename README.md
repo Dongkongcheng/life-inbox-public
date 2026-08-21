@@ -167,8 +167,13 @@ V0.2 的目标是：
 * ✅ IMAGE OCR
 * ✅ IMAGE OCR-based AI Analyze（显式触发）
 * ⏳ General Image Vision
-* ⏳ AI Processing Status
-* ⏳ AI Failure Handling
+* ✅ AI Processing Status
+  * ✅ `NOT_PROCESSED`
+  * ✅ `PROCESSING`
+  * ✅ `SUCCESS`
+  * ✅ `FAILED`
+* ⏳ Retry / Failure Recovery
+* ⏳ Automatic AI Analyze
 
 > 注意：以上带有 `⏳` 的功能属于开发计划，目前尚未完成。
 
@@ -644,6 +649,14 @@ Python 服务。
 
 V0.2 Task 7 让 IMAGE 与 TEXT、URL、FILE 复用同一套 AI Analyze Pipeline。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；截图或文字图片由 Python 使用本地 RapidOCR 临时提取文字，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
 
+V0.2 Task 8 在 Java 业务层为统一 `InboxItem` 增加 AI Processing Status。更新后端前需先执行：
+
+```text
+docs/sql/v0.2-task8-add-ai-processing-status.sql
+```
+
+状态只有四种：`NOT_PROCESSED`、`PROCESSING`、`SUCCESS`、`FAILED`。新 Capture 仍立即保存为 `NOT_PROCESSED`，不会自动调用 AI；手工 Analyze 在基础校验后用数据库条件 UPDATE 原子领取任务并提交 `PROCESSING`，因此同一条记录的重复请求会返回 409。远程 Python/LLM 调用不处于数据库事务中；五类结果全部持久化成功后，才在同一个短事务中设置 `SUCCESS`。任何提取、OCR、LLM、校验或持久化失败都会另用短事务设置 `FAILED`，但不会清空上一次成功结果。
+
 进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
 ```powershell
@@ -727,6 +740,8 @@ POST http://localhost:8080/api/inbox/{id}/ai/analyze
 
 该产品接口同时支持 TEXT、URL、FILE 和 IMAGE。前端不需要知道 Java 内部调用的是 Python `/analyze`、`/analyze/url`、`/analyze/file` 还是 `/analyze/image`；IMAGE 当前只做 OCR-based Analyze，不做通用 Vision。
 
+`GET /api/inbox` 和 Analyze 响应会直接返回 `aiStatus`、`aiErrorMessage`、`aiStartedTime`、`aiFinishedTime`，前端无需额外查询状态接口。`FAILED` 只表示最近一次尝试失败；如果条目已有旧结果，页面会继续展示并提示“正在显示上一次成功的 AI 结果”。当前 Analyze 仍是同步请求，不使用后台线程、Redis 或 MQ。若 Spring Boot 在 `PROCESSING` 后突然退出，状态可能暂时保留为 `PROCESSING`；stale PROCESSING 检测、Retry 和 Failure Recovery 留给后续 Task。
+
 旧 `POST /api/inbox/{id}/ai/summary` 也暂时保留为兼容入口，并委托同一个 Analyze Service。
 
 可以在 PowerShell 中手工验证完整链路：
@@ -770,7 +785,7 @@ Invoke-RestMethod -Method Post `
 
 > Windows PowerShell 5.1 的 `Invoke-RestMethod` 不支持 `-Form`，可直接通过网页上传，或使用 PowerShell 7 执行上述示例。
 
-随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category`、`tags`、`keywords` 和 `entities`。再次调用会把五项作为一组原子替换，而不是追加旧结果。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python 的 LLM 故障仍使用原有 502/503/504 语义；URL 和 FILE 接口会额外区分各自的抓取或解析错误。Java 只映射受控错误码，不向前端暴露网页、文件内容或上游内部响应。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
+随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category`、`tags`、`keywords`、`entities` 和 AI 状态字段。再次调用会把五项作为一组原子替换，而不是追加旧结果。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python 的 LLM 故障仍使用原有 502/503/504 语义；URL、FILE 和 IMAGE 接口会额外区分各自的读取、解析或 OCR 错误。Java 只映射受控错误码，不向前端暴露网页、文件内容或上游内部响应。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
 
 目标架构：
 
@@ -826,6 +841,8 @@ Python AI Engine
 TEXT + URL + FILE + IMAGE OCR AI Analyze
 Summary + Category + Tags
   + Keywords + Entities
+        ↓
+AI Processing Status
 ```
 
 ---
