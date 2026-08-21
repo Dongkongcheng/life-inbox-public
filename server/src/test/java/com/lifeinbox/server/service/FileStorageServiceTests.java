@@ -1,6 +1,7 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.core.io.Resource;
@@ -314,6 +315,72 @@ class FileStorageServiceTests {
         );
 
         assertEquals("FILE_TOO_LARGE", exception.getCode());
+        assertEquals(HttpStatus.CONTENT_TOO_LARGE, exception.getStatus());
+    }
+
+    @Test
+    void safelyLoadsManagedPngForImageAnalysis() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.png";
+        byte[] content = new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47};
+        Files.write(tempDirectory.resolve(storedName), content);
+
+        FileStorageService.AnalyzableFile image = service.loadImageForAnalysis(
+                "/api/files/" + storedName
+        );
+
+        assertEquals(storedName, image.resource().getFilename());
+        assertEquals("image/png", image.mediaType().toString());
+        assertEquals(content.length, image.size());
+        assertArrayEquals(content, image.resource().getInputStream().readAllBytes());
+    }
+
+    @Test
+    void imageAnalysisRejectsMissingUnsafeAndUnsupportedManagedFiles() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        String gifName = "550e8400-e29b-41d4-a716-446655440000.gif";
+        Files.write(tempDirectory.resolve(gifName), new byte[]{1});
+
+        ImageAnalyzeException missing = assertThrows(
+                ImageAnalyzeException.class,
+                () -> service.loadImageForAnalysis(
+                        "/api/files/550e8400-e29b-41d4-a716-446655440000.png"
+                )
+        );
+        ImageAnalyzeException unsafe = assertThrows(
+                ImageAnalyzeException.class,
+                () -> service.loadImageForAnalysis("/api/files/../application.yaml")
+        );
+        ImageAnalyzeException malformed = assertThrows(
+                ImageAnalyzeException.class,
+                () -> service.loadImageForAnalysis("/api/files/not-a-managed-name")
+        );
+        ImageAnalyzeException unsupported = assertThrows(
+                ImageAnalyzeException.class,
+                () -> service.loadImageForAnalysis("/api/files/" + gifName)
+        );
+
+        assertEquals("IMAGE_NOT_FOUND", missing.getCode());
+        assertEquals("IMAGE_NOT_FOUND", unsafe.getCode());
+        assertEquals("IMAGE_NOT_FOUND", malformed.getCode());
+        assertEquals("IMAGE_TYPE_UNSUPPORTED", unsupported.getCode());
+    }
+
+    @Test
+    void imageAnalysisRejectsFileOverTenMegabytes() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.jpg";
+        Files.write(
+                tempDirectory.resolve(storedName),
+                new byte[(int) FileStorageService.MAX_AI_ANALYZE_FILE_SIZE + 1]
+        );
+
+        ImageAnalyzeException exception = assertThrows(
+                ImageAnalyzeException.class,
+                () -> service.loadImageForAnalysis("/api/files/" + storedName)
+        );
+
+        assertEquals("IMAGE_TOO_LARGE", exception.getCode());
         assertEquals(HttpStatus.CONTENT_TOO_LARGE, exception.getStatus());
     }
 }

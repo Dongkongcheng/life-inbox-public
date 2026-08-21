@@ -6,6 +6,7 @@ import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -475,6 +476,126 @@ class AiServiceClientTests {
         }
     }
 
+    @Test
+    void analyzeImageSendsMultipartAndParsesCompleteResponse() throws IOException {
+        AtomicReference<String> contentType = new AtomicReference<>();
+        AtomicReference<byte[]> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/image", exchange -> {
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            requestBody.set(exchange.getRequestBody().readAllBytes());
+            byte[] body = completeAnalysisJson().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            ByteArrayResource resource = namedImageResource();
+
+            AiAnalyzeResponse response = client.analyzeImage(
+                    "Course notice",
+                    resource,
+                    MediaType.IMAGE_PNG
+            );
+
+            assertEquals("结构化摘要", response.summary());
+            String multipartText = new String(requestBody.get(), StandardCharsets.ISO_8859_1);
+            assertEquals(true, contentType.get().startsWith("multipart/form-data;boundary="));
+            assertEquals(true, multipartText.contains("name=\"file\""));
+            assertEquals(true, multipartText.contains(
+                    "filename=\"550e8400-e29b-41d4-a716-446655440000.png\""
+            ));
+            assertEquals(true, multipartText.contains("Content-Type: image/png"));
+            assertEquals(true, multipartText.contains("IMAGE_CONTENT_MARKER"));
+            assertEquals(true, multipartText.contains("Course notice"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzeImageMapsOnlyKnownCodeAndExpectedUpstreamStatus() throws IOException {
+        List<ImageFailureCase> cases = List.of(
+                new ImageFailureCase("IMAGE_TYPE_UNSUPPORTED", 415, HttpStatus.UNSUPPORTED_MEDIA_TYPE),
+                new ImageFailureCase("IMAGE_TOO_LARGE", 413, HttpStatus.CONTENT_TOO_LARGE),
+                new ImageFailureCase("IMAGE_DIMENSIONS_TOO_LARGE", 413, HttpStatus.CONTENT_TOO_LARGE),
+                new ImageFailureCase("IMAGE_INVALID", 422, HttpStatus.UNPROCESSABLE_CONTENT),
+                new ImageFailureCase("IMAGE_OCR_FAILED", 422, HttpStatus.UNPROCESSABLE_CONTENT),
+                new ImageFailureCase("IMAGE_TEXT_EMPTY", 422, HttpStatus.UNPROCESSABLE_CONTENT),
+                new ImageFailureCase("IMAGE_TEXT_TOO_LONG", 413, HttpStatus.CONTENT_TOO_LARGE)
+        );
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/image", exchange -> {
+            ImageFailureCase failure = cases.get(requestIndex.getAndIncrement());
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = ("""
+                    {"code":"%s","detail":"不应透传的内部信息"}
+                    """).formatted(failure.code()).strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(failure.upstreamStatus(), body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            for (ImageFailureCase failure : cases) {
+                ImageAnalyzeException exception = assertThrows(
+                        ImageAnalyzeException.class,
+                        () -> client.analyzeImage(null, namedImageResource(), MediaType.IMAGE_PNG)
+                );
+                assertEquals(failure.code(), exception.getCode());
+                assertEquals(failure.productStatus(), exception.getStatus());
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzeImageKeepsUnknownAndLlmErrorsGeneric() throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/image", exchange -> {
+            int index = requestIndex.getAndIncrement();
+            exchange.getRequestBody().readAllBytes();
+            String responseBody = index == 0
+                    ? "{\"code\":\"UNKNOWN_IMAGE_ERROR\",\"detail\":\"internal\"}"
+                    : index == 1
+                            ? "{\"code\":\"IMAGE_TEXT_EMPTY\",\"detail\":\"wrong status\"}"
+                            : "{\"detail\":\"LLM 服务暂不可用\"}";
+            int status = index == 0 ? 422 : 503;
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            for (int index = 0; index < 3; index++) {
+                assertThrows(
+                        AiServiceUnavailableException.class,
+                        () -> client.analyzeImage(
+                                null,
+                                namedImageResource(),
+                                MediaType.IMAGE_PNG
+                        )
+                );
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private AiServiceClient clientFor(HttpServer server) {
         return new AiServiceClient(
                 "http://127.0.0.1:" + server.getAddress().getPort(),
@@ -489,6 +610,15 @@ class AiServiceClientTests {
             @Override
             public String getFilename() {
                 return "550e8400-e29b-41d4-a716-446655440000.txt";
+            }
+        };
+    }
+
+    private ByteArrayResource namedImageResource() {
+        return new ByteArrayResource("IMAGE_CONTENT_MARKER".getBytes(StandardCharsets.UTF_8)) {
+            @Override
+            public String getFilename() {
+                return "550e8400-e29b-41d4-a716-446655440000.png";
             }
         };
     }
@@ -514,6 +644,13 @@ class AiServiceClientTests {
     }
 
     private record FileFailureCase(
+            String code,
+            int upstreamStatus,
+            HttpStatus productStatus
+    ) {
+    }
+
+    private record ImageFailureCase(
             String code,
             int upstreamStatus,
             HttpStatus productStatus

@@ -20,7 +20,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 编排 TEXT/URL/FILE 的统一 AI Analyze：内容准备方式不同，但共享结果校验和持久化。
+ * 编排 TEXT/URL/FILE/IMAGE 的统一 AI Analyze：内容准备方式不同，但共享结果校验和持久化。
  */
 @Service
 public class InboxAnalyzeService {
@@ -28,6 +28,7 @@ public class InboxAnalyzeService {
     private static final String TYPE_TEXT = "TEXT";
     private static final String TYPE_URL = "URL";
     private static final String TYPE_FILE = "FILE";
+    private static final String TYPE_IMAGE = "IMAGE";
     private static final int MAX_INPUT_CHARS = 20_000;
     private static final int MAX_SUMMARY_CHARS = 2_000;
     private static final int MAX_TAGS = 5;
@@ -124,7 +125,21 @@ public class InboxAnalyzeService {
                     file.mediaType()
             );
         }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前只支持分析 TEXT、URL 或 FILE");
+        if (TYPE_IMAGE.equals(inboxItem.getType())) {
+            // OCR 属于 Python 内容理解职责；Java 仍只发送受管图片内容，不暴露磁盘路径。
+            FileStorageService.AnalyzableFile image = fileStorageService.loadImageForAnalysis(
+                    inboxItem.getFileUrl()
+            );
+            return aiServiceClient.analyzeImage(
+                    inboxItem.getTitle(),
+                    image.resource(),
+                    image.mediaType()
+            );
+        }
+        throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "当前只支持分析 TEXT、URL、FILE 或 IMAGE"
+        );
     }
 
     private void validateText(InboxItem inboxItem) {

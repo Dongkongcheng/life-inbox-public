@@ -3,6 +3,7 @@ package com.lifeinbox.server.controller;
 import com.lifeinbox.server.dto.AiHealthErrorResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,15 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    /** IMAGE 读取或 OCR 失败时只返回 Java allowlist 中的安全错误。 */
+    @ExceptionHandler(ImageAnalyzeException.class)
+    public ResponseEntity<Map<String, String>> handleImageAnalyze(ImageAnalyzeException exception) {
+        return ResponseEntity.status(exception.getStatus()).body(Map.of(
+                "code", exception.getCode(),
+                "detail", exception.getMessage()
+        ));
+    }
 
     /** FILE 读取或解析失败时只返回 Java allowlist 中的安全错误。 */
     @ExceptionHandler(FileAnalyzeException.class)

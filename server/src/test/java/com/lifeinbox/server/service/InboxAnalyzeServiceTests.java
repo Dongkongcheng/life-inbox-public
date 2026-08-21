@@ -6,6 +6,7 @@ import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
@@ -174,16 +175,51 @@ class InboxAnalyzeServiceTests {
     }
 
     @Test
-    void rejectsImageItem() {
-        when(inboxItemMapper.selectById(2L)).thenReturn(item("IMAGE", null));
-
-        ResponseStatusException imageException = assertThrows(
-                ResponseStatusException.class,
-                () -> analyzeService.analyze(2L)
+    void analyzesImageThenUsesTheSameValidationAndPersistence() {
+        InboxItem original = item("IMAGE", null);
+        original.setTitle("课程通知.png");
+        original.setFileUrl("/api/files/00000000-0000-0000-0000-000000000001.png");
+        when(inboxItemMapper.selectById(2L)).thenReturn(original);
+        Resource resource = new ByteArrayResource("png".getBytes()) {
+            @Override
+            public String getFilename() {
+                return "00000000-0000-0000-0000-000000000001.png";
+            }
+        };
+        when(fileStorageService.loadImageForAnalysis(original.getFileUrl())).thenReturn(
+                new FileStorageService.AnalyzableFile(resource, MediaType.IMAGE_PNG, 3)
         );
+        AiAnalyzeResponse response = new AiAnalyzeResponse(
+                "IMAGE 摘要",
+                "学习成长",
+                List.of("OCR"),
+                List.of("课程通知"),
+                List.of()
+        );
+        when(aiServiceClient.analyzeImage("课程通知.png", resource, MediaType.IMAGE_PNG))
+                .thenReturn(response);
+        InboxItem updated = item("IMAGE", null);
+        when(persistenceService.replaceAnalysis(
+                2L,
+                "IMAGE 摘要",
+                "学习成长",
+                List.of(new NormalizedTag("OCR", "ocr")),
+                List.of("课程通知"),
+                List.of()
+        )).thenReturn(updated);
 
-        assertEquals(HttpStatus.BAD_REQUEST, imageException.getStatusCode());
-        verifyNoInteractions(aiServiceClient, fileStorageService, persistenceService);
+        assertEquals(updated, analyzeService.analyze(2L));
+
+        verify(fileStorageService).loadImageForAnalysis(original.getFileUrl());
+        verify(aiServiceClient).analyzeImage("课程通知.png", resource, MediaType.IMAGE_PNG);
+        verify(persistenceService).replaceAnalysis(
+                2L,
+                "IMAGE 摘要",
+                "学习成长",
+                List.of(new NormalizedTag("OCR", "ocr")),
+                List.of("课程通知"),
+                List.of()
+        );
     }
 
     @Test
@@ -527,6 +563,67 @@ class InboxAnalyzeServiceTests {
         verifyNoInteractions(persistenceService);
     }
 
+    @Test
+    void imageReadFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldImageAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        when(fileStorageService.loadImageForAnalysis(original.getFileUrl()))
+                .thenThrow(ImageAnalyzeException.imageNotFound());
+
+        assertThrows(ImageAnalyzeException.class, () -> analyzeService.analyze(1L));
+
+        assertOldImageAnalysis(original);
+        verifyNoInteractions(aiServiceClient, persistenceService);
+    }
+
+    @Test
+    void imageOcrFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldImageAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        Resource resource = new ByteArrayResource("png".getBytes()) {
+            @Override
+            public String getFilename() {
+                return "00000000-0000-0000-0000-000000000001.png";
+            }
+        };
+        when(fileStorageService.loadImageForAnalysis(original.getFileUrl())).thenReturn(
+                new FileStorageService.AnalyzableFile(resource, MediaType.IMAGE_PNG, 3)
+        );
+        ImageAnalyzeException failure = ImageAnalyzeException.fromUpstream(
+                "IMAGE_TEXT_EMPTY",
+                422
+        ).orElseThrow();
+        when(aiServiceClient.analyzeImage("旧截图", resource, MediaType.IMAGE_PNG))
+                .thenThrow(failure);
+
+        assertThrows(ImageAnalyzeException.class, () -> analyzeService.analyze(1L));
+
+        assertOldImageAnalysis(original);
+        verifyNoInteractions(persistenceService);
+    }
+
+    @Test
+    void imageLlmFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldImageAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        Resource resource = new ByteArrayResource("png".getBytes()) {
+            @Override
+            public String getFilename() {
+                return "00000000-0000-0000-0000-000000000001.png";
+            }
+        };
+        when(fileStorageService.loadImageForAnalysis(original.getFileUrl())).thenReturn(
+                new FileStorageService.AnalyzableFile(resource, MediaType.IMAGE_PNG, 3)
+        );
+        when(aiServiceClient.analyzeImage("旧截图", resource, MediaType.IMAGE_PNG))
+                .thenThrow(new AiServiceUnavailableException("mock LLM failure"));
+
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        assertOldImageAnalysis(original);
+        verifyNoInteractions(persistenceService);
+    }
+
     private AiAnalyzeResponse response(String summary, String category, List<String> tags) {
         return new AiAnalyzeResponse(summary, category, tags, List.of("关键词"), List.of());
     }
@@ -590,6 +687,26 @@ class InboxAnalyzeServiceTests {
     private void assertOldFileAnalysis(InboxItem item) {
         assertEquals("旧摘要", item.getSummary());
         assertEquals("学习成长", item.getCategory());
+        assertEquals(List.of("旧标签"), item.getTags());
+        assertEquals(List.of("旧关键词"), item.getKeywords());
+        assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), item.getEntities());
+    }
+
+    private InboxItem oldImageAnalysis() {
+        InboxItem item = item("IMAGE", null);
+        item.setTitle("旧截图");
+        item.setFileUrl("/api/files/00000000-0000-0000-0000-000000000001.png");
+        item.setSummary("旧摘要");
+        item.setCategory("工作");
+        item.setTags(List.of("旧标签"));
+        item.setKeywords(List.of("旧关键词"));
+        item.setEntities(List.of(new AiEntityResponse("旧实体", "OTHER")));
+        return item;
+    }
+
+    private void assertOldImageAnalysis(InboxItem item) {
+        assertEquals("旧摘要", item.getSummary());
+        assertEquals("工作", item.getCategory());
         assertEquals(List.of("旧标签"), item.getTags());
         assertEquals(List.of("旧关键词"), item.getKeywords());
         assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), item.getEntities());
