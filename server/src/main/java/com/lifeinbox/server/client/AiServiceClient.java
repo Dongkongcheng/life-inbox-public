@@ -3,18 +3,26 @@ package com.lifeinbox.server.client;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
+import com.lifeinbox.server.dto.AiFileErrorResponse;
 import com.lifeinbox.server.dto.AiSummaryRequest;
 import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
 import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 
 import java.time.Duration;
 
@@ -143,6 +151,42 @@ public class AiServiceClient {
         }
     }
 
+    /** 将 Java 安全读取的受管文件作为 multipart 内容发送给 Python。 */
+    public AiAnalyzeResponse analyzeFile(String title, Resource file, MediaType contentType) {
+        HttpHeaders fileHeaders = new HttpHeaders();
+        fileHeaders.setContentDispositionFormData("file", file.getFilename());
+        fileHeaders.setContentType(contentType);
+        MultiValueMap<String, Object> multipart = new LinkedMultiValueMap<>();
+        multipart.add("file", new HttpEntity<>(file, fileHeaders));
+        if (title != null && !title.isBlank()) {
+            multipart.add("title", title.trim());
+        }
+
+        try {
+            AiAnalyzeResponse response = analysisRestClient.post()
+                    .uri("/analyze/file")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(multipart)
+                    .retrieve()
+                    .body(AiAnalyzeResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回 FILE 分析结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException | FileAnalyzeException exception) {
+            throw exception;
+        } catch (RestClientResponseException exception) {
+            FileAnalyzeException knownFailure = parseKnownFileFailure(exception);
+            if (knownFailure != null) {
+                throw knownFailure;
+            }
+            // 未知文档错误和 LLM 错误不能伪装成受信任的文件解析失败。
+            throw new AiServiceUnavailableException("AI FILE 分析服务暂不可用", exception);
+        } catch (RestClientException exception) {
+            throw new AiServiceUnavailableException("AI FILE 分析服务暂不可用", exception);
+        }
+    }
+
     private UrlAnalyzeException parseKnownUrlFailure(RestClientResponseException exception) {
         try {
             AiUrlErrorResponse errorResponse = exception.getResponseBodyAs(AiUrlErrorResponse.class);
@@ -150,6 +194,21 @@ public class AiServiceClient {
                 return null;
             }
             return UrlAnalyzeException.fromUpstream(
+                    errorResponse.code(),
+                    exception.getStatusCode().value()
+            ).orElse(null);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private FileAnalyzeException parseKnownFileFailure(RestClientResponseException exception) {
+        try {
+            AiFileErrorResponse errorResponse = exception.getResponseBodyAs(AiFileErrorResponse.class);
+            if (errorResponse == null) {
+                return null;
+            }
+            return FileAnalyzeException.fromUpstream(
                     errorResponse.code(),
                     exception.getStatusCode().value()
             ).orElse(null);

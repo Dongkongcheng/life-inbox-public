@@ -5,10 +5,14 @@ import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -27,12 +31,14 @@ class InboxAnalyzeServiceTests {
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
     private final AiServiceClient aiServiceClient = mock(AiServiceClient.class);
+    private final FileStorageService fileStorageService = mock(FileStorageService.class);
     private final InboxAnalysisPersistenceService persistenceService = mock(
             InboxAnalysisPersistenceService.class
     );
     private final InboxAnalyzeService analyzeService = new InboxAnalyzeService(
             inboxItemMapper,
             aiServiceClient,
+            fileStorageService,
             persistenceService
     );
 
@@ -110,22 +116,74 @@ class InboxAnalyzeServiceTests {
     }
 
     @Test
-    void rejectsFileAndImageItems() {
-        when(inboxItemMapper.selectById(1L)).thenReturn(item("FILE", null));
+    void analyzesFileThenUsesTheSameValidationAndPersistence() {
+        InboxItem original = item("FILE", null);
+        original.setTitle("架构说明.pdf");
+        original.setFileUrl("/api/files/00000000-0000-0000-0000-000000000001.pdf");
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        Resource resource = new ByteArrayResource("pdf".getBytes()) {
+            @Override
+            public String getFilename() {
+                return "00000000-0000-0000-0000-000000000001.pdf";
+            }
+        };
+        FileStorageService.AnalyzableFile file = new FileStorageService.AnalyzableFile(
+                resource,
+                MediaType.APPLICATION_PDF,
+                3
+        );
+        when(fileStorageService.loadForAnalysis(original.getFileUrl())).thenReturn(file);
+        AiAnalyzeResponse response = new AiAnalyzeResponse(
+                "FILE 摘要",
+                "技术学习",
+                List.of("PDF"),
+                List.of("文档解析"),
+                List.of()
+        );
+        when(aiServiceClient.analyzeFile(
+                "架构说明.pdf",
+                resource,
+                MediaType.APPLICATION_PDF
+        )).thenReturn(response);
+        InboxItem updated = item("FILE", null);
+        when(persistenceService.replaceAnalysis(
+                1L,
+                "FILE 摘要",
+                "技术学习",
+                List.of(new NormalizedTag("PDF", "pdf")),
+                List.of("文档解析"),
+                List.of()
+        )).thenReturn(updated);
+
+        assertEquals(updated, analyzeService.analyze(1L));
+
+        verify(fileStorageService).loadForAnalysis(original.getFileUrl());
+        verify(aiServiceClient).analyzeFile(
+                "架构说明.pdf",
+                resource,
+                MediaType.APPLICATION_PDF
+        );
+        verify(persistenceService).replaceAnalysis(
+                1L,
+                "FILE 摘要",
+                "技术学习",
+                List.of(new NormalizedTag("PDF", "pdf")),
+                List.of("文档解析"),
+                List.of()
+        );
+    }
+
+    @Test
+    void rejectsImageItem() {
         when(inboxItemMapper.selectById(2L)).thenReturn(item("IMAGE", null));
 
-        ResponseStatusException fileException = assertThrows(
-                ResponseStatusException.class,
-                () -> analyzeService.analyze(1L)
-        );
         ResponseStatusException imageException = assertThrows(
                 ResponseStatusException.class,
                 () -> analyzeService.analyze(2L)
         );
 
-        assertEquals(HttpStatus.BAD_REQUEST, fileException.getStatusCode());
         assertEquals(HttpStatus.BAD_REQUEST, imageException.getStatusCode());
-        verifyNoInteractions(aiServiceClient, persistenceService);
+        verifyNoInteractions(aiServiceClient, fileStorageService, persistenceService);
     }
 
     @Test
@@ -408,6 +466,67 @@ class InboxAnalyzeServiceTests {
         verifyNoInteractions(persistenceService);
     }
 
+    @Test
+    void fileReadFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldFileAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        when(fileStorageService.loadForAnalysis(original.getFileUrl()))
+                .thenThrow(FileAnalyzeException.fileNotFound());
+
+        assertThrows(FileAnalyzeException.class, () -> analyzeService.analyze(1L));
+
+        assertOldFileAnalysis(original);
+        verifyNoInteractions(aiServiceClient, persistenceService);
+    }
+
+    @Test
+    void fileExtractionFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldFileAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        Resource resource = new ByteArrayResource("pdf".getBytes()) {
+            @Override
+            public String getFilename() {
+                return "00000000-0000-0000-0000-000000000001.pdf";
+            }
+        };
+        when(fileStorageService.loadForAnalysis(original.getFileUrl())).thenReturn(
+                new FileStorageService.AnalyzableFile(resource, MediaType.APPLICATION_PDF, 3)
+        );
+        FileAnalyzeException failure = FileAnalyzeException.fromUpstream(
+                "FILE_PDF_NO_TEXT",
+                422
+        ).orElseThrow();
+        when(aiServiceClient.analyzeFile("旧文档", resource, MediaType.APPLICATION_PDF))
+                .thenThrow(failure);
+
+        assertThrows(FileAnalyzeException.class, () -> analyzeService.analyze(1L));
+
+        assertOldFileAnalysis(original);
+        verifyNoInteractions(persistenceService);
+    }
+
+    @Test
+    void fileLlmFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldFileAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        Resource resource = new ByteArrayResource("text".getBytes()) {
+            @Override
+            public String getFilename() {
+                return "00000000-0000-0000-0000-000000000001.txt";
+            }
+        };
+        when(fileStorageService.loadForAnalysis(original.getFileUrl())).thenReturn(
+                new FileStorageService.AnalyzableFile(resource, MediaType.TEXT_PLAIN, 4)
+        );
+        when(aiServiceClient.analyzeFile("旧文档", resource, MediaType.TEXT_PLAIN))
+                .thenThrow(new AiServiceUnavailableException("mock LLM failure"));
+
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        assertOldFileAnalysis(original);
+        verifyNoInteractions(persistenceService);
+    }
+
     private AiAnalyzeResponse response(String summary, String category, List<String> tags) {
         return new AiAnalyzeResponse(summary, category, tags, List.of("关键词"), List.of());
     }
@@ -451,6 +570,26 @@ class InboxAnalyzeServiceTests {
     private void assertOldUrlAnalysis(InboxItem item) {
         assertEquals("旧摘要", item.getSummary());
         assertEquals("资讯", item.getCategory());
+        assertEquals(List.of("旧标签"), item.getTags());
+        assertEquals(List.of("旧关键词"), item.getKeywords());
+        assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), item.getEntities());
+    }
+
+    private InboxItem oldFileAnalysis() {
+        InboxItem item = item("FILE", null);
+        item.setTitle("旧文档");
+        item.setFileUrl("/api/files/00000000-0000-0000-0000-000000000001.pdf");
+        item.setSummary("旧摘要");
+        item.setCategory("学习成长");
+        item.setTags(List.of("旧标签"));
+        item.setKeywords(List.of("旧关键词"));
+        item.setEntities(List.of(new AiEntityResponse("旧实体", "OTHER")));
+        return item;
+    }
+
+    private void assertOldFileAnalysis(InboxItem item) {
+        assertEquals("旧摘要", item.getSummary());
+        assertEquals("学习成长", item.getCategory());
         assertEquals(List.of("旧标签"), item.getTags());
         assertEquals(List.of("旧关键词"), item.getKeywords());
         assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), item.getEntities());

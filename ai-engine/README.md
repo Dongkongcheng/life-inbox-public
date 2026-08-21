@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-V0.2 Task 5 在现有 TEXT Analyze 之外增加 URL 正文提取。URL 抓取成功后仍进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem 和分析结果仍由 Java 持久化。
+V0.2 Task 6 在现有 TEXT/URL Analyze 之外增加 FILE 文本提取。TXT、Markdown 和带文本层的 PDF 提取成功后仍进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem、文件和分析结果仍由 Java 管理。
 
 ## 安装依赖
 
@@ -107,10 +107,43 @@ URL 抓取采用以下边界：
 | 413 | `URL_RESPONSE_TOO_LARGE` | 网页响应超过 1 MiB |
 | 422 | `URL_CONTENT_EMPTY` | 无法提取有效正文 |
 
+## 分析 FILE
+
+`POST /analyze/file` 使用 multipart 接收文件内容和可选标题：
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/analyze/file" `
+  -Form @{ file = Get-Item ".\notes.txt"; title = "学习笔记" }
+```
+
+响应继续使用与 TEXT/URL 完全相同的 AnalyzeResult。Java 读取自己管理的文件并发送内容，Python 不接收服务器本地路径；提取出的正文只在本次请求中使用，不持久化。
+
+文档提取边界：
+
+- 仅支持 `.txt`、`.md` 和 `.pdf`；
+- TXT/Markdown 必须是 UTF-8，支持 UTF-8 BOM；Markdown 作为普通文本读取，不渲染或执行；
+- PDF 使用 pypdf 提取真实文本层，最多 100 页，不执行 OCR；
+- 文件最大 10 MiB，规范化正文最大 20,000 字符；超限明确失败，不静默截断；
+- 空文件、加密/损坏 PDF、扫描版或其他无文本 PDF 均不会调用 LLM。
+
+文档错误使用固定的 `{ "code": "...", "detail": "..." }` 结构：
+
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 415 | `FILE_TYPE_UNSUPPORTED` | 文件类型或 MIME 不支持 |
+| 413 | `FILE_TOO_LARGE` | 文件超过 10 MiB |
+| 422 | `FILE_ENCODING_UNSUPPORTED` | 文本不是 UTF-8 |
+| 422 | `FILE_CONTENT_EMPTY` | 文档为空 |
+| 422 | `FILE_PDF_ENCRYPTED` | PDF 已加密 |
+| 422 | `FILE_PDF_NO_TEXT` | PDF 没有可提取文本，可能需要 OCR |
+| 413 | `FILE_DOCUMENT_TOO_LONG` | 页数或正文超过当前限制 |
+| 422 | `FILE_EXTRACTION_FAILED` | 文档损坏或解析失败 |
+
 ## 运行测试
 
 ```powershell
 uv run pytest
 ```
 
-自动化测试使用 Fake Service、假 DNS 和 `httpx.MockTransport`，不会请求真实网页或 LLM，也不会消耗付费 Token。
+自动化测试使用本地文档 fixture、Fake Service、假 DNS 和 `httpx.MockTransport`，不会请求真实网页或 LLM，也不会消耗付费 Token。

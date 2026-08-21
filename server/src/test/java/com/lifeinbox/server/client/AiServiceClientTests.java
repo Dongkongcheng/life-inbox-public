@@ -5,10 +5,13 @@ import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -346,6 +349,132 @@ class AiServiceClientTests {
         }
     }
 
+    @Test
+    void analyzeFileSendsMultipartAndParsesCompleteResponse() throws IOException {
+        AtomicReference<String> contentType = new AtomicReference<>();
+        AtomicReference<byte[]> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/file", exchange -> {
+            contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            requestBody.set(exchange.getRequestBody().readAllBytes());
+            byte[] body = completeAnalysisJson().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            ByteArrayResource resource = new ByteArrayResource(
+                    "FILE_CONTENT_MARKER".getBytes(StandardCharsets.UTF_8)
+            ) {
+                @Override
+                public String getFilename() {
+                    return "550e8400-e29b-41d4-a716-446655440000.txt";
+                }
+            };
+
+            AiAnalyzeResponse response = client.analyzeFile(
+                    "Architecture notes",
+                    resource,
+                    MediaType.TEXT_PLAIN
+            );
+
+            assertEquals("结构化摘要", response.summary());
+            String multipartText = new String(requestBody.get(), StandardCharsets.UTF_8);
+            assertEquals(true, contentType.get().startsWith("multipart/form-data;boundary="));
+            assertEquals(true, multipartText.contains("name=\"file\""));
+            assertEquals(true, multipartText.contains(
+                    "filename=\"550e8400-e29b-41d4-a716-446655440000.txt\""
+            ));
+            assertEquals(true, multipartText.contains("Content-Type: text/plain"));
+            assertEquals(true, multipartText.contains("FILE_CONTENT_MARKER"));
+            assertEquals(true, multipartText.contains("name=\"title\""));
+            assertEquals(true, multipartText.contains("Architecture notes"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzeFileMapsOnlyKnownCodeAndExpectedUpstreamStatus() throws IOException {
+        List<FileFailureCase> cases = List.of(
+                new FileFailureCase("FILE_TYPE_UNSUPPORTED", 415, HttpStatus.UNSUPPORTED_MEDIA_TYPE),
+                new FileFailureCase("FILE_TOO_LARGE", 413, HttpStatus.CONTENT_TOO_LARGE),
+                new FileFailureCase("FILE_ENCODING_UNSUPPORTED", 422, HttpStatus.UNPROCESSABLE_CONTENT),
+                new FileFailureCase("FILE_CONTENT_EMPTY", 422, HttpStatus.UNPROCESSABLE_CONTENT),
+                new FileFailureCase("FILE_PDF_ENCRYPTED", 422, HttpStatus.UNPROCESSABLE_CONTENT),
+                new FileFailureCase("FILE_PDF_NO_TEXT", 422, HttpStatus.UNPROCESSABLE_CONTENT),
+                new FileFailureCase("FILE_DOCUMENT_TOO_LONG", 413, HttpStatus.CONTENT_TOO_LARGE),
+                new FileFailureCase("FILE_EXTRACTION_FAILED", 422, HttpStatus.UNPROCESSABLE_CONTENT)
+        );
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/file", exchange -> {
+            FileFailureCase failure = cases.get(requestIndex.getAndIncrement());
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = ("""
+                    {"code":"%s","detail":"不应透传的内部信息"}
+                    """).formatted(failure.code()).strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(failure.upstreamStatus(), body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            ByteArrayResource resource = namedTextResource();
+            for (FileFailureCase failure : cases) {
+                FileAnalyzeException exception = assertThrows(
+                        FileAnalyzeException.class,
+                        () -> client.analyzeFile(null, resource, MediaType.TEXT_PLAIN)
+                );
+                assertEquals(failure.code(), exception.getCode());
+                assertEquals(failure.productStatus(), exception.getStatus());
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzeFileKeepsUnknownAndLlmErrorsGeneric() throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/file", exchange -> {
+            int index = requestIndex.getAndIncrement();
+            exchange.getRequestBody().readAllBytes();
+            String responseBody = index == 0
+                    ? "{\"code\":\"UNKNOWN_FILE_ERROR\",\"detail\":\"internal\"}"
+                    : index == 1
+                            ? "{\"code\":\"FILE_PDF_NO_TEXT\",\"detail\":\"wrong status\"}"
+                            : "{\"detail\":\"LLM 服务暂不可用\"}";
+            int status = index == 0 ? 422 : 503;
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            for (int index = 0; index < 3; index++) {
+                assertThrows(
+                        AiServiceUnavailableException.class,
+                        () -> client.analyzeFile(null, namedTextResource(), MediaType.TEXT_PLAIN)
+                );
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private AiServiceClient clientFor(HttpServer server) {
         return new AiServiceClient(
                 "http://127.0.0.1:" + server.getAddress().getPort(),
@@ -353,6 +482,15 @@ class AiServiceClientTests {
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1)
         );
+    }
+
+    private ByteArrayResource namedTextResource() {
+        return new ByteArrayResource("content".getBytes(StandardCharsets.UTF_8)) {
+            @Override
+            public String getFilename() {
+                return "550e8400-e29b-41d4-a716-446655440000.txt";
+            }
+        };
     }
 
     private String completeAnalysisJson() {
@@ -372,6 +510,13 @@ class AiServiceClientTests {
             int upstreamStatus,
             HttpStatus productStatus,
             String safeDetail
+    ) {
+    }
+
+    private record FileFailureCase(
+            String code,
+            int upstreamStatus,
+            HttpStatus productStatus
     ) {
     }
 }

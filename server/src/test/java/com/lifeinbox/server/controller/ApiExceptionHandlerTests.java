@@ -1,6 +1,7 @@
 package com.lifeinbox.server.controller;
 
 import com.lifeinbox.server.dto.AiHealthErrorResponse;
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,22 @@ class ApiExceptionHandlerTests {
         assertEquals(Map.of(
                 "code", "URL_FETCH_TIMEOUT",
                 "detail", "网页读取超时"
+        ), response.getBody());
+    }
+
+    @Test
+    void returnsSafeStructuredFileError() {
+        FileAnalyzeException exception = FileAnalyzeException.fromUpstream(
+                "FILE_PDF_NO_TEXT",
+                422
+        ).orElseThrow();
+
+        ResponseEntity<Map<String, String>> response = handler.handleFileAnalyze(exception);
+
+        assertEquals(HttpStatus.UNPROCESSABLE_CONTENT, response.getStatusCode());
+        assertEquals(Map.of(
+                "code", "FILE_PDF_NO_TEXT",
+                "detail", "无法从 PDF 提取有效文本，文件可能需要 OCR"
         ), response.getBody());
     }
 

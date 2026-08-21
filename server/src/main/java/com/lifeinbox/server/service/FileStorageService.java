@@ -1,9 +1,11 @@
 package com.lifeinbox.server.service;
 
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -16,6 +18,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -30,6 +33,7 @@ public class FileStorageService {
 
     static final long MAX_FILE_SIZE = 20L * 1024 * 1024;
     static final long MAX_IMAGE_SIZE = 10L * 1024 * 1024;
+    static final long MAX_AI_ANALYZE_FILE_SIZE = 10L * 1024 * 1024;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(FileStorageService.class);
     private static final Set<String> FILE_EXTENSIONS = Set.of(
@@ -38,6 +42,8 @@ public class FileStorageService {
     private static final Set<String> IMAGE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "webp", "gif", "bmp"
     );
+    private static final Set<String> AI_ANALYZE_EXTENSIONS = Set.of("txt", "md", "pdf");
+    private static final String FILE_URL_PREFIX = "/api/files/";
     private static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES = Map.ofEntries(
             Map.entry("pdf", Set.of("application/pdf")),
             Map.entry("txt", Set.of("text/plain")),
@@ -147,6 +153,45 @@ public class FileStorageService {
         return new FileSystemResource(filePath);
     }
 
+    /**
+     * 从 Java 管理的 fileUrl 安全读取可分析文件。
+     * 返回内存 Resource 而不是本地路径，避免 Python 与 Java 磁盘目录耦合。
+     */
+    public AnalyzableFile loadForAnalysis(String fileUrl) {
+        String storedName = storedNameFromFileUrl(fileUrl);
+        String extension = extensionOf(storedName);
+        if (!AI_ANALYZE_EXTENSIONS.contains(extension)) {
+            throw FileAnalyzeException.typeUnsupported();
+        }
+
+        Path filePath;
+        try {
+            filePath = resolveStoredPath(storedName);
+        } catch (ResponseStatusException exception) {
+            throw FileAnalyzeException.fileNotFound();
+        }
+        if (!Files.isRegularFile(filePath, LinkOption.NOFOLLOW_LINKS)) {
+            throw FileAnalyzeException.fileNotFound();
+        }
+
+        byte[] content;
+        try (InputStream inputStream = Files.newInputStream(
+                filePath,
+                StandardOpenOption.READ,
+                LinkOption.NOFOLLOW_LINKS
+        )) {
+            content = inputStream.readNBytes((int) MAX_AI_ANALYZE_FILE_SIZE + 1);
+        } catch (IOException | UnsupportedOperationException exception) {
+            throw FileAnalyzeException.fileReadFailed();
+        }
+        if (content.length > MAX_AI_ANALYZE_FILE_SIZE) {
+            throw FileAnalyzeException.fileTooLarge();
+        }
+
+        Resource resource = new NamedByteArrayResource(content, storedName);
+        return new AnalyzableFile(resource, mediaTypeFor(storedName), content.length);
+    }
+
     public MediaType mediaTypeFor(String storedName) {
         String extension = extensionOf(storedName);
         return switch (extension) {
@@ -191,6 +236,17 @@ public class FileStorageService {
 
         String extension = filename.substring(lastDot + 1).toLowerCase(Locale.ROOT);
         return extension;
+    }
+
+    private String storedNameFromFileUrl(String fileUrl) {
+        if (fileUrl == null || !fileUrl.startsWith(FILE_URL_PREFIX)) {
+            throw FileAnalyzeException.fileNotFound();
+        }
+        String storedName = fileUrl.substring(FILE_URL_PREFIX.length());
+        if (storedName.contains("/") || storedName.contains("\\")) {
+            throw FileAnalyzeException.fileNotFound();
+        }
+        return storedName;
     }
 
     private void validateContentType(String extension, String contentType, boolean allowOctetStream) {
@@ -280,5 +336,23 @@ public class FileStorageService {
     }
 
     public record StoredFile(String storedName, String originalFilename) {
+    }
+
+    public record AnalyzableFile(Resource resource, MediaType mediaType, long size) {
+    }
+
+    private static final class NamedByteArrayResource extends ByteArrayResource {
+
+        private final String filename;
+
+        private NamedByteArrayResource(byte[] byteArray, String filename) {
+            super(byteArray);
+            this.filename = filename;
+        }
+
+        @Override
+        public String getFilename() {
+            return filename;
+        }
     }
 }

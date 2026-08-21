@@ -20,13 +20,14 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 编排 TEXT/URL 的统一 AI Analyze：内容准备方式不同，但共享结果校验和持久化。
+ * 编排 TEXT/URL/FILE 的统一 AI Analyze：内容准备方式不同，但共享结果校验和持久化。
  */
 @Service
 public class InboxAnalyzeService {
 
     private static final String TYPE_TEXT = "TEXT";
     private static final String TYPE_URL = "URL";
+    private static final String TYPE_FILE = "FILE";
     private static final int MAX_INPUT_CHARS = 20_000;
     private static final int MAX_SUMMARY_CHARS = 2_000;
     private static final int MAX_TAGS = 5;
@@ -62,15 +63,18 @@ public class InboxAnalyzeService {
 
     private final InboxItemMapper inboxItemMapper;
     private final AiServiceClient aiServiceClient;
+    private final FileStorageService fileStorageService;
     private final InboxAnalysisPersistenceService persistenceService;
 
     public InboxAnalyzeService(
             InboxItemMapper inboxItemMapper,
             AiServiceClient aiServiceClient,
+            FileStorageService fileStorageService,
             InboxAnalysisPersistenceService persistenceService
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.aiServiceClient = aiServiceClient;
+        this.fileStorageService = fileStorageService;
         this.persistenceService = persistenceService;
     }
 
@@ -109,7 +113,18 @@ public class InboxAnalyzeService {
             // Java 不抓取网页正文；Python 完成 SSRF 校验、正文提取后再复用统一 Analyze。
             return aiServiceClient.analyzeUrl(inboxItem.getTitle(), sourceUrl.trim());
         }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前只支持分析 TEXT 或 URL");
+        if (TYPE_FILE.equals(inboxItem.getType())) {
+            // 文件仍由 Java 存储层管理；只发送安全读取的内容，不向 Python 暴露磁盘路径。
+            FileStorageService.AnalyzableFile file = fileStorageService.loadForAnalysis(
+                    inboxItem.getFileUrl()
+            );
+            return aiServiceClient.analyzeFile(
+                    inboxItem.getTitle(),
+                    file.resource(),
+                    file.mediaType()
+            );
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前只支持分析 TEXT、URL 或 FILE");
     }
 
     private void validateText(InboxItem inboxItem) {

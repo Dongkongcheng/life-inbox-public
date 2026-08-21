@@ -159,6 +159,12 @@ V0.2 的目标是：
   * ✅ Entities
 * ✅ URL Content Extraction
 * ✅ URL AI Analyze（显式触发）
+* ✅ FILE Text Extraction
+  * ✅ TXT
+  * ✅ Markdown
+  * ✅ PDF 文本层
+* ✅ FILE AI Analyze（显式触发）
+* ⏳ IMAGE OCR / Vision
 * ⏳ AI Processing Status
 * ⏳ AI Failure Handling
 
@@ -634,7 +640,7 @@ ai-engine
 
 Python 服务。
 
-V0.2 Task 5 让 URL 与 TEXT 复用同一套 AI Analyze Pipeline。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；URL 由 Python 安全获取并清洗静态 HTML 正文，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
+V0.2 Task 6 让 FILE 与 TEXT、URL 复用同一套 AI Analyze Pipeline。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；TXT、Markdown 和带文本层的 PDF 由 Python 临时提取正文，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
 
 进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
@@ -649,7 +655,7 @@ $env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/analyze`、`/analyze/url` 和兼容的 `/summarize` 会返回 503。
+`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/analyze`、`/analyze/url`、`/analyze/file` 和兼容的 `/summarize` 会返回 503。
 
 Python 健康检查：
 
@@ -689,6 +695,16 @@ Response: 与 POST /analyze 相同
 
 URL 抓取只允许 `http` 和 `https`，手工跟随并逐跳检查最多 5 次重定向；DNS 解析出的地址必须全部为公网地址。响应必须是 HTML，实际读取上限为 1 MiB，清洗后的正文最多向 Analyze Service 传递 20,000 个字符。动态 JavaScript 页面、PDF、图片和其他二进制内容当前不支持。
 
+FILE 使用 multipart Python 内部接口，并返回同一个 AnalyzeResult：
+
+```text
+POST http://localhost:8000/analyze/file
+Parts: file=<TXT/MD/PDF 文件内容>, title=<可选标题>
+Response: 与 POST /analyze 相同
+```
+
+文件仍由 Java 安全管理和读取，Python 不接收服务器绝对路径。FILE Analyze 仅支持 TXT、Markdown 和具有文本层的 PDF；文件最大 10 MiB、PDF 最多 100 页，规范化后的正文最多 20,000 个字符。UTF-8 文本支持 BOM；超长文档会明确失败而不是静默截断。扫描版 PDF、加密 PDF、OCR、DOC/DOCX、PPT/PPTX 和 Excel 当前不支持。
+
 允许的 Category 为：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 必须有 1～5 个，每个最长 64 个字符；Keywords 可以有 0～8 个；Entities 可以有 0～10 个，类型只能是 `PERSON`、`ORGANIZATION`、`LOCATION`、`TECHNOLOGY`、`PRODUCT`、`EVENT`、`OTHER`。旧 `POST /summarize` 暂时保留原请求和 `{ "summary": "..." }` 响应，但底层复用同一次 Analyze，不维护第二套 Prompt。
 
 产品接口：
@@ -697,7 +713,7 @@ URL 抓取只允许 `http` 和 `https`，手工跟随并逐跳检查最多 5 次
 POST http://localhost:8080/api/inbox/{id}/ai/analyze
 ```
 
-该产品接口同时支持 TEXT 和 URL。前端不需要知道 Java 内部调用的是 Python `/analyze` 还是 `/analyze/url`；FILE 和 IMAGE 当前仍明确不支持 AI Analyze。
+该产品接口同时支持 TEXT、URL 和 FILE。前端不需要知道 Java 内部调用的是 Python `/analyze`、`/analyze/url` 还是 `/analyze/file`；IMAGE 当前仍明确不支持 AI Analyze。
 
 旧 `POST /api/inbox/{id}/ai/summary` 也暂时保留为兼容入口，并委托同一个 Analyze Service。
 
@@ -729,7 +745,20 @@ $captureBody = @{
 } | ConvertTo-Json
 ```
 
-随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category`、`tags`、`keywords` 和 `entities`。再次调用会把五项作为一组原子替换，而不是追加旧结果。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python 的 LLM 故障仍使用原有 502/503/504 语义；URL 接口会额外区分无效 URL、安全策略拦截、网页访问失败或超时、响应过大、非 HTML 和正文为空。Java 只映射受控错误码，不向前端暴露网页或上游内部响应。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
+验证 FILE 时先上传，再调用同一个产品 Analyze 接口：
+
+```powershell
+$item = Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8080/api/inbox/file" `
+  -Form @{ file = Get-Item ".\notes.txt"; title = "学习笔记" }
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/analyze"
+```
+
+> Windows PowerShell 5.1 的 `Invoke-RestMethod` 不支持 `-Form`，可直接通过网页上传，或使用 PowerShell 7 执行上述示例。
+
+随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category`、`tags`、`keywords` 和 `entities`。再次调用会把五项作为一组原子替换，而不是追加旧结果。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python 的 LLM 故障仍使用原有 502/503/504 语义；URL 和 FILE 接口会额外区分各自的抓取或解析错误。Java 只映射受控错误码，不向前端暴露网页、文件内容或上游内部响应。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
 
 目标架构：
 
@@ -782,7 +811,7 @@ Delete
 ```text
 Python AI Engine
         ↓
-TEXT + URL AI Analyze
+TEXT + URL + FILE AI Analyze
 Summary + Category + Tags
   + Keywords + Entities
 ```

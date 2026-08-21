@@ -273,8 +273,8 @@ const analyzeItem = async (item) => {
   }
 }
 
-// TEXT 和 URL 复用同一个产品 Analyze API；FILE/IMAGE 暂不开放分析入口。
-const isAnalyzableItem = (item) => item.type === 'TEXT' || item.type === 'URL'
+// TEXT、URL、FILE 复用同一个产品 Analyze API；IMAGE 当前仍不开放分析入口。
+const isAnalyzableItem = (item) => ['TEXT', 'URL', 'FILE'].includes(item.type)
 const hasTags = (item) => Array.isArray(item.tags) && item.tags.length > 0
 // Tags 面向整理，Keywords 面向内容理解；两者保持独立展示，不在前端互相推导。
 const hasKeywords = (item) => Array.isArray(item.keywords) && item.keywords.length > 0

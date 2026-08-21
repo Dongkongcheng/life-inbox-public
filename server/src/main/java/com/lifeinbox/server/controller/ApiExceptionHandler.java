@@ -2,6 +2,7 @@ package com.lifeinbox.server.controller;
 
 import com.lifeinbox.server.dto.AiHealthErrorResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,15 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    /** FILE 读取或解析失败时只返回 Java allowlist 中的安全错误。 */
+    @ExceptionHandler(FileAnalyzeException.class)
+    public ResponseEntity<Map<String, String>> handleFileAnalyze(FileAnalyzeException exception) {
+        return ResponseEntity.status(exception.getStatus()).body(Map.of(
+                "code", exception.getCode(),
+                "detail", exception.getMessage()
+        ));
+    }
 
     /** 只返回 Java allowlist 中的 URL 读取错误，不透传 Python 或目标网站的内部信息。 */
     @ExceptionHandler(UrlAnalyzeException.class)
