@@ -247,6 +247,22 @@ public class FileStorageService {
         deletePathQuietly(filePath);
     }
 
+    /**
+     * 根据数据库中的受管文件 URL 尽力清理本地文件。
+     * 数据库删除已经成功时，文件系统异常只记录日志，避免把 API 伪装成整体删除失败。
+     */
+    public void deleteByFileUrl(String fileUrl) {
+        try {
+            String storedName = storedNameFromFileUrl(
+                    fileUrl,
+                    () -> new IllegalArgumentException("不是 LifeInbox 受管文件 URL")
+            );
+            delete(storedName);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("InboxItem 已删除，但关联的本地文件清理失败：{}", exception.getMessage());
+        }
+    }
+
     private String validateOriginalFilename(String originalFilename) {
         if (originalFilename == null || originalFilename.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "原始文件名不能为空");

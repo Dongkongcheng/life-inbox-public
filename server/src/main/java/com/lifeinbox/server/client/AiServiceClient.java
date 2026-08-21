@@ -5,8 +5,6 @@ import com.lifeinbox.server.dto.AiImageErrorResponse;
 import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiFileErrorResponse;
-import com.lifeinbox.server.dto.AiSummaryRequest;
-import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
 import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -84,26 +82,6 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // AI 只是增强能力；这里只转换当前健康请求的错误，不影响任何 Inbox Capture 服务。
             throw new AiServiceUnavailableException("AI 服务暂不可用", exception);
-        }
-    }
-
-    /** 将 TEXT 的必要字段发送给 Python，并解析明确的 summary 响应。 */
-    public AiSummaryResponse summarize(String title, String text) {
-        try {
-            AiSummaryResponse response = analysisRestClient.post()
-                    .uri("/summarize")
-                    .body(new AiSummaryRequest(title, text))
-                    .retrieve()
-                    .body(AiSummaryResponse.class);
-            if (response == null) {
-                throw new AiServiceUnavailableException("AI 服务没有返回摘要结果");
-            }
-            return response;
-        } catch (AiServiceUnavailableException exception) {
-            throw exception;
-        } catch (RestClientException exception) {
-            // Python 或 LLM 的任何失败都只终止本次摘要请求，不进入 Capture 流程。
-            throw new AiServiceUnavailableException("AI 摘要服务暂不可用", exception);
         }
     }
 

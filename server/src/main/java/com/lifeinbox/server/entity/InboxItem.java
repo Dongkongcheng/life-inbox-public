@@ -35,7 +35,7 @@ public class InboxItem {
     /** AI 从有限集合中选择的粗粒度分类。 */
     private String category;
 
-    /** 最近一次统一 AI Analyze 的业务状态；新 Capture 不会自动触发分析。 */
+    /** 最近一次统一 AI Analyze 的业务状态；是否在 Capture 后自动分析由配置决定。 */
     private AiProcessingStatus aiStatus = AiProcessingStatus.NOT_PROCESSED;
 
     /** 每次 Analyze 都有独立 UUID，防止已经过期的请求覆盖后来接管的新请求。 */
