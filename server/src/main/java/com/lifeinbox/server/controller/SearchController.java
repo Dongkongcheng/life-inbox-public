@@ -23,7 +23,12 @@ public class SearchController {
     }
 
     @GetMapping
-    public List<InboxItem> search(@RequestParam("q") String query) {
-        return inboxService.search(query);
+    public List<InboxItem> search(
+            @RequestParam("q") String query,
+            @RequestParam(value = "type", required = false) String type,
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "favorite", required = false) Boolean favorite
+    ) {
+        return inboxService.search(query, type, category, favorite);
     }
 }

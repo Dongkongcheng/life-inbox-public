@@ -86,7 +86,13 @@ class InboxServiceTests {
     @Test
     void searchTrimsEscapesLikeWildcardsAndReturnsExistingInboxRepresentation() {
         InboxItem item = savedItem(1L, "TEXT", "CPU 使用率 50%", "路径 \\logs", null);
-        when(inboxItemMapper.searchActiveByKeyword("50!%!_!!\\path")).thenReturn(List.of(item));
+        when(inboxItemMapper.searchActiveByKeyword(
+                "50%_!\\path",
+                "50!%!_!!\\path",
+                null,
+                null,
+                null
+        )).thenReturn(List.of(item));
         when(inboxTagMapper.selectTagNamesByInboxItemId(1L)).thenReturn(List.of("性能"));
         when(inboxKeywordMapper.selectKeywordsByInboxItemId(1L)).thenReturn(List.of("CPU"));
         when(inboxEntityMapper.selectEntitiesByInboxItemId(1L)).thenReturn(List.of());
@@ -96,13 +102,20 @@ class InboxServiceTests {
         assertEquals(List.of(item), result);
         assertEquals(List.of("性能"), result.getFirst().getTags());
         assertEquals(List.of("CPU"), result.getFirst().getKeywords());
-        verify(inboxItemMapper).searchActiveByKeyword("50!%!_!!\\path");
+        verify(inboxItemMapper).searchActiveByKeyword(
+                "50%_!\\path",
+                "50!%!_!!\\path",
+                null,
+                null,
+                null
+        );
         verify(analysisStatusService).isProcessingStale(item);
     }
 
     @Test
     void searchReturnsEmptyListWhenKeywordHasNoMatch() {
-        when(inboxItemMapper.searchActiveByKeyword("missing")).thenReturn(List.of());
+        when(inboxItemMapper.searchActiveByKeyword("missing", "missing", null, null, null))
+                .thenReturn(List.of());
 
         assertEquals(List.of(), inboxService.search("missing"));
     }
@@ -110,7 +123,8 @@ class InboxServiceTests {
     @Test
     void searchReturnsExistingFieldMatchWhenAiMetadataIsMissing() {
         InboxItem item = savedItem(2L, "TEXT", "未分析标题", "仍可搜索的正文", null);
-        when(inboxItemMapper.searchActiveByKeyword("仍可搜索")).thenReturn(List.of(item));
+        when(inboxItemMapper.searchActiveByKeyword("仍可搜索", "仍可搜索", null, null, null))
+                .thenReturn(List.of(item));
         when(inboxTagMapper.selectTagNamesByInboxItemId(2L)).thenReturn(List.of());
         when(inboxKeywordMapper.selectKeywordsByInboxItemId(2L)).thenReturn(List.of());
         when(inboxEntityMapper.selectEntitiesByInboxItemId(2L)).thenReturn(List.of());
@@ -123,6 +137,48 @@ class InboxServiceTests {
         assertEquals(List.of(), result.getFirst().getEntities());
     }
 
+    @Test
+    void searchNormalizesAndCombinesAllOptionalFilters() {
+        when(inboxItemMapper.searchActiveByKeyword("Redis", "Redis", "URL", "技术", 1))
+                .thenReturn(List.of());
+
+        assertEquals(List.of(), inboxService.search(" Redis ", " url ", " 技术 ", true));
+
+        verify(inboxItemMapper).searchActiveByKeyword("Redis", "Redis", "URL", "技术", 1);
+    }
+
+    @Test
+    void searchPassesFavoriteFalseAsZero() {
+        when(inboxItemMapper.searchActiveByKeyword("Redis", "Redis", null, null, 0))
+                .thenReturn(List.of());
+
+        assertEquals(List.of(), inboxService.search("Redis", " ", " ", false));
+
+        verify(inboxItemMapper).searchActiveByKeyword("Redis", "Redis", null, null, 0);
+    }
+
+    @Test
+    void searchRejectsUnsupportedType() {
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("Redis", "AUDIO", null, null)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void searchRejectsCategoryLongerThanDatabaseColumn() {
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("Redis", null, "分".repeat(33), null)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"", " ", "\t\n"})
     void searchRejectsBlankQuery(String query) {
@@ -132,7 +188,7 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).searchActiveByKeyword(any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -143,7 +199,7 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).searchActiveByKeyword(any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
     }
 
     @Test
