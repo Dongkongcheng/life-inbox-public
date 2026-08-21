@@ -155,11 +155,13 @@ Current implementation status:
 
 ```text
 V0.3 Task 1 — Basic Keyword Search  ✅ Completed
+V0.3 Task 2 — AI-derived Field Search  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot. MySQL matches
-ACTIVE InboxItems on persisted `title`, `content`, `summary`, or `category` fields.
-Tags, Keywords, Entities, semantic retrieval, hybrid retrieval, and reranking remain future work.
+ACTIVE InboxItems on persisted `title`, `content`, `summary`, `category`, `tags`, `keywords`,
+or `entities`. Relation-table matches use `EXISTS`, so one item remains one result even when
+several AI-derived values match. Semantic retrieval, hybrid retrieval, and reranking remain future work.
 
 It is not the final definition of V0.3.
 

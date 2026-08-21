@@ -26,11 +26,12 @@
 
 - `q` 会先去除首尾空白，空白查询返回 400；
 - 最长 200 个 Java 字符，超长查询返回 400；
-- 仅匹配 ACTIVE InboxItem 的 `title`、`content`、`summary`、`category`，四个字段使用 OR 语义；
+- 仅匹配 ACTIVE InboxItem 的 `title`、`content`、`summary`、`category`、`tags`、`keywords`、`entities`，七类信息使用 OR 语义；
+- tags、keywords、entities 通过现有关系表或子表查询；同一条目有多个匹配值时仍只返回一次；
 - `%`、`_` 按普通搜索文本处理，不作为用户可控的 LIKE 通配符；
 - 结果按 `created_time DESC, id DESC` 排序；
 - 响应仍是与 `GET /api/inbox` 相同的 InboxItem 数组，合法查询无结果时返回空数组；
-- 当前不搜索 tags、keywords、entities、sourceUrl 或 fileUrl。
+- 当前不搜索 `sourceUrl` 或 `fileUrl`，也不返回匹配分数、原因或高亮。
 
 ### JSON Capture
 

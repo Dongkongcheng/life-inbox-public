@@ -107,6 +107,22 @@ class InboxServiceTests {
         assertEquals(List.of(), inboxService.search("missing"));
     }
 
+    @Test
+    void searchReturnsExistingFieldMatchWhenAiMetadataIsMissing() {
+        InboxItem item = savedItem(2L, "TEXT", "未分析标题", "仍可搜索的正文", null);
+        when(inboxItemMapper.searchActiveByKeyword("仍可搜索")).thenReturn(List.of(item));
+        when(inboxTagMapper.selectTagNamesByInboxItemId(2L)).thenReturn(List.of());
+        when(inboxKeywordMapper.selectKeywordsByInboxItemId(2L)).thenReturn(List.of());
+        when(inboxEntityMapper.selectEntitiesByInboxItemId(2L)).thenReturn(List.of());
+
+        List<InboxItem> result = inboxService.search("仍可搜索");
+
+        assertEquals(List.of(item), result);
+        assertEquals(List.of(), result.getFirst().getTags());
+        assertEquals(List.of(), result.getFirst().getKeywords());
+        assertEquals(List.of(), result.getFirst().getEntities());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"", " ", "\t\n"})
     void searchRejectsBlankQuery(String query) {
