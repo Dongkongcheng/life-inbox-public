@@ -5,8 +5,10 @@ import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiSummaryResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -15,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -208,5 +211,167 @@ class AiServiceClientTests {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void analyzeUrlPostsExplicitRequestAndParsesSharedResult() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/url", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] body = completeAnalysisJson().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+
+            AiAnalyzeResponse result = client.analyzeUrl(
+                    "示例文章",
+                    "https://example.com/article"
+            );
+
+            assertEquals("结构化摘要", result.summary());
+            assertEquals(List.of("ChatModel", "Tool Calling"), result.keywords());
+            assertEquals(
+                    "{\"title\":\"示例文章\",\"url\":\"https://example.com/article\"}",
+                    requestBody.get()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzeUrlMapsOnlyKnownCodeAndExpectedUpstreamStatus() throws IOException {
+        List<UrlFailureCase> cases = List.of(
+                new UrlFailureCase("URL_INVALID", 400, HttpStatus.BAD_REQUEST, "URL 无效"),
+                new UrlFailureCase("URL_BLOCKED", 403, HttpStatus.FORBIDDEN, "URL 被安全策略阻止"),
+                new UrlFailureCase("URL_FETCH_TIMEOUT", 408, HttpStatus.GATEWAY_TIMEOUT, "网页读取超时"),
+                new UrlFailureCase("URL_FETCH_FAILED", 424, HttpStatus.BAD_GATEWAY, "网页访问失败"),
+                new UrlFailureCase(
+                        "URL_CONTENT_TYPE_UNSUPPORTED",
+                        415,
+                        HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                        "网页内容类型不受支持"
+                ),
+                new UrlFailureCase(
+                        "URL_RESPONSE_TOO_LARGE",
+                        413,
+                        HttpStatus.CONTENT_TOO_LARGE,
+                        "网页内容过大"
+                ),
+                new UrlFailureCase(
+                        "URL_CONTENT_EMPTY",
+                        422,
+                        HttpStatus.UNPROCESSABLE_CONTENT,
+                        "无法从网页提取有效正文"
+                )
+        );
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/url", exchange -> {
+            UrlFailureCase failure = cases.get(requestIndex.getAndIncrement());
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = ("""
+                    {"code":"%s","detail":"不应透传的上游内部信息"}
+                    """).formatted(failure.code()).strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(failure.upstreamStatus(), body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            for (UrlFailureCase failure : cases) {
+                UrlAnalyzeException exception = assertThrows(
+                        UrlAnalyzeException.class,
+                        () -> client.analyzeUrl(null, "https://example.com/article")
+                );
+                assertEquals(failure.code(), exception.getCode());
+                assertEquals(failure.productStatus(), exception.getStatus());
+                assertEquals(failure.safeDetail(), exception.getMessage());
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void analyzeUrlKeepsUnknownMalformedAndLlmErrorsGeneric() throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/analyze/url", exchange -> {
+            int index = requestIndex.getAndIncrement();
+            exchange.getRequestBody().readAllBytes();
+            String responseBody;
+            int status;
+            if (index == 0) {
+                responseBody = "{\"code\":\"UNKNOWN_URL_ERROR\",\"detail\":\"internal\"}";
+                status = 400;
+            } else if (index == 1) {
+                responseBody = "not-json";
+                status = 400;
+            } else if (index == 2) {
+                responseBody = "{\"code\":\"URL_BLOCKED\",\"detail\":\"wrong status\"}";
+                status = 500;
+            } else {
+                responseBody = "{\"detail\":\"LLM 服务暂不可用\"}";
+                status = 503;
+            }
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            for (int index = 0; index < 4; index++) {
+                assertThrows(
+                        AiServiceUnavailableException.class,
+                        () -> client.analyzeUrl(null, "https://example.com/article")
+                );
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private AiServiceClient clientFor(HttpServer server) {
+        return new AiServiceClient(
+                "http://127.0.0.1:" + server.getAddress().getPort(),
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1)
+        );
+    }
+
+    private String completeAnalysisJson() {
+        return """
+                {
+                  "summary":"结构化摘要",
+                  "category":"技术学习",
+                  "tags":["Java","Spring AI"],
+                  "keywords":["ChatModel","Tool Calling"],
+                  "entities":[{"name":"Spring AI","type":"TECHNOLOGY"}]
+                }
+                """.strip();
+    }
+
+    private record UrlFailureCase(
+            String code,
+            int upstreamStatus,
+            HttpStatus productStatus,
+            String safeDetail
+    ) {
     }
 }

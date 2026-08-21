@@ -5,12 +5,16 @@ import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiSummaryRequest;
 import com.lifeinbox.server.dto.AiSummaryResponse;
+import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
+import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.UrlAnalyzeException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
 
@@ -110,6 +114,47 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // Python/LLM 失败只终止本次 Analyze，不会进入 Java 的持久化事务。
             throw new AiServiceUnavailableException("AI 分析服务暂不可用", exception);
+        }
+    }
+
+    /** URL 正文由 Python 安全读取；Java 仍只接收与 TEXT 相同的 AnalyzeResult。 */
+    public AiAnalyzeResponse analyzeUrl(String title, String url) {
+        try {
+            AiAnalyzeResponse response = analysisRestClient.post()
+                    .uri("/analyze/url")
+                    .body(new AiUrlAnalyzeRequest(title, url))
+                    .retrieve()
+                    .body(AiAnalyzeResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回 URL 分析结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException | UrlAnalyzeException exception) {
+            throw exception;
+        } catch (RestClientResponseException exception) {
+            UrlAnalyzeException knownFailure = parseKnownUrlFailure(exception);
+            if (knownFailure != null) {
+                throw knownFailure;
+            }
+            // LLM 错误、未知 code 或畸形响应都不能伪装成受信任的网页读取错误。
+            throw new AiServiceUnavailableException("AI URL 分析服务暂不可用", exception);
+        } catch (RestClientException exception) {
+            throw new AiServiceUnavailableException("AI URL 分析服务暂不可用", exception);
+        }
+    }
+
+    private UrlAnalyzeException parseKnownUrlFailure(RestClientResponseException exception) {
+        try {
+            AiUrlErrorResponse errorResponse = exception.getResponseBodyAs(AiUrlErrorResponse.class);
+            if (errorResponse == null) {
+                return null;
+            }
+            return UrlAnalyzeException.fromUpstream(
+                    errorResponse.code(),
+                    exception.getStatusCode().value()
+            ).orElse(null);
+        } catch (RuntimeException ignored) {
+            return null;
         }
     }
 }

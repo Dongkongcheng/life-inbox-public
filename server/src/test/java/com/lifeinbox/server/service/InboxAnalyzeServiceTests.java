@@ -5,6 +5,7 @@ import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -49,8 +50,55 @@ class InboxAnalyzeServiceTests {
     }
 
     @Test
-    void rejectsNonTextItem() {
-        when(inboxItemMapper.selectById(1L)).thenReturn(item("URL", null));
+    void analyzesUrlThenUsesTheSameValidationAndPersistence() {
+        InboxItem original = item("URL", null);
+        original.setTitle("Spring AI 文档");
+        original.setSourceUrl(" https://example.com/spring-ai ");
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        AiAnalyzeResponse response = new AiAnalyzeResponse(
+                "  URL 摘要  ",
+                "技术学习",
+                List.of(" Spring　AI "),
+                List.of(" ChatModel "),
+                List.of(new AiEntityResponse(" Spring　AI ", "TECHNOLOGY"))
+        );
+        when(aiServiceClient.analyzeUrl(
+                "Spring AI 文档",
+                "https://example.com/spring-ai"
+        )).thenReturn(response);
+        InboxItem updated = item("URL", null);
+        updated.setSourceUrl("https://example.com/spring-ai");
+        when(persistenceService.replaceAnalysis(
+                1L,
+                "URL 摘要",
+                "技术学习",
+                List.of(new NormalizedTag("Spring AI", "spring ai")),
+                List.of("ChatModel"),
+                List.of(new NormalizedEntity("Spring AI", "TECHNOLOGY"))
+        )).thenReturn(updated);
+
+        assertEquals(updated, analyzeService.analyze(1L));
+
+        verify(aiServiceClient).analyzeUrl(
+                "Spring AI 文档",
+                "https://example.com/spring-ai"
+        );
+        verify(aiServiceClient, never()).analyze(any(), any());
+        verify(persistenceService).replaceAnalysis(
+                1L,
+                "URL 摘要",
+                "技术学习",
+                List.of(new NormalizedTag("Spring AI", "spring ai")),
+                List.of("ChatModel"),
+                List.of(new NormalizedEntity("Spring AI", "TECHNOLOGY"))
+        );
+    }
+
+    @Test
+    void rejectsUrlWithBlankSourceBeforeCallingPython() {
+        InboxItem item = item("URL", null);
+        item.setSourceUrl("  ");
+        when(inboxItemMapper.selectById(1L)).thenReturn(item);
 
         ResponseStatusException exception = assertThrows(
                 ResponseStatusException.class,
@@ -58,6 +106,25 @@ class InboxAnalyzeServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verifyNoInteractions(aiServiceClient, persistenceService);
+    }
+
+    @Test
+    void rejectsFileAndImageItems() {
+        when(inboxItemMapper.selectById(1L)).thenReturn(item("FILE", null));
+        when(inboxItemMapper.selectById(2L)).thenReturn(item("IMAGE", null));
+
+        ResponseStatusException fileException = assertThrows(
+                ResponseStatusException.class,
+                () -> analyzeService.analyze(1L)
+        );
+        ResponseStatusException imageException = assertThrows(
+                ResponseStatusException.class,
+                () -> analyzeService.analyze(2L)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, fileException.getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, imageException.getStatusCode());
         verifyNoInteractions(aiServiceClient, persistenceService);
     }
 
@@ -313,6 +380,34 @@ class InboxAnalyzeServiceTests {
         verifyNoInteractions(persistenceService);
     }
 
+    @Test
+    void urlExtractionFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldUrlAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        UrlAnalyzeException failure = UrlAnalyzeException.fromUpstream("URL_BLOCKED", 403)
+                .orElseThrow();
+        when(aiServiceClient.analyzeUrl("旧网页", "https://example.com/article"))
+                .thenThrow(failure);
+
+        assertThrows(UrlAnalyzeException.class, () -> analyzeService.analyze(1L));
+
+        assertOldUrlAnalysis(original);
+        verifyNoInteractions(persistenceService);
+    }
+
+    @Test
+    void urlLlmFailureKeepsOldAnalysisAndNeverStartsPersistence() {
+        InboxItem original = oldUrlAnalysis();
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        when(aiServiceClient.analyzeUrl("旧网页", "https://example.com/article"))
+                .thenThrow(new AiServiceUnavailableException("mock LLM failure"));
+
+        assertThrows(AiServiceUnavailableException.class, () -> analyzeService.analyze(1L));
+
+        assertOldUrlAnalysis(original);
+        verifyNoInteractions(persistenceService);
+    }
+
     private AiAnalyzeResponse response(String summary, String category, List<String> tags) {
         return new AiAnalyzeResponse(summary, category, tags, List.of("关键词"), List.of());
     }
@@ -339,5 +434,25 @@ class InboxAnalyzeServiceTests {
         item.setType(type);
         item.setContent(content);
         return item;
+    }
+
+    private InboxItem oldUrlAnalysis() {
+        InboxItem item = item("URL", null);
+        item.setTitle("旧网页");
+        item.setSourceUrl("https://example.com/article");
+        item.setSummary("旧摘要");
+        item.setCategory("资讯");
+        item.setTags(List.of("旧标签"));
+        item.setKeywords(List.of("旧关键词"));
+        item.setEntities(List.of(new AiEntityResponse("旧实体", "OTHER")));
+        return item;
+    }
+
+    private void assertOldUrlAnalysis(InboxItem item) {
+        assertEquals("旧摘要", item.getSummary());
+        assertEquals("资讯", item.getCategory());
+        assertEquals(List.of("旧标签"), item.getTags());
+        assertEquals(List.of("旧关键词"), item.getKeywords());
+        assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), item.getEntities());
     }
 }
