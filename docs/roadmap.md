@@ -24,11 +24,12 @@ Roadmap 只描述方向；未标记完成的内容不是当前产品能力。
 ## V0.3 — Smart Search（In Progress）
 
 - ✅ Task 1 — Basic Keyword Search（title/content/summary/category，ACTIVE only）
+- ✅ Task 2 — AI-derived Field Search（tags/keywords/entities，EXISTS 去重）
 - 搜索条件与更丰富的结果排序
 - Embedding / Semantic Search 的可行性验证
 - Hybrid Search 与 Rerank 只在真实需求出现后评估
 
-V0.3 已完成第一步关键词检索，但整个版本仍在进行中。
+V0.3 已完成基础字段和 AI 派生字段检索，但整个版本仍在进行中。
 
 ## V0.4 — Action Extractor（Planned）
 

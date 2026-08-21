@@ -548,7 +548,7 @@ onBeforeUnmount(() => {
             v-model="searchQuery"
             type="search"
             maxlength="200"
-            placeholder="搜索标题、内容、摘要或分类"
+            placeholder="搜索标题、内容或 AI 整理信息"
           />
           <button type="submit" :disabled="loading">搜索</button>
           <button

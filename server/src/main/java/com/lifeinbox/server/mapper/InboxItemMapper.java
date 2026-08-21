@@ -14,20 +14,42 @@ import java.util.List;
 public interface InboxItemMapper extends BaseMapper<InboxItem> {
 
     /**
-     * 搜索只读取业务主表中的四个已持久化字段。ESCAPE 使用固定的 !，
-     * 让 Service 转义后的用户输入按普通文本匹配，而不是控制 LIKE 通配范围。
+     * V0.2 已持久化的 Tags、Keywords、Entities 现在直接参与 Retrieve，搜索过程不调用 AI。
+     * ACTIVE 条件包住全部 OR 路径，归档项不能通过 AI 关系表绕过过滤。
+     * 三个 EXISTS 在数据库内完成候选判断且不会扩增主表行，避免多条分析结果产生重复 InboxItem。
+     * 没有 AI 元数据时 EXISTS 只会返回 false，原有四个字段仍可独立命中；排序继续沿用 Task 21，暂不评分。
+     * ESCAPE 使用固定的 !，让用户输入按普通文本匹配，而不是控制 LIKE 通配范围。
      */
     @Select("""
-            SELECT *
-            FROM inbox_item
-            WHERE status = 'ACTIVE'
+            SELECT i.*
+            FROM inbox_item i
+            WHERE i.status = 'ACTIVE'
               AND (
-                    title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
-                    OR content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
-                    OR summary LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
-                    OR category LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    i.title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR i.content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR i.summary LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR i.category LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM inbox_tag it
+                        INNER JOIN tag t ON t.id = it.tag_id
+                        WHERE it.inbox_item_id = i.id
+                          AND t.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM inbox_keyword ik
+                        WHERE ik.inbox_item_id = i.id
+                          AND ik.keyword LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM inbox_entity ie
+                        WHERE ie.inbox_item_id = i.id
+                          AND ie.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    )
               )
-            ORDER BY created_time DESC, id DESC
+            ORDER BY i.created_time DESC, i.id DESC
             """)
     List<InboxItem> searchActiveByKeyword(@Param("escapedQuery") String escapedQuery);
 

@@ -723,10 +723,12 @@ Hybrid Search
 Rerank
 ```
 
-已实现第一步：
+已实现前两步：
 
 ```text
 Basic Keyword Search
+        ↓
+AI-derived Field Search
 ```
 
 只是 V0.3 的起点，
@@ -737,7 +739,7 @@ Basic Keyword Search
 
 # 15. 当前 Keyword Search 架构
 
-Task 1 当前实现：
+Task 2 当前实现：
 
 ```text
 Vue Search UI
@@ -751,17 +753,20 @@ Keyword Search
 InboxItem Results
 ```
 
-当前只查询业务主表中已持久化的：
+当前查询已持久化的：
 
 ```text
 title
 content
 summary
 category
+tags
+keywords
+entities
 ```
 
 查询由 Spring Boot 参数化调用 MySQL，限制为 ACTIVE，并按创建时间倒序返回现有 InboxItem 表示。
-tags、keywords、entities 等字段留给后续独立 Task。
+tags、keywords、entities 使用相关 EXISTS 子查询，既在数据库内判断候选，也不会因多个匹配关系产生重复主表行。
 
 不要一次把所有 Search 功能全部实现。
 
@@ -1382,10 +1387,11 @@ Persistent MQ
 V0.3 Smart Search
 ```
 
-第一步：
+当前已完成：
 
 ```text
 Basic Keyword Search
+AI-derived Field Search
 ```
 
 后续目标：
