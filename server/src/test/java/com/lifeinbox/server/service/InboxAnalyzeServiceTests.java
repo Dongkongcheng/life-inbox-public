@@ -10,6 +10,7 @@ import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -33,6 +36,9 @@ class InboxAnalyzeServiceTests {
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
     private final AiServiceClient aiServiceClient = mock(AiServiceClient.class);
     private final FileStorageService fileStorageService = mock(FileStorageService.class);
+    private final InboxAnalysisStatusService statusService = mock(
+            InboxAnalysisStatusService.class
+    );
     private final InboxAnalysisPersistenceService persistenceService = mock(
             InboxAnalysisPersistenceService.class
     );
@@ -40,6 +46,7 @@ class InboxAnalyzeServiceTests {
             inboxItemMapper,
             aiServiceClient,
             fileStorageService,
+            statusService,
             persistenceService
     );
 
@@ -53,7 +60,7 @@ class InboxAnalyzeServiceTests {
         );
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
-        verifyNoInteractions(aiServiceClient, persistenceService);
+        verifyNoInteractions(aiServiceClient, statusService, persistenceService);
     }
 
     @Test
@@ -86,6 +93,7 @@ class InboxAnalyzeServiceTests {
 
         assertEquals(updated, analyzeService.analyze(1L));
 
+        verify(statusService).markProcessing(1L);
         verify(aiServiceClient).analyzeUrl(
                 "Spring AI 文档",
                 "https://example.com/spring-ai"
@@ -113,7 +121,7 @@ class InboxAnalyzeServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verifyNoInteractions(aiServiceClient, persistenceService);
+        verifyNoInteractions(aiServiceClient, statusService, persistenceService);
     }
 
     @Test
@@ -158,6 +166,7 @@ class InboxAnalyzeServiceTests {
 
         assertEquals(updated, analyzeService.analyze(1L));
 
+        verify(statusService).markProcessing(1L);
         verify(fileStorageService).loadForAnalysis(original.getFileUrl());
         verify(aiServiceClient).analyzeFile(
                 "架构说明.pdf",
@@ -210,6 +219,7 @@ class InboxAnalyzeServiceTests {
 
         assertEquals(updated, analyzeService.analyze(2L));
 
+        verify(statusService).markProcessing(2L);
         verify(fileStorageService).loadImageForAnalysis(original.getFileUrl());
         verify(aiServiceClient).analyzeImage("课程通知.png", resource, MediaType.IMAGE_PNG);
         verify(persistenceService).replaceAnalysis(
@@ -232,7 +242,7 @@ class InboxAnalyzeServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verifyNoInteractions(aiServiceClient, persistenceService);
+        verifyNoInteractions(aiServiceClient, statusService, persistenceService);
     }
 
     @Test
@@ -245,7 +255,7 @@ class InboxAnalyzeServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verifyNoInteractions(aiServiceClient, persistenceService);
+        verifyNoInteractions(aiServiceClient, statusService, persistenceService);
     }
 
     @Test
@@ -450,6 +460,34 @@ class InboxAnalyzeServiceTests {
         )).thenReturn(updated);
 
         assertEquals(updated, analyzeService.analyze(1L));
+
+        InOrder order = inOrder(statusService, aiServiceClient, persistenceService);
+        order.verify(statusService).markProcessing(1L);
+        order.verify(aiServiceClient).analyze(null, "你好");
+        order.verify(persistenceService).replaceAnalysis(
+                1L,
+                "一句问候。",
+                "其他",
+                List.of(new NormalizedTag("问候", "问候")),
+                List.of(),
+                List.of()
+        );
+    }
+
+    @Test
+    void duplicateAnalyzeStopsBeforeCallingAi() {
+        InboxItem original = item("TEXT", "原始正文");
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "AI 分析正在进行中"))
+                .when(statusService).markProcessing(1L);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> analyzeService.analyze(1L)
+        );
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
+        verifyNoInteractions(aiServiceClient, persistenceService);
     }
 
     @Test
@@ -471,6 +509,7 @@ class InboxAnalyzeServiceTests {
         assertEquals(List.of("旧标签"), original.getTags());
         assertEquals(List.of("旧关键词"), original.getKeywords());
         assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), original.getEntities());
+        verify(statusService).markFailed(1L, "AI 服务暂时不可用");
         verifyNoInteractions(persistenceService);
     }
 
@@ -486,6 +525,7 @@ class InboxAnalyzeServiceTests {
         assertThrows(UrlAnalyzeException.class, () -> analyzeService.analyze(1L));
 
         assertOldUrlAnalysis(original);
+        verify(statusService).markFailed(1L, "URL 被安全策略阻止");
         verifyNoInteractions(persistenceService);
     }
 
@@ -622,6 +662,43 @@ class InboxAnalyzeServiceTests {
 
         assertOldImageAnalysis(original);
         verifyNoInteractions(persistenceService);
+    }
+
+    @Test
+    void persistenceFailureMarksFailedAndKeepsOldAnalysis() {
+        InboxItem original = item("TEXT", "原始正文");
+        original.setSummary("旧摘要");
+        original.setCategory("工作");
+        original.setTags(List.of("旧标签"));
+        original.setKeywords(List.of("旧关键词"));
+        original.setEntities(List.of(new AiEntityResponse("旧实体", "OTHER")));
+        when(inboxItemMapper.selectById(1L)).thenReturn(original);
+        when(aiServiceClient.analyze(null, "原始正文")).thenReturn(
+                new AiAnalyzeResponse(
+                        "新摘要",
+                        "技术学习",
+                        List.of("Java"),
+                        List.of("Spring"),
+                        List.of()
+                )
+        );
+        when(persistenceService.replaceAnalysis(
+                1L,
+                "新摘要",
+                "技术学习",
+                List.of(new NormalizedTag("Java", "java")),
+                List.of("Spring"),
+                List.of()
+        )).thenThrow(new IllegalStateException("mock persistence failure"));
+
+        assertThrows(IllegalStateException.class, () -> analyzeService.analyze(1L));
+
+        assertEquals("旧摘要", original.getSummary());
+        assertEquals("工作", original.getCategory());
+        assertEquals(List.of("旧标签"), original.getTags());
+        assertEquals(List.of("旧关键词"), original.getKeywords());
+        assertEquals(List.of(new AiEntityResponse("旧实体", "OTHER")), original.getEntities());
+        verify(statusService).markFailed(1L, "AI 结果保存失败");
     }
 
     private AiAnalyzeResponse response(String summary, String category, List<String> tags) {

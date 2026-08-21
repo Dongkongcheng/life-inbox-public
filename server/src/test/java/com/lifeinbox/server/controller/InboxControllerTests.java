@@ -1,6 +1,7 @@
 package com.lifeinbox.server.controller;
 
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.ImageAnalyzeException;
@@ -10,7 +11,10 @@ import com.lifeinbox.server.service.InboxService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,10 +23,33 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class InboxControllerTests {
+
+    @Test
+    void listResponseIncludesAiProcessingStateFields() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        InboxAnalyzeService analyzeService = mock(InboxAnalyzeService.class);
+        InboxController controller = new InboxController(inboxService, analyzeService);
+        InboxItem item = new InboxItem();
+        item.setId(1L);
+        item.setAiStatus(AiProcessingStatus.FAILED);
+        item.setAiErrorMessage("网页读取超时");
+        item.setAiStartedTime(LocalDateTime.of(2026, 8, 20, 21, 0));
+        item.setAiFinishedTime(LocalDateTime.of(2026, 8, 20, 21, 1));
+        when(inboxService.list()).thenReturn(List.of(item));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mockMvc.perform(get("/api/inbox"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].aiStatus").value("FAILED"))
+                .andExpect(jsonPath("$[0].aiErrorMessage").value("网页读取超时"))
+                .andExpect(jsonPath("$[0].aiStartedTime").value("2026-08-20T21:00:00"))
+                .andExpect(jsonPath("$[0].aiFinishedTime").value("2026-08-20T21:01:00"));
+    }
 
     @Test
     void analyzeAndLegacySummaryEndpointsShareOneAnalyzeFlow() {
@@ -101,5 +128,19 @@ class InboxControllerTests {
                 .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.code").value("IMAGE_TEXT_EMPTY"))
                 .andExpect(jsonPath("$.detail").value("当前图片未识别到足够的文字内容"));
+    }
+
+    @Test
+    void duplicateAnalyzeReturnsConflict() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        InboxAnalyzeService analyzeService = mock(InboxAnalyzeService.class);
+        InboxController controller = new InboxController(inboxService, analyzeService);
+        when(analyzeService.analyze(11L)).thenThrow(
+                new ResponseStatusException(HttpStatus.CONFLICT, "AI 分析正在进行中")
+        );
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mockMvc.perform(post("/api/inbox/11/ai/analyze"))
+                .andExpect(status().isConflict());
     }
 }

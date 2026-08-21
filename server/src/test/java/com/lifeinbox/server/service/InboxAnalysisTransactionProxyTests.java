@@ -1,6 +1,7 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.mapper.InboxEntityMapper;
+import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
@@ -113,6 +114,37 @@ class InboxAnalysisTransactionProxyTests {
         );
 
         verify(inboxTagMapper).insertRelation(1L, 10L);
+        verify(inboxKeywordMapper).insertKeyword(1L, "ChatModel");
+        verify(transactionManager).rollback(transactionStatus);
+        verify(transactionManager, never()).commit(transactionStatus);
+    }
+
+    @Test
+    void successStatusFailureRollsBackAllSavedAnalysisResults() {
+        SimpleTransactionStatus transactionStatus = new SimpleTransactionStatus();
+        when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(transactionStatus);
+        when(inboxItemMapper.updateAnalysis(1L, "新摘要", "技术学习")).thenReturn(1);
+        when(tagMapper.selectIdByNormalizedName("java")).thenReturn(10L);
+        when(inboxTagMapper.insertRelation(1L, 10L)).thenReturn(1);
+        when(inboxItemMapper.markAnalysisSuccess(
+                1L,
+                AiProcessingStatus.PROCESSING,
+                AiProcessingStatus.SUCCESS
+        )).thenReturn(0);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> persistenceService.replaceAnalysis(
+                        1L,
+                        "新摘要",
+                        "技术学习",
+                        List.of(new NormalizedTag("Java", "java")),
+                        List.of("ChatModel"),
+                        List.of()
+                )
+        );
+
         verify(inboxKeywordMapper).insertKeyword(1L, "ChatModel");
         verify(transactionManager).rollback(transactionStatus);
         verify(transactionManager, never()).commit(transactionStatus);

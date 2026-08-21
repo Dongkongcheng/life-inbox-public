@@ -31,6 +31,13 @@ const entityTypeLabels = {
   OTHER: '其他'
 }
 
+const aiStatusLabels = {
+  NOT_PROCESSED: '未分析',
+  PROCESSING: '分析中…',
+  SUCCESS: '分析完成',
+  FAILED: '分析失败'
+}
+
 const clearSelectedUpload = () => {
   // createObjectURL 占用浏览器内存，切换类型和离开页面时都需要主动释放。
   if (imagePreviewUrl.value) {
@@ -239,7 +246,7 @@ const toggleFavorite = async (item) => {
 }
 
 const analyzeItem = async (item) => {
-  // 当前没有后台任务状态，同一时间只允许一次显式分析请求，避免重复消耗模型额度。
+  // 前端锁改善点击体验；真正的并发保护由 Java 的数据库条件 UPDATE 保证。
   if (analyzingId.value !== null) return
   analyzingId.value = item.id
   analysisErrorItemId.value = null
@@ -268,6 +275,8 @@ const analyzeItem = async (item) => {
     // 不在前端清空旧分析结果；重新分析失败时，用户仍能查看上一次的有效结果。
     analysisErrorItemId.value = item.id
     analysisErrorMessage.value = error.message || 'AI 分析失败，请稍后重试。'
+    // Java 已把最近一次尝试记为 FAILED；重新加载后展示持久化状态和安全错误摘要。
+    await loadInbox()
   } finally {
     analyzingId.value = null
   }
@@ -283,6 +292,16 @@ const entityTypeLabel = (type) => entityTypeLabels[type] ?? type
 const hasAnalysis = (item) => Boolean(
   item.summary || item.category || hasTags(item) || hasKeywords(item) || hasEntities(item)
 )
+const effectiveAiStatus = (item) => analyzingId.value === item.id
+  ? 'PROCESSING'
+  : item.aiStatus || 'NOT_PROCESSED'
+const aiStatusLabel = (item) => aiStatusLabels[effectiveAiStatus(item)] || '未分析'
+const aiStatusClass = (item) => `ai-status-${effectiveAiStatus(item).toLowerCase()}`
+const analysisButtonLabel = (item) => {
+  const status = effectiveAiStatus(item)
+  if (status === 'PROCESSING') return '分析中…'
+  return status === 'SUCCESS' || status === 'FAILED' ? '重新分析' : 'AI 分析'
+}
 
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
@@ -429,7 +448,7 @@ onBeforeUnmount(clearSelectedUpload)
           v-for="item in inboxItems"
           :key="item.id"
           class="inbox-item"
-          :aria-busy="analyzingId === item.id"
+          :aria-busy="effectiveAiStatus(item) === 'PROCESSING'"
         >
           <div class="item-top">
             <div class="item-meta">
@@ -441,6 +460,9 @@ onBeforeUnmount(clearSelectedUpload)
                     ? '🖼️ IMAGE'
                     : item.type }}</span>
               <time>{{ formatTime(item.createdTime) }}</time>
+              <span class="ai-status-chip" :class="aiStatusClass(item)">
+                {{ aiStatusLabel(item) }}
+              </span>
             </div>
             <div class="item-actions">
               <button
@@ -551,18 +573,27 @@ onBeforeUnmount(clearSelectedUpload)
               </ul>
             </div>
           </section>
+          <p
+            v-if="item.aiStatus === 'FAILED' && item.aiErrorMessage"
+            class="analysis-status-error"
+            role="status"
+          >
+            分析失败：{{ item.aiErrorMessage }}
+          </p>
+          <p
+            v-if="item.aiStatus === 'FAILED' && hasAnalysis(item)"
+            class="analysis-status-note"
+          >
+            正在显示上一次成功的 AI 结果。
+          </p>
           <div v-if="isAnalyzableItem(item)" class="analysis-actions" aria-live="polite">
             <button
               class="analysis-button"
               type="button"
-              :disabled="analyzingId !== null || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
+              :disabled="analyzingId !== null || effectiveAiStatus(item) === 'PROCESSING' || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
               @click="analyzeItem(item)"
             >
-              {{ analyzingId === item.id
-                ? '分析中…'
-                : hasAnalysis(item)
-                  ? '重新分析'
-                  : 'AI 分析' }}
+              {{ analysisButtonLabel(item) }}
             </button>
           </div>
           <p

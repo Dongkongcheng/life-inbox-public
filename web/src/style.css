@@ -100,6 +100,16 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .item-meta { color: #75827c; font-size: 0.76rem; }
 .item-meta { justify-content: flex-start; }
 .item-meta span { color: #2f745b; font-weight: 750; letter-spacing: 0.08em; }
+.item-meta .ai-status-chip {
+  padding: 4px 8px;
+  border: 1px solid #cad5ce;
+  border-radius: 999px;
+  letter-spacing: 0;
+  background: #fff;
+}
+.item-meta .ai-status-processing { color: #806b22; border-color: #e3d39b; background: #fff8dc; }
+.item-meta .ai-status-success { color: #2f745b; border-color: #b9d8cc; background: #eff8f4; }
+.item-meta .ai-status-failed { color: #b42318; border-color: #f0c7c3; background: #fff1f0; }
 .item-actions { display: flex; gap: 8px; }
 .favorite-button,
 .archive-button,
@@ -242,6 +252,16 @@ button:disabled { cursor: wait; opacity: 0.65; }
   font-size: 0.82rem;
 }
 .inbox-item > .analysis-error { margin: 8px 0 0; color: #b42318; font-size: 0.88rem; }
+.inbox-item > .analysis-status-error {
+  margin: 10px 0 0;
+  color: #b42318;
+  font-size: 0.88rem;
+}
+.inbox-item > .analysis-status-note {
+  margin: 5px 0 0;
+  color: #65736d;
+  font-size: 0.82rem;
+}
 
 @media (max-width: 560px) {
   .page-shell { width: min(100% - 20px, 760px); padding: 36px 0; }

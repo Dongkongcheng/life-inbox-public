@@ -5,7 +5,12 @@ import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
+import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
+import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -24,6 +29,8 @@ import java.util.regex.Pattern;
  */
 @Service
 public class InboxAnalyzeService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(InboxAnalyzeService.class);
 
     private static final String TYPE_TEXT = "TEXT";
     private static final String TYPE_URL = "URL";
@@ -65,22 +72,26 @@ public class InboxAnalyzeService {
     private final InboxItemMapper inboxItemMapper;
     private final AiServiceClient aiServiceClient;
     private final FileStorageService fileStorageService;
+    private final InboxAnalysisStatusService statusService;
     private final InboxAnalysisPersistenceService persistenceService;
 
     public InboxAnalyzeService(
             InboxItemMapper inboxItemMapper,
             AiServiceClient aiServiceClient,
             FileStorageService fileStorageService,
+            InboxAnalysisStatusService statusService,
             InboxAnalysisPersistenceService persistenceService
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.aiServiceClient = aiServiceClient;
         this.fileStorageService = fileStorageService;
+        this.statusService = statusService;
         this.persistenceService = persistenceService;
     }
 
     /**
-     * LLM 调用刻意放在事务外；只有全部结果通过 Java 二次校验后才开启短数据库事务。
+     * 基础校验后先用短事务提交 PROCESSING，再在事务外等待 Python/LLM。
+     * 这样不会为了同步 Analyze 持有几十秒数据库事务；崩溃后的 stale PROCESSING 留给下一 Task。
      */
     public InboxItem analyze(Long id) {
         InboxItem inboxItem = inboxItemMapper.selectById(id);
@@ -88,31 +99,67 @@ public class InboxAnalyzeService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }
 
-        AiAnalyzeResponse aiResponse = requestAnalysis(inboxItem);
-        ValidatedAnalysis analysis = validateAnalysis(aiResponse);
+        validateAnalyzableItem(inboxItem);
+        statusService.markProcessing(id);
 
-        return persistenceService.replaceAnalysis(
-                id,
-                analysis.summary(),
-                analysis.category(),
-                analysis.tags(),
-                analysis.keywords(),
-                analysis.entities()
+        ValidatedAnalysis analysis;
+        try {
+            AiAnalyzeResponse aiResponse = requestAnalysis(inboxItem);
+            analysis = validateAnalysis(aiResponse);
+        } catch (RuntimeException exception) {
+            recordFailure(id, safeProcessingFailureMessage(exception), exception);
+            throw exception;
+        }
+
+        try {
+            // 持久化 Bean 在同一短事务内替换五类结果，并在最后设置 SUCCESS。
+            return persistenceService.replaceAnalysis(
+                    id,
+                    analysis.summary(),
+                    analysis.category(),
+                    analysis.tags(),
+                    analysis.keywords(),
+                    analysis.entities()
+            );
+        } catch (RuntimeException exception) {
+            recordFailure(id, "AI 结果保存失败", exception);
+            throw exception;
+        }
+    }
+
+    private void validateAnalyzableItem(InboxItem inboxItem) {
+        if (TYPE_TEXT.equals(inboxItem.getType())) {
+            validateText(inboxItem);
+            return;
+        }
+        if (TYPE_URL.equals(inboxItem.getType())) {
+            if (inboxItem.getSourceUrl() == null || inboxItem.getSourceUrl().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL 的 sourceUrl 不能为空");
+            }
+            return;
+        }
+        if (TYPE_FILE.equals(inboxItem.getType()) || TYPE_IMAGE.equals(inboxItem.getType())) {
+            if (inboxItem.getFileUrl() == null || inboxItem.getFileUrl().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文件访问地址不能为空");
+            }
+            return;
+        }
+        throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "当前只支持分析 TEXT、URL、FILE 或 IMAGE"
         );
     }
 
     private AiAnalyzeResponse requestAnalysis(InboxItem inboxItem) {
         if (TYPE_TEXT.equals(inboxItem.getType())) {
-            validateText(inboxItem);
             return aiServiceClient.analyze(inboxItem.getTitle(), inboxItem.getContent());
         }
         if (TYPE_URL.equals(inboxItem.getType())) {
-            String sourceUrl = inboxItem.getSourceUrl();
-            if (sourceUrl == null || sourceUrl.isBlank()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL 的 sourceUrl 不能为空");
-            }
             // Java 不抓取网页正文；Python 完成 SSRF 校验、正文提取后再复用统一 Analyze。
-            return aiServiceClient.analyzeUrl(inboxItem.getTitle(), sourceUrl.trim());
+            return aiServiceClient.analyzeUrl(
+                    inboxItem.getTitle(),
+                    inboxItem.getSourceUrl().trim()
+            );
         }
         if (TYPE_FILE.equals(inboxItem.getType())) {
             // 文件仍由 Java 存储层管理；只发送安全读取的内容，不向 Python 暴露磁盘路径。
@@ -140,6 +187,32 @@ public class InboxAnalyzeService {
                 HttpStatus.BAD_REQUEST,
                 "当前只支持分析 TEXT、URL、FILE 或 IMAGE"
         );
+    }
+
+    private String safeProcessingFailureMessage(RuntimeException exception) {
+        if (exception instanceof UrlAnalyzeException
+                || exception instanceof FileAnalyzeException
+                || exception instanceof ImageAnalyzeException) {
+            return exception.getMessage();
+        }
+        if (exception instanceof AiServiceUnavailableException) {
+            return "AI 服务暂时不可用";
+        }
+        return "AI 分析失败";
+    }
+
+    private void recordFailure(
+            Long inboxItemId,
+            String safeMessage,
+            RuntimeException originalException
+    ) {
+        try {
+            statusService.markFailed(inboxItemId, safeMessage);
+        } catch (RuntimeException statusException) {
+            // 状态写入故障不能掩盖原始 Analyze 异常；只在服务日志记录，不写入数据库或 API。
+            originalException.addSuppressed(statusException);
+            LOGGER.warn("InboxItem {} 的 AI 失败状态保存失败", inboxItemId, statusException);
+        }
     }
 
     private void validateText(InboxItem inboxItem) {
