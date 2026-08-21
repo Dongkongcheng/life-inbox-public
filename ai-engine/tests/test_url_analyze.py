@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, get_url_analyze_service
-from app.schemas.analyze import MAX_ANALYZE_INPUT_CHARS, AnalyzeResult
+from app.schemas.analyze import MAX_ANALYZE_INPUT_CHARS, AnalyzeResult, PreparedContent
 from app.schemas.url_analyze import MAX_URL_CHARS, UrlAnalyzeRequest
 from app.services.url_analyze_service import UrlAnalyzeService
 from app.services.url_content_extractor import (
@@ -53,12 +53,18 @@ class StaticUrlAnalyzeService:
     def analyze(self, request) -> AnalyzeResult:
         return successful_result()
 
+    def prepare(self, request) -> PreparedContent:
+        return PreparedContent(title=request.title or "网页标题", text="网页提取正文")
+
 
 class FailedUrlAnalyzeService:
     def __init__(self, error: UrlContentError) -> None:
         self._error = error
 
     def analyze(self, request) -> AnalyzeResult:
+        raise self._error
+
+    def prepare(self, request) -> PreparedContent:
         raise self._error
 
 
@@ -458,6 +464,21 @@ def test_url_analyze_service_reuses_single_analyze_pipeline() -> None:
     assert analyze_service.requests[0].text == "网页提取后的正文"
 
 
+def test_url_prepare_returns_extracted_content_without_calling_llm() -> None:
+    extractor = StaticContentExtractor(
+        ExtractedUrlContent(title="网页标题", text="网页提取后的正文")
+    )
+    analyze_service = RecordingAnalyzeService()
+    service = UrlAnalyzeService(extractor, analyze_service)
+
+    prepared = service.prepare(
+        UrlAnalyzeRequest(url="https://example.com/article", title=None)
+    )
+
+    assert prepared == PreparedContent(title="网页标题", text="网页提取后的正文")
+    assert analyze_service.requests == []
+
+
 def test_url_analyze_endpoint_returns_existing_analyze_result() -> None:
     app.dependency_overrides[get_url_analyze_service] = lambda: StaticUrlAnalyzeService()
 
@@ -474,6 +495,18 @@ def test_url_analyze_endpoint_returns_existing_analyze_result() -> None:
         "keywords": ["正文提取"],
         "entities": [],
     }
+
+
+def test_url_prepare_endpoint_returns_plain_content() -> None:
+    app.dependency_overrides[get_url_analyze_service] = lambda: StaticUrlAnalyzeService()
+
+    response = client.post(
+        "/prepare/url",
+        json={"url": "https://example.com/article", "title": "用户标题"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"title": "用户标题", "text": "网页提取正文"}
 
 
 @pytest.mark.parametrize(

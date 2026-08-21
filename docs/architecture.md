@@ -723,12 +723,16 @@ Hybrid Search
 Rerank
 ```
 
-已实现前两步：
+已实现前四步：
 
 ```text
 Basic Keyword Search
         ↓
 AI-derived Field Search
+        ↓
+Filter / Ranking / Highlight
+        ↓
+Searchable Content
 ```
 
 只是 V0.3 的起点，
@@ -739,7 +743,7 @@ AI-derived Field Search
 
 # 15. 当前 Keyword Search 架构
 
-Task 2 当前实现：
+Task 4 当前实现：
 
 ```text
 Vue Search UI
@@ -763,12 +767,40 @@ category
 tags
 keywords
 entities
+searchable_content（URL / FILE / IMAGE）
 ```
 
-查询由 Spring Boot 参数化调用 MySQL，限制为 ACTIVE，并按创建时间倒序返回现有 InboxItem 表示。
+TEXT 直接复用业务源字段 `content`，不复制原文。URL、FILE、IMAGE 复用 V0.2 的安全网页提取、文档文本提取和 OCR，
+把归一化且最长 20,000 字符的派生正文保存到可空的 `inbox_item.searchable_content`。该字段可以重新生成，
+不是原始内容、文件或 AI 结构化结果的业务 Source of Truth，也不通过产品 API 暴露。
+
+```text
+URL / FILE / IMAGE
+        ↓
+FastAPI 复用现有提取器（不调用 LLM）
+        ↓
+Spring Boot 以 Attempt Guard 短更新保存 Searchable Content
+        ↓
+FastAPI /analyze 生成结构化 AI 结果
+```
+
+提取成功后即保存，因此后续 LLM 失败不会丢失本次可搜正文；提取失败不会覆盖旧值。重新分析成功提取会替换旧值，
+过期 Attempt 不能覆盖较新的内容。旧数据允许保持 NULL，当前不在启动时扫描或批量回填。
+
+查询由 Spring Boot 参数化调用 MySQL，限制为 ACTIVE，并使用确定性的字段优先级排序返回现有 InboxItem 表示。
 tags、keywords、entities 使用相关 EXISTS 子查询，既在数据库内判断候选，也不会因多个匹配关系产生重复主表行。
 
-不要一次把所有 Search 功能全部实现。
+当前仍是条目级统一正文，不拆分 document chunk，也不生成 Embedding 或调用 Vector Store。
+
+```text
+InboxItem 原始数据 / 受管文件 / URL
+                ↓
+Searchable Content（可重建派生数据）
+                ↓
+Future Embedding（可重建派生索引）
+                ↓
+Future Vector Index（可重建派生索引）
+```
 
 ---
 
@@ -1392,6 +1424,8 @@ V0.3 Smart Search
 ```text
 Basic Keyword Search
 AI-derived Field Search
+Search Filter / Ranking / Highlight
+Searchable Content Preparation
 ```
 
 后续目标：

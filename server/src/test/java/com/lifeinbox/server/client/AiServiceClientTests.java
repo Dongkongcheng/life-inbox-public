@@ -3,6 +3,7 @@ package com.lifeinbox.server.client;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
+import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.ImageAnalyzeException;
@@ -529,6 +530,93 @@ class AiServiceClientTests {
                         )
                 );
             }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void prepareUrlReturnsExtractedTextWithoutAnAnalyzeResult() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/prepare/url", exchange -> {
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = "{\"title\":\"网页标题\",\"text\":\"网页提取正文\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiPreparedContentResponse response = clientFor(server).prepareUrl(
+                    null,
+                    "https://example.com/article"
+            );
+
+            assertEquals(new AiPreparedContentResponse("网页标题", "网页提取正文"), response);
+            assertEquals(
+                    "{\"title\":null,\"url\":\"https://example.com/article\"}",
+                    requestBody.get()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void prepareFileAndImageReuseMultipartTransport() throws IOException {
+        AtomicReference<String> fileBody = new AtomicReference<>();
+        AtomicReference<String> imageBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/prepare/file", exchange -> {
+            fileBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.ISO_8859_1
+            ));
+            byte[] body = "{\"title\":\"notes.txt\",\"text\":\"TXT 正文\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.createContext("/prepare/image", exchange -> {
+            imageBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.ISO_8859_1
+            ));
+            byte[] body = "{\"title\":\"screen.png\",\"text\":\"OCR 正文\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            AiPreparedContentResponse file = client.prepareFile(
+                    "notes.txt",
+                    namedTextResource(),
+                    MediaType.TEXT_PLAIN
+            );
+            AiPreparedContentResponse image = client.prepareImage(
+                    "screen.png",
+                    namedImageResource(),
+                    MediaType.IMAGE_PNG
+            );
+
+            assertEquals("TXT 正文", file.text());
+            assertEquals("OCR 正文", image.text());
+            assertEquals(true, fileBody.get().contains("name=\"file\""));
+            assertEquals(true, imageBody.get().contains("name=\"file\""));
         } finally {
             server.stop(0);
         }

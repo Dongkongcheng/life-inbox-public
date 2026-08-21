@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
 from app.config import LlmConfigurationError
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResult
+from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
 from app.schemas.summary import SummaryRequest, SummaryResponse
 from app.schemas.url_analyze import UrlAnalyzeRequest
 from app.services.analyze_service import AnalyzeService
@@ -187,6 +187,16 @@ def analyze_url(
     return service.analyze(request)
 
 
+@app.post("/prepare/url", response_model=PreparedContent)
+def prepare_url(
+    request: UrlAnalyzeRequest,
+    service: UrlAnalyzeService = Depends(get_url_analyze_service),
+) -> PreparedContent:
+    """仅安全提取 URL 正文，供 Java 在 LLM 调用前持久化派生检索内容。"""
+
+    return service.prepare(request)
+
+
 @app.post("/analyze/file", response_model=AnalyzeResult)
 def analyze_file(
     file: Annotated[UploadFile, File()],
@@ -198,6 +208,17 @@ def analyze_file(
     return service.analyze(file, title)
 
 
+@app.post("/prepare/file", response_model=PreparedContent)
+def prepare_file(
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form(max_length=255)] = None,
+    service: FileAnalyzeService = Depends(get_file_analyze_service),
+) -> PreparedContent:
+    """仅复用现有 TXT/Markdown/PDF 提取器，不调用 LLM。"""
+
+    return service.prepare(file, title)
+
+
 @app.post("/analyze/image", response_model=AnalyzeResult)
 def analyze_image(
     file: Annotated[UploadFile, File()],
@@ -207,6 +228,17 @@ def analyze_image(
     """接收 Java 管理的图片内容，本地 OCR 后复用统一 Analyze Pipeline。"""
 
     return service.analyze(file, title)
+
+
+@app.post("/prepare/image", response_model=PreparedContent)
+def prepare_image(
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form(max_length=255)] = None,
+    service: ImageAnalyzeService = Depends(get_image_analyze_service),
+) -> PreparedContent:
+    """仅复用现有 OCR 生成纯文本，不调用 LLM 或 Vision 模型。"""
+
+    return service.prepare(file, title)
 
 
 @app.post("/summarize", response_model=SummaryResponse)

@@ -5,6 +5,7 @@ import com.lifeinbox.server.dto.AiImageErrorResponse;
 import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiFileErrorResponse;
+import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
 import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -131,6 +132,31 @@ public class AiServiceClient {
         }
     }
 
+    /** 只让 Python 安全提取网页正文；LLM Analyze 由 Java 在派生正文落库后单独调用。 */
+    public AiPreparedContentResponse prepareUrl(String title, String url) {
+        try {
+            AiPreparedContentResponse response = analysisRestClient.post()
+                    .uri("/prepare/url")
+                    .body(new AiUrlAnalyzeRequest(title, url))
+                    .retrieve()
+                    .body(AiPreparedContentResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回 URL 内容准备结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException | UrlAnalyzeException exception) {
+            throw exception;
+        } catch (RestClientResponseException exception) {
+            UrlAnalyzeException knownFailure = parseKnownUrlFailure(exception);
+            if (knownFailure != null) {
+                throw knownFailure;
+            }
+            throw new AiServiceUnavailableException("AI URL 内容准备服务暂不可用", exception);
+        } catch (RestClientException exception) {
+            throw new AiServiceUnavailableException("AI URL 内容准备服务暂不可用", exception);
+        }
+    }
+
     /** 将 Java 安全读取的受管文件作为 multipart 内容发送给 Python。 */
     public AiAnalyzeResponse analyzeFile(String title, Resource file, MediaType contentType) {
         MultiValueMap<String, Object> multipart = buildMultipart(title, file, contentType);
@@ -160,6 +186,38 @@ public class AiServiceClient {
         }
     }
 
+    /** 将受管文件交给既有文档解析器，返回纯文本而不调用 LLM。 */
+    public AiPreparedContentResponse prepareFile(
+            String title,
+            Resource file,
+            MediaType contentType
+    ) {
+        MultiValueMap<String, Object> multipart = buildMultipart(title, file, contentType);
+
+        try {
+            AiPreparedContentResponse response = analysisRestClient.post()
+                    .uri("/prepare/file")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(multipart)
+                    .retrieve()
+                    .body(AiPreparedContentResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回 FILE 内容准备结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException | FileAnalyzeException exception) {
+            throw exception;
+        } catch (RestClientResponseException exception) {
+            FileAnalyzeException knownFailure = parseKnownFileFailure(exception);
+            if (knownFailure != null) {
+                throw knownFailure;
+            }
+            throw new AiServiceUnavailableException("AI FILE 内容准备服务暂不可用", exception);
+        } catch (RestClientException exception) {
+            throw new AiServiceUnavailableException("AI FILE 内容准备服务暂不可用", exception);
+        }
+    }
+
     /** 将 Java 安全读取的受管图片作为 multipart 内容发送给 Python OCR。 */
     public AiAnalyzeResponse analyzeImage(String title, Resource file, MediaType contentType) {
         MultiValueMap<String, Object> multipart = buildMultipart(title, file, contentType);
@@ -186,6 +244,38 @@ public class AiServiceClient {
             throw new AiServiceUnavailableException("AI IMAGE 分析服务暂不可用", exception);
         } catch (RestClientException exception) {
             throw new AiServiceUnavailableException("AI IMAGE 分析服务暂不可用", exception);
+        }
+    }
+
+    /** 将受管图片交给既有 OCR，返回纯文本而不调用 LLM 或 Vision 模型。 */
+    public AiPreparedContentResponse prepareImage(
+            String title,
+            Resource file,
+            MediaType contentType
+    ) {
+        MultiValueMap<String, Object> multipart = buildMultipart(title, file, contentType);
+
+        try {
+            AiPreparedContentResponse response = analysisRestClient.post()
+                    .uri("/prepare/image")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(multipart)
+                    .retrieve()
+                    .body(AiPreparedContentResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回 IMAGE 内容准备结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException | ImageAnalyzeException exception) {
+            throw exception;
+        } catch (RestClientResponseException exception) {
+            ImageAnalyzeException knownFailure = parseKnownImageFailure(exception);
+            if (knownFailure != null) {
+                throw knownFailure;
+            }
+            throw new AiServiceUnavailableException("AI IMAGE 内容准备服务暂不可用", exception);
+        } catch (RestClientException exception) {
+            throw new AiServiceUnavailableException("AI IMAGE 内容准备服务暂不可用", exception);
         }
     }
 

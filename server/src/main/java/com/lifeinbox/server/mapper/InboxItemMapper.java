@@ -33,6 +33,7 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
                     i.title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
                     OR i.content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
                     OR i.summary LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR i.searchable_content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
                     OR i.category LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
                     OR EXISTS (
                         SELECT 1
@@ -53,30 +54,31 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
                         WHERE ie.inbox_item_id = i.id
                           AND ie.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
                     )
-              )
+            )
             ORDER BY CASE
-                WHEN i.title = #{query} THEN 8
-                WHEN i.title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 7
+                WHEN i.title = #{query} THEN 9
+                WHEN i.title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 8
                 WHEN EXISTS (
                     SELECT 1
                     FROM inbox_keyword ik_rank
                     WHERE ik_rank.inbox_item_id = i.id
                       AND ik_rank.keyword LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
-                ) THEN 6
+                ) THEN 7
                 WHEN EXISTS (
                     SELECT 1
                     FROM inbox_tag it_rank
                     INNER JOIN tag t_rank ON t_rank.id = it_rank.tag_id
                     WHERE it_rank.inbox_item_id = i.id
                       AND t_rank.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
-                ) THEN 5
+                ) THEN 6
                 WHEN EXISTS (
                     SELECT 1
                     FROM inbox_entity ie_rank
                     WHERE ie_rank.inbox_item_id = i.id
                       AND ie_rank.name LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
-                ) THEN 4
-                WHEN i.summary LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 3
+                ) THEN 5
+                WHEN i.summary LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 4
+                WHEN i.searchable_content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 3
                 WHEN i.content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 2
                 WHEN i.category LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!' THEN 1
                 ELSE 0
@@ -90,6 +92,23 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
             @Param("type") String type,
             @Param("category") String category,
             @Param("favorite") Integer favorite
+    );
+
+    /**
+     * 内容准备在事务外完成；单条条件 UPDATE 只允许当前 PROCESSING Attempt 写入派生正文。
+     */
+    @Update("""
+            UPDATE inbox_item
+            SET searchable_content = #{searchableContent}
+            WHERE id = #{id}
+              AND ai_status = #{processingStatus}
+              AND ai_attempt_id = #{attemptId}
+            """)
+    int updateSearchableContent(
+            @Param("id") Long id,
+            @Param("attemptId") String attemptId,
+            @Param("processingStatus") AiProcessingStatus processingStatus,
+            @Param("searchableContent") String searchableContent
     );
 
     /**
