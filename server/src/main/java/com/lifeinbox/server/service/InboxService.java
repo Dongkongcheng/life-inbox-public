@@ -32,6 +32,7 @@ public class InboxService {
     private static final String TYPE_IMAGE = "IMAGE";
     private static final String FILE_URL_PREFIX = "/api/files/";
     private static final int MAX_TITLE_LENGTH = 255;
+    private static final int MAX_SEARCH_QUERY_LENGTH = 200;
 
     private final InboxItemMapper inboxItemMapper;
     private final InboxTagMapper inboxTagMapper;
@@ -66,7 +67,35 @@ public class InboxService {
         // 归档只是修改状态而不是删除；主 Inbox 因此只查询 ACTIVE 数据。
         LambdaQueryWrapper<InboxItem> query = new LambdaQueryWrapper<>();
         query.eq(InboxItem::getStatus, STATUS_ACTIVE);
-        List<InboxItem> items = inboxItemMapper.selectList(query);
+        return enrichItems(inboxItemMapper.selectList(query));
+    }
+
+    /**
+     * Basic Keyword Search 只协调 MySQL 主表检索，不依赖 FastAPI 或触发新的 AI 分析。
+     */
+    public List<InboxItem> search(String query) {
+        String normalizedQuery = query == null ? "" : query.trim();
+        if (normalizedQuery.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "搜索关键词不能为空");
+        }
+        if (normalizedQuery.length() > MAX_SEARCH_QUERY_LENGTH) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "搜索关键词长度不能超过 " + MAX_SEARCH_QUERY_LENGTH
+            );
+        }
+
+        return enrichItems(inboxItemMapper.searchActiveByKeyword(escapeLikeLiteral(normalizedQuery)));
+    }
+
+    private String escapeLikeLiteral(String query) {
+        // Mapper 固定使用 ! 作为 LIKE ESCAPE，依次转义它自身及两个通配符。
+        return query.replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
+    }
+
+    private List<InboxItem> enrichItems(List<InboxItem> items) {
         // 当前数据量很小，逐条聚合三类分析子表；API 始终返回数组而不是数据库关系实体。
         for (InboxItem item : items) {
             item.setTags(inboxTagMapper.selectTagNamesByInboxItemId(item.getId()));
