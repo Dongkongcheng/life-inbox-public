@@ -20,6 +20,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,13 +35,17 @@ class InboxServiceTests {
     private final InboxEntityMapper inboxEntityMapper = mock(InboxEntityMapper.class);
     private final UrlMetadataService urlMetadataService = mock(UrlMetadataService.class);
     private final FileStorageService fileStorageService = mock(FileStorageService.class);
+    private final InboxAnalysisStatusService analysisStatusService = mock(
+            InboxAnalysisStatusService.class
+    );
     private final InboxService inboxService = new InboxService(
             inboxItemMapper,
             inboxTagMapper,
             inboxKeywordMapper,
             inboxEntityMapper,
             urlMetadataService,
-            fileStorageService
+            fileStorageService,
+            analysisStatusService
     );
 
     @Test
@@ -55,6 +60,7 @@ class InboxServiceTests {
                 entity("Spring AI", "TECHNOLOGY"),
                 entity("OpenAI", "ORGANIZATION")
         ));
+        when(analysisStatusService.isProcessingStale(item)).thenReturn(true);
 
         List<InboxItem> result = inboxService.list();
 
@@ -64,9 +70,11 @@ class InboxServiceTests {
                 new AiEntityResponse("Spring AI", "TECHNOLOGY"),
                 new AiEntityResponse("OpenAI", "ORGANIZATION")
         ), result.getFirst().getEntities());
+        assertTrue(result.getFirst().isAiProcessingStale());
         verify(inboxTagMapper).selectTagNamesByInboxItemId(1L);
         verify(inboxKeywordMapper).selectKeywordsByInboxItemId(1L);
         verify(inboxEntityMapper).selectEntitiesByInboxItemId(1L);
+        verify(analysisStatusService).isProcessingStale(item);
     }
 
     @Test

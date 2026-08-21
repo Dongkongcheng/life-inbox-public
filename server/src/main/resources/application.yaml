@@ -27,3 +27,5 @@ life-inbox:
     read-timeout: 5s
     # Analyze 内部还要等待 LLM，Java 上限应略大于 Python 的默认 20 秒超时。
     analysis-read-timeout: 30s
+    # 超过该时间的 PROCESSING 可由用户手动接管；应明显大于一次正常 Analyze 的预期耗时。
+    processing-stale-after: 5m

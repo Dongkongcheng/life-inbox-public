@@ -38,12 +38,19 @@ public class InboxItem {
     /** 最近一次统一 AI Analyze 的业务状态；新 Capture 不会自动触发分析。 */
     private AiProcessingStatus aiStatus = AiProcessingStatus.NOT_PROCESSED;
 
+    /** 每次 Analyze 都有独立 UUID，防止已经过期的请求覆盖后来接管的新请求。 */
+    private String aiAttemptId;
+
     /** 最近一次分析失败的安全简短说明，不保存异常栈或上游原始响应。 */
     private String aiErrorMessage;
 
     private LocalDateTime aiStartedTime;
 
     private LocalDateTime aiFinishedTime;
+
+    /** PROCESSING 是否超过配置阈值；这是 API 派生值，不新增第五种数据库状态。 */
+    @TableField(exist = false)
+    private boolean aiProcessingStale;
 
     /** 标签存放在关系表中，这个字段只用于 API 返回，不映射 inbox_item 列。 */
     @TableField(exist = false)
@@ -137,6 +144,14 @@ public class InboxItem {
         this.aiStatus = aiStatus;
     }
 
+    public String getAiAttemptId() {
+        return aiAttemptId;
+    }
+
+    public void setAiAttemptId(String aiAttemptId) {
+        this.aiAttemptId = aiAttemptId;
+    }
+
     public String getAiErrorMessage() {
         return aiErrorMessage;
     }
@@ -159,6 +174,14 @@ public class InboxItem {
 
     public void setAiFinishedTime(LocalDateTime aiFinishedTime) {
         this.aiFinishedTime = aiFinishedTime;
+    }
+
+    public boolean isAiProcessingStale() {
+        return aiProcessingStale;
+    }
+
+    public void setAiProcessingStale(boolean aiProcessingStale) {
+        this.aiProcessingStale = aiProcessingStale;
     }
 
     public List<String> getTags() {

@@ -1,44 +1,82 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.entity.AiProcessingStatus;
+import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-/** 管理 Analyze 开始与失败状态；每个方法都是独立、立即提交的短事务。 */
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+/**
+ * 管理 Analyze 开始与失败状态；每个方法都是独立、立即提交的短事务。
+ * 当前只在用户手动 Analyze 时懒恢复 stale PROCESSING，不做自动重试或定时扫描，Capture 仍不依赖 AI。
+ */
 @Service
 public class InboxAnalysisStatusService {
 
     private static final int MAX_ERROR_MESSAGE_CHARS = 255;
 
     private final InboxItemMapper inboxItemMapper;
+    private final Duration processingStaleAfter;
+    private final Clock clock;
 
-    public InboxAnalysisStatusService(InboxItemMapper inboxItemMapper) {
+    @Autowired
+    public InboxAnalysisStatusService(
+            InboxItemMapper inboxItemMapper,
+            @Value("${life-inbox.ai.processing-stale-after:5m}") Duration processingStaleAfter
+    ) {
+        this(inboxItemMapper, processingStaleAfter, Clock.systemDefaultZone());
+    }
+
+    InboxAnalysisStatusService(
+            InboxItemMapper inboxItemMapper,
+            Duration processingStaleAfter,
+            Clock clock
+    ) {
+        if (processingStaleAfter == null
+                || processingStaleAfter.isZero()
+                || processingStaleAfter.isNegative()) {
+            throw new IllegalArgumentException("processing-stale-after 必须大于 0");
+        }
         this.inboxItemMapper = inboxItemMapper;
+        this.processingStaleAfter = processingStaleAfter;
+        this.clock = clock;
     }
 
     /**
      * 在远程调用前提交 PROCESSING。条件 UPDATE 是数据库级重复请求保护，
-     * 当前单机 MySQL 已足够，不需要 Redis 分布式锁。
+     * 当前单机 MySQL 已足够，不需要 Redis 分布式锁；唯一 Attempt ID 使被接管的旧请求失去写权限。
      */
     @Transactional
-    public void markProcessing(Long inboxItemId) {
+    public String markProcessing(Long inboxItemId) {
+        String attemptId = UUID.randomUUID().toString();
+        LocalDateTime startedTime = LocalDateTime.now(clock);
         int updatedRows = inboxItemMapper.markAnalysisProcessing(
                 inboxItemId,
-                AiProcessingStatus.PROCESSING
+                AiProcessingStatus.PROCESSING,
+                attemptId,
+                startedTime,
+                startedTime.minus(processingStaleAfter)
         );
         if (updatedRows != 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI 分析正在进行中");
         }
+        return attemptId;
     }
 
     /**
      * 失败只记录安全摘要并结束本次尝试；旧的五类 AI 结果继续保留供用户查看。
      */
     @Transactional
-    public void markFailed(Long inboxItemId, String errorMessage) {
+    public boolean markFailed(Long inboxItemId, String attemptId, String errorMessage) {
         String candidate = errorMessage == null || errorMessage.isBlank()
                 ? "AI 分析失败"
                 : errorMessage;
@@ -47,12 +85,27 @@ public class InboxAnalysisStatusService {
                 : candidate.substring(0, MAX_ERROR_MESSAGE_CHARS);
         int updatedRows = inboxItemMapper.markAnalysisFailed(
                 inboxItemId,
+                attemptId,
                 AiProcessingStatus.PROCESSING,
                 AiProcessingStatus.FAILED,
                 safeMessage
         );
-        if (updatedRows != 1) {
-            throw new IllegalStateException("AI 失败状态保存失败");
+        // 返回 0 表示该 Attempt 已被接管；旧失败必须静默放弃，不能破坏新请求。
+        return updatedRows == 1;
+    }
+
+    /**
+     * STALE 只是由 PROCESSING 与 startedTime 计算的展示/接管条件，不写入第五种状态。
+     */
+    public boolean isProcessingStale(InboxItem inboxItem) {
+        if (inboxItem == null || inboxItem.getAiStatus() != AiProcessingStatus.PROCESSING) {
+            return false;
         }
+        LocalDateTime startedTime = inboxItem.getAiStartedTime();
+        if (startedTime == null) {
+            return true;
+        }
+        LocalDateTime staleBefore = LocalDateTime.now(clock).minus(processingStaleAfter);
+        return !startedTime.isAfter(staleBefore);
     }
 }

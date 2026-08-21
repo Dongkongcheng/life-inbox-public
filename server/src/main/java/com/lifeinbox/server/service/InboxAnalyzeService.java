@@ -90,8 +90,8 @@ public class InboxAnalyzeService {
     }
 
     /**
-     * 基础校验后先用短事务提交 PROCESSING，再在事务外等待 Python/LLM。
-     * 这样不会为了同步 Analyze 持有几十秒数据库事务；崩溃后的 stale PROCESSING 留给下一 Task。
+     * 基础校验后先用短事务领取唯一 Attempt，再在事务外等待 Python/LLM。
+     * stale PROCESSING 可由新 Attempt 懒恢复；旧 Attempt 的成功和失败都没有回写资格。
      */
     public InboxItem analyze(Long id) {
         InboxItem inboxItem = inboxItemMapper.selectById(id);
@@ -100,14 +100,14 @@ public class InboxAnalyzeService {
         }
 
         validateAnalyzableItem(inboxItem);
-        statusService.markProcessing(id);
+        String attemptId = statusService.markProcessing(id);
 
         ValidatedAnalysis analysis;
         try {
             AiAnalyzeResponse aiResponse = requestAnalysis(inboxItem);
             analysis = validateAnalysis(aiResponse);
         } catch (RuntimeException exception) {
-            recordFailure(id, safeProcessingFailureMessage(exception), exception);
+            recordFailure(id, attemptId, safeProcessingFailureMessage(exception), exception);
             throw exception;
         }
 
@@ -115,6 +115,7 @@ public class InboxAnalyzeService {
             // 持久化 Bean 在同一短事务内替换五类结果，并在最后设置 SUCCESS。
             return persistenceService.replaceAnalysis(
                     id,
+                    attemptId,
                     analysis.summary(),
                     analysis.category(),
                     analysis.tags(),
@@ -122,7 +123,7 @@ public class InboxAnalyzeService {
                     analysis.entities()
             );
         } catch (RuntimeException exception) {
-            recordFailure(id, "AI 结果保存失败", exception);
+            recordFailure(id, attemptId, "AI 结果保存失败", exception);
             throw exception;
         }
     }
@@ -203,11 +204,15 @@ public class InboxAnalyzeService {
 
     private void recordFailure(
             Long inboxItemId,
+            String attemptId,
             String safeMessage,
             RuntimeException originalException
     ) {
         try {
-            statusService.markFailed(inboxItemId, safeMessage);
+            boolean saved = statusService.markFailed(inboxItemId, attemptId, safeMessage);
+            if (!saved) {
+                LOGGER.info("忽略已失效 AI Attempt 的失败结果，InboxItem={}", inboxItemId);
+            }
         } catch (RuntimeException statusException) {
             // 状态写入故障不能掩盖原始 Analyze 异常；只在服务日志记录，不写入数据库或 API。
             originalException.addSuppressed(statusException);

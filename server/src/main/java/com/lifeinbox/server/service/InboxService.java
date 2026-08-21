@@ -40,6 +40,7 @@ public class InboxService {
     private final InboxEntityMapper inboxEntityMapper;
     private final UrlMetadataService urlMetadataService;
     private final FileStorageService fileStorageService;
+    private final InboxAnalysisStatusService analysisStatusService;
 
     public InboxService(
             InboxItemMapper inboxItemMapper,
@@ -47,7 +48,8 @@ public class InboxService {
             InboxKeywordMapper inboxKeywordMapper,
             InboxEntityMapper inboxEntityMapper,
             UrlMetadataService urlMetadataService,
-            FileStorageService fileStorageService
+            FileStorageService fileStorageService,
+            InboxAnalysisStatusService analysisStatusService
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.inboxTagMapper = inboxTagMapper;
@@ -55,6 +57,7 @@ public class InboxService {
         this.inboxEntityMapper = inboxEntityMapper;
         this.urlMetadataService = urlMetadataService;
         this.fileStorageService = fileStorageService;
+        this.analysisStatusService = analysisStatusService;
     }
 
     public List<InboxItem> list() {
@@ -71,6 +74,7 @@ public class InboxService {
                             .map(this::toEntityResponse)
                             .toList()
             );
+            item.setAiProcessingStale(analysisStatusService.isProcessingStale(item));
         }
         return items;
     }

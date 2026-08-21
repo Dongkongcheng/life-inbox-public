@@ -50,7 +50,9 @@ class InboxAnalysisPersistenceServiceTests {
                 new NormalizedTag("Java", "java"),
                 new NormalizedTag("Spring AI", "spring ai")
         );
-        when(inboxItemMapper.updateAnalysis(1L, "摘要", "技术学习")).thenReturn(1);
+        when(inboxItemMapper.updateAnalysis(
+                1L, "attempt-1", AiProcessingStatus.PROCESSING, "摘要", "技术学习"
+        )).thenReturn(1);
         when(tagMapper.selectIdByNormalizedName("java")).thenReturn(10L);
         when(tagMapper.selectIdByNormalizedName("spring ai")).thenReturn(11L);
         when(inboxTagMapper.insertRelation(1L, 10L)).thenReturn(1);
@@ -61,6 +63,7 @@ class InboxAnalysisPersistenceServiceTests {
         when(inboxEntityMapper.insertEntity(1L, "OpenAI", "ORGANIZATION")).thenReturn(1);
         when(inboxItemMapper.markAnalysisSuccess(
                 1L,
+                "attempt-1",
                 AiProcessingStatus.PROCESSING,
                 AiProcessingStatus.SUCCESS
         )).thenReturn(1);
@@ -80,6 +83,7 @@ class InboxAnalysisPersistenceServiceTests {
 
         InboxItem result = persistenceService.replaceAnalysis(
                 1L,
+                "attempt-1",
                 "摘要",
                 "技术学习",
                 tags,
@@ -103,7 +107,9 @@ class InboxAnalysisPersistenceServiceTests {
                 inboxKeywordMapper,
                 inboxEntityMapper
         );
-        order.verify(inboxItemMapper).updateAnalysis(1L, "摘要", "技术学习");
+        order.verify(inboxItemMapper).updateAnalysis(
+                1L, "attempt-1", AiProcessingStatus.PROCESSING, "摘要", "技术学习"
+        );
         order.verify(inboxTagMapper).deleteByInboxItemId(1L);
         order.verify(tagMapper).upsertTag("Java", "java");
         order.verify(tagMapper).selectIdByNormalizedName("java");
@@ -119,19 +125,23 @@ class InboxAnalysisPersistenceServiceTests {
         order.verify(inboxEntityMapper).insertEntity(1L, "OpenAI", "ORGANIZATION");
         order.verify(inboxItemMapper).markAnalysisSuccess(
                 1L,
+                "attempt-1",
                 AiProcessingStatus.PROCESSING,
                 AiProcessingStatus.SUCCESS
         );
     }
 
     @Test
-    void missingItemStopsBeforeDeletingOldRelations() {
-        when(inboxItemMapper.updateAnalysis(99L, "摘要", "其他")).thenReturn(0);
+    void lateSuccessStopsBeforeDeletingNewAttemptRelations() {
+        when(inboxItemMapper.updateAnalysis(
+                99L, "old-attempt", AiProcessingStatus.PROCESSING, "摘要", "其他"
+        )).thenReturn(0);
 
         ResponseStatusException exception = assertThrows(
                 ResponseStatusException.class,
                 () -> persistenceService.replaceAnalysis(
                         99L,
+                        "old-attempt",
                         "摘要",
                         "其他",
                         List.of(new NormalizedTag("测试", "测试")),
@@ -140,7 +150,7 @@ class InboxAnalysisPersistenceServiceTests {
                 )
         );
 
-        assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
         verify(inboxTagMapper, never()).deleteByInboxItemId(anyLong());
         verify(inboxKeywordMapper, never()).deleteByInboxItemId(anyLong());
         verify(inboxEntityMapper, never()).deleteByInboxItemId(anyLong());
@@ -148,7 +158,9 @@ class InboxAnalysisPersistenceServiceTests {
 
     @Test
     void tagFailureEscapesTransactionAndDoesNotContinueWithRelations() {
-        when(inboxItemMapper.updateAnalysis(1L, "新摘要", "工作")).thenReturn(1);
+        when(inboxItemMapper.updateAnalysis(
+                1L, "attempt-1", AiProcessingStatus.PROCESSING, "新摘要", "工作"
+        )).thenReturn(1);
         when(tagMapper.upsertTag("Java", "java"))
                 .thenThrow(new IllegalStateException("mock tag failure"));
 
@@ -156,6 +168,7 @@ class InboxAnalysisPersistenceServiceTests {
                 IllegalStateException.class,
                 () -> persistenceService.replaceAnalysis(
                         1L,
+                        "attempt-1",
                         "新摘要",
                         "工作",
                         List.of(new NormalizedTag("Java", "java")),
@@ -172,7 +185,9 @@ class InboxAnalysisPersistenceServiceTests {
 
     @Test
     void entityFailureEscapesAfterEarlierResultsAndSkipsReload() {
-        when(inboxItemMapper.updateAnalysis(1L, "新摘要", "技术学习")).thenReturn(1);
+        when(inboxItemMapper.updateAnalysis(
+                1L, "attempt-1", AiProcessingStatus.PROCESSING, "新摘要", "技术学习"
+        )).thenReturn(1);
         when(tagMapper.selectIdByNormalizedName("java")).thenReturn(10L);
         when(inboxTagMapper.insertRelation(1L, 10L)).thenReturn(1);
         when(inboxKeywordMapper.insertKeyword(1L, "ChatModel")).thenReturn(1);
@@ -182,6 +197,7 @@ class InboxAnalysisPersistenceServiceTests {
                 IllegalStateException.class,
                 () -> persistenceService.replaceAnalysis(
                         1L,
+                        "attempt-1",
                         "新摘要",
                         "技术学习",
                         List.of(new NormalizedTag("Java", "java")),
@@ -198,11 +214,14 @@ class InboxAnalysisPersistenceServiceTests {
 
     @Test
     void successStatusFailureEscapesAndSkipsReload() {
-        when(inboxItemMapper.updateAnalysis(1L, "新摘要", "技术学习")).thenReturn(1);
+        when(inboxItemMapper.updateAnalysis(
+                1L, "attempt-1", AiProcessingStatus.PROCESSING, "新摘要", "技术学习"
+        )).thenReturn(1);
         when(tagMapper.selectIdByNormalizedName("java")).thenReturn(10L);
         when(inboxTagMapper.insertRelation(1L, 10L)).thenReturn(1);
         when(inboxItemMapper.markAnalysisSuccess(
                 1L,
+                "attempt-1",
                 AiProcessingStatus.PROCESSING,
                 AiProcessingStatus.SUCCESS
         )).thenReturn(0);
@@ -211,6 +230,7 @@ class InboxAnalysisPersistenceServiceTests {
                 IllegalStateException.class,
                 () -> persistenceService.replaceAnalysis(
                         1L,
+                        "attempt-1",
                         "新摘要",
                         "技术学习",
                         List.of(new NormalizedTag("Java", "java")),
@@ -228,6 +248,7 @@ class InboxAnalysisPersistenceServiceTests {
         Method method = InboxAnalysisPersistenceService.class.getMethod(
                 "replaceAnalysis",
                 Long.class,
+                String.class,
                 String.class,
                 String.class,
                 List.class,
