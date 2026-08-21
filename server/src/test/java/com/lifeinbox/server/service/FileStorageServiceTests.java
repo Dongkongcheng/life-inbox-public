@@ -15,6 +15,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -246,6 +247,27 @@ class FileStorageServiceTests {
         );
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+    }
+
+    @Test
+    void deletesManagedFileFromDatabaseFileUrl() throws Exception {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+        String storedName = "550e8400-e29b-41d4-a716-446655440000.txt";
+        Path storedPath = tempDirectory.resolve(storedName);
+        Files.writeString(storedPath, "temporary content");
+
+        service.deleteByFileUrl("/api/files/" + storedName);
+
+        assertFalse(Files.exists(storedPath));
+    }
+
+    @Test
+    void malformedManagedFileUrlDoesNotFailCompletedBusinessDeletion() {
+        FileStorageService service = new FileStorageService(tempDirectory.toString());
+
+        service.deleteByFileUrl("/api/files/../application.yaml");
+
+        assertTrue(Files.exists(tempDirectory));
     }
 
     @Test

@@ -184,9 +184,20 @@ public class InboxService {
     }
 
     public void delete(Long id) {
+        InboxItem inboxItem = inboxItemMapper.selectById(id);
+        if (inboxItem == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+        }
+
         int deletedRows = inboxItemMapper.deleteById(id);
         if (deletedRows == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+        }
+
+        if ((TYPE_FILE.equals(inboxItem.getType()) || TYPE_IMAGE.equals(inboxItem.getType()))
+                && !isBlank(inboxItem.getFileUrl())) {
+            // 先确认数据库删除成功，再尽力清理磁盘；两种存储无法组成同一个原子事务。
+            fileStorageService.deleteByFileUrl(inboxItem.getFileUrl());
         }
     }
 

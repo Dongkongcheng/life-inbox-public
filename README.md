@@ -2,1032 +2,197 @@
 
 > Capture First, Organize Later.
 
-LifeInbox 是一个面向个人使用的信息收件箱，用于统一收集日常生活和学习过程中遇到的文字、网页链接、文件、图片等信息。
+LifeInbox 是一个个人信息收件箱，用统一的 InboxItem 收集文字、网页、文件和图片，再由可选 AI 帮助理解和整理。
 
-它希望解决一个很常见的问题：
-
-> 我记得自己以前看到过、收藏过或者保存过某个东西，但需要的时候却找不到了。
-
-LifeInbox 的长期目标不是做一个普通收藏夹，而是逐步形成一个能够帮助用户：
-
-**收集 → 理解 → 整理 → 检索 → 行动**
-
-的个人信息系统。
-
----
-
-## ✨ Product Philosophy
-
-LifeInbox 的核心原则是：
-
-**Capture First, Organize Later.**
-
-保存信息时，用户不应该被迫立即：
-
-* 选择文件夹
-* 选择分类
-* 添加标签
-* 写摘要
-* 整理知识结构
-
-第一件事应该只是：
+长期产品流程：
 
 ```text
-看到有价值的信息
-        ↓
-       Save
-        ↓
-      Inbox
+Capture → Understand → Organize → Retrieve → Action
 ```
 
-整理工作可以以后再完成，也可以逐步交给 AI。
+AI 是增强能力，不是 Capture 的前置条件。FastAPI、OCR、网页抓取或 LLM 失败时，原始内容仍应保存并可继续查询、收藏、归档和删除。
 
----
+## 当前版本
 
-## 🧭 Product Flow
+### V0.1 — Universal Inbox ✅
 
-LifeInbox 的长期产品流程：
+- TEXT、URL、FILE、IMAGE Capture
+- URL 标题获取、文件/图片本地存储与图片预览
+- 统一 Inbox 列表
+- 收藏、取消收藏、归档和删除
+- Vue 3、Spring Boot 与 MySQL 持久化
+- 基础 URL、文件名、扩展名、MIME、大小和路径安全检查
+
+### V0.2 — AI Organizer ✅
+
+- 独立 FastAPI AI Engine 与 Java ↔ Python HTTP 集成
+- TEXT 直接 Analyze
+- URL 安全抓取静态 HTML 正文后 Analyze
+- TXT、Markdown、带文本层 PDF 提取后 Analyze
+- JPG/PNG/WEBP 本地 OCR 后 Analyze
+- 一次 LLM 请求统一生成 Summary、Category、Tags、Keywords、Entities
+- `NOT_PROCESSED`、`PROCESSING`、`SUCCESS`、`FAILED` 状态机
+- 手工 Analyze、重新分析、FAILED Retry、stale PROCESSING Recovery
+- attemptId Guard、防重复处理与迟到结果覆盖
+- 可配置的 AFTER_COMMIT 进程内后台自动 Analyze（默认关闭）
+- 前端状态、五类结果、重试与有限轮询
+
+IMAGE 当前是面向截图/文字图片的 **OCR-based Analyze**，不是 General Vision。URL 不执行 JavaScript；PDF 不做 OCR；DOCX、PPTX、Excel 等格式尚未支持。
+
+### V0.3 — Smart Search（Next / Planned）
+
+V0.3 尚未实现。关键词搜索、Semantic Search、Embedding、Hybrid Search 和 Rerank 只是下一阶段候选，详见 [Roadmap](docs/roadmap.md)。
+
+## 架构与职责
 
 ```text
-Capture
-   ↓
-Understand
-   ↓
-Organize
-   ↓
-Retrieve
-   ↓
-Action
+Vue 3
+  ↓ 产品 API
+Spring Boot / Java 21
+  ├─ MySQL（业务 Source of Truth）
+  ├─ Local Files
+  └─ FastAPI
+       ├─ URL / FILE / OCR Extractor
+       └─ AnalyzeService → LLM
 ```
 
-对应含义：
+Java 负责 InboxItem、业务状态、文件元数据、AI Attempt、结果持久化和产品 API。Python 只负责内容提取、OCR、LLM 与结构化校验，不连接业务数据库。完整说明见 [架构文档](docs/architecture.md)。
 
-### Capture
+## 技术栈
 
-快速收集：
+- Frontend：Vue 3、Vite、JavaScript
+- Backend：Java 21、Spring Boot 4.1、MyBatis-Plus、MySQL
+- AI Engine：Python 3.11+、FastAPI、httpx、Beautiful Soup、pypdf、RapidOCR、ONNX Runtime、Pillow
+- Storage：MySQL + 本地 `server/uploads`
 
-* Text
-* URL
-* File
-* Image
+项目没有引入 Redis、MQ、向量数据库、RAG、Agent、MCP 或通用 Vision。
 
-### Understand
-
-未来通过 AI 理解信息：
-
-* 内容摘要
-* 自动分类
-* 标签生成
-* 关键词提取
-* 实体提取
-
-### Organize
-
-自动帮助用户整理已经保存的信息。
-
-### Retrieve
-
-帮助用户重新找到过去保存过的内容：
-
-* 关键词搜索
-* 语义搜索
-* RAG
-* 个人知识检索
-
-### Action
-
-进一步从信息中识别：
-
-* Todo
-* Deadline
-* Reminder
-* Action Item
-
----
-
-# 📌 Current Status
-
-## V0.1 — Universal Inbox ✅
-
-V0.1 主要解决：
-
-> **如何把不同类型的信息快速保存进统一 Inbox？**
-
-目前已经实现的主要功能：
-
-* ✅ TEXT 文本收集
-* ✅ URL 链接收集
-* ✅ URL 自动获取网页标题
-* ✅ FILE 文件上传
-* ✅ IMAGE 图片上传
-* ✅ 图片预览
-* ✅ Inbox 列表
-* ✅ 收藏 / 取消收藏
-* ✅ 归档
-* ✅ 删除
-* ✅ 本地文件存储
-* ✅ 基础文件安全检查
-* ✅ URL 基础安全检查
-* ✅ Vue 与 Spring Boot 前后端通信
-* ✅ MySQL 数据持久化
-
-V0.1 不依赖 AI。
-
-即使未来 AI 服务不可用，LifeInbox 的基本 Capture 和 Inbox 管理能力仍然可以正常工作。
-
----
-
-## V0.2 — AI Understanding 🚧
-
-当前正在进入 V0.2 开发阶段。
-
-V0.2 的目标是：
-
-> **让 LifeInbox 开始理解用户保存进去的信息。**
-
-计划逐步实现：
-
-* ✅ Python AI Engine 基础服务
-* ✅ FastAPI `/health`
-* ✅ Java ↔ Python Health Integration
-* ✅ AI 服务不可用时返回结构化 503
-* ✅ TEXT AI Analyze（手工或可选自动触发）
-  * ✅ Summary
-  * ✅ Category
-  * ✅ Tags
-  * ✅ Keywords
-  * ✅ Entities
-* ✅ URL Content Extraction
-* ✅ URL AI Analyze（手工或可选自动触发）
-* ✅ FILE Text Extraction
-  * ✅ TXT
-  * ✅ Markdown
-  * ✅ PDF 文本层
-* ✅ FILE AI Analyze（手工或可选自动触发）
-* ✅ IMAGE OCR
-* ✅ IMAGE OCR-based AI Analyze（手工或可选自动触发）
-* ⏳ General Image Vision
-* ✅ AI Processing Status
-  * ✅ `NOT_PROCESSED`
-  * ✅ `PROCESSING`
-  * ✅ `SUCCESS`
-  * ✅ `FAILED`
-* ✅ Manual AI Retry
-* ✅ Stale PROCESSING Recovery
-* ✅ AI Attempt Protection
-* ✅ Automatic Analyze After Capture（默认关闭）
-* ✅ Bounded In-process Background AI Processing
-
-> 注意：以上带有 `⏳` 的功能属于开发计划，目前尚未完成。
-
----
-
-# 🏗 Architecture
-
-LifeInbox 当前采用：
-
-```text
-                    LifeInbox
-                        │
-                        ▼
-                    Vue 3
-                     Vite
-                        │
-                   REST API
-                        │
-                        ▼
-               Spring Boot 4.1
-                  Java 21
-                        │
-             ┌──────────┴──────────┐
-             ▼                     ▼
-           MySQL              Local Files
-         Business Data          Uploads
-```
-
-从 V0.2 开始，将逐步增加：
-
-```text
-                    LifeInbox
-                        │
-                        ▼
-                     Vue 3
-                        │
-                        ▼
-                  Spring Boot
-                        │
-             ┌──────────┴──────────┐
-             │                     │
-             ▼                     ▼
-           MySQL               FastAPI
-                                  │
-                                  ▼
-                             AI Processing
-```
-
----
-
-# 🧩 Java + Python Responsibilities
-
-LifeInbox 采用：
-
-> **Java 负责业务，Python 负责 AI。**
-
-## Java / Spring Boot
-
-Java 是业务数据的 **Source of Truth**。
-
-主要负责：
-
-* InboxItem
-* 业务状态
-* 数据持久化
-* 文件元数据
-* 收藏
-* 归档
-* 删除
-* 产品 API
-* AI 任务状态
-* AI 结果持久化
-* 业务异常处理
-
----
-
-## Python / FastAPI
-
-Python AI Service 主要负责未来的 AI 处理能力，例如：
-
-* 内容理解
-* 摘要生成
-* 自动标签
-* 自动分类
-* 关键词提取
-* 实体提取
-* 文档解析
-* OCR
-* Embedding
-* Rerank
-
-Python 不负责重复实现 InboxItem CRUD。
-
-Python 不应该成为核心业务数据的 Source of Truth。
-
----
-
-# 🧱 Core Model
-
-LifeInbox 当前最重要的业务模型是：
-
-```text
-InboxItem
-```
-
-所有捕获的信息首先进入统一 Inbox。
-
-当前主要类型：
-
-```text
-TEXT
-URL
-FILE
-IMAGE
-```
-
-例如：
-
-```text
-                InboxItem
-                    │
-       ┌────────────┼────────────┐
-       ▼            ▼            ▼
-      TEXT          URL         FILE
-                                  │
-                                IMAGE
-```
-
-当前不会为不同 Capture 类型分别创建：
-
-```text
-TextItem
-UrlItem
-FileItem
-ImageItem
-```
-
-等独立核心业务模型。
-
-除非未来出现明确需求，否则优先保持统一 InboxItem 模型。
-
----
-
-# 🛠 Tech Stack
-
-## Frontend
-
-* Vue 3
-* Vite
-* JavaScript
-
-## Backend
-
-* Java 21
-* Spring Boot 4.1
-* Spring MVC
-* MyBatis-Plus
-* MySQL
-
-## AI Service
-
-V0.2 开始逐步引入：
-
-* Python
-* FastAPI
-
-## Storage
-
-当前：
-
-* MySQL
-* Local File Storage
-
-未来根据真实需求可能增加：
-
-* Vector Database
-* Redis
-* Object Storage
-
-但不会为了技术栈而提前引入。
-
----
-
-# 📂 Project Structure
+## 目录
 
 ```text
 life-inbox/
-│
-├── web/
-│   └── Vue 3 frontend
-│
-├── server/
-│   └── Spring Boot backend
-│
-├── ai-engine/
-│   └── Python AI service
-│
-├── extension/
-│   └── Future browser extension
-│
-├── docs/
-│   └── Project documents
-│
-├── deploy/
-│   └── Deployment configuration
-│
+├── web/          # Vue 前端
+├── server/       # Spring Boot 业务后端
+├── ai-engine/    # FastAPI AI 服务
+├── docs/         # 架构、数据库、API、Roadmap、验收与 SQL
+├── extension/    # 预留目录，当前不是 V0.2 能力
+├── deploy/       # 预留目录
 ├── AGENTS.md
-│   └── Repository development instructions
-│
-├── .gitignore
-│
 └── README.md
 ```
 
-> 部分目录目前可能仍处于预留或开发阶段，以仓库实际代码为准。
+## 本地运行
 
----
+### 1. 准备数据库
 
-# 🗄 Database
-
-数据库名称：
+全新安装直接执行：
 
 ```text
-life_inbox
+docs/sql/v0.2-schema.sql
 ```
 
-核心表：
+已有 V0.1/V0.2 数据库不要重复执行 Fresh Schema，只按顺序执行尚未执行的历史增量 SQL。数据库说明见 [docs/database.md](docs/database.md)。本项目当前没有自动 Migration 框架。
 
-```text
-inbox_item
-```
-
-主要字段：
-
-```text
-id
-user_id
-type
-title
-content
-summary
-category
-source_url
-file_url
-status
-favorite
-created_time
-updated_time
-```
-
-AI Tags 使用统一关系模型，不按 Capture 类型拆表：
-
-```text
-tag
-inbox_tag
-```
-
-Keywords 和 Entities 是每条 InboxItem 的分析结果，分别使用简单的一对多表：
-
-```text
-inbox_keyword
-inbox_entity
-```
-
-其中：
-
-```text
-type
-```
-
-当前主要用于区分：
-
-```text
-TEXT
-URL
-FILE
-IMAGE
-```
-
-`status` 用于表示 InboxItem 当前状态，例如：
-
-```text
-ACTIVE
-ARCHIVED
-```
-
-`favorite` 用于表示收藏状态。
-
----
-
-# 🚀 Local Development
-
-## Requirements
-
-建议准备以下环境：
-
-```text
-Java 21
-Node.js
-npm
-MySQL
-Git
-```
-
-V0.2 AI Engine 开始后还需要：
-
-```text
-Python
-uv
-```
-
----
-
-# 1. Clone Repository
-
-```bash
-git clone <your-repository-url>
-
-cd life-inbox
-```
-
----
-
-# 2. Prepare MySQL
-
-创建数据库：
-
-```sql
-CREATE DATABASE life_inbox
-DEFAULT CHARACTER SET utf8mb4
-COLLATE utf8mb4_unicode_ci;
-```
-
-然后选择数据库：
-
-```sql
-USE life_inbox;
-```
-
-根据项目当前数据库结构创建：
-
-```text
-inbox_item
-```
-
-表。
-
-如果数据库来自 V0.1，请在启动新版后端前手工执行本仓库的迁移文件：
-
-```text
-docs/sql/v0.2-task2-add-summary.sql
-docs/sql/v0.2-task3-add-analysis.sql
-docs/sql/v0.2-task4-add-keywords-entities.sql
-```
-
-请按 Task 顺序执行。Task 2 增加可空的 `summary`；Task 3 增加可空的 `category`，并创建统一的 `tag`、`inbox_tag` 标签关系表；Task 4 创建 `inbox_keyword` 和 `inbox_entity`。迁移不会自动分析或回填历史数据。
-
----
-
-# 3. Backend Configuration
-
-后端配置位于：
-
-```text
-server/src/main/resources/application.yaml
-```
-
-数据库密码等敏感信息不要直接提交到 Git。
-
-推荐通过环境变量提供，例如：
-
-```yaml
-spring:
-  datasource:
-    url: jdbc:mysql://localhost:3306/life_inbox?useUnicode=true&characterEncoding=utf8
-    username: root
-    password: ${MYSQL_PASSWORD}
-```
-
-然后在本地提供：
-
-```text
-MYSQL_PASSWORD
-```
-
-环境变量。
-
----
-
-# 4. Start Backend
-
-进入：
-
-```bash
-cd server
-```
-
-Windows：
-
-```bash
-.\mvnw.cmd spring-boot:run
-```
-
-后端默认运行：
-
-```text
-http://localhost:8080
-```
-
----
-
-# 5. Start Frontend
-
-打开新的终端：
-
-```bash
-cd web
-```
-
-安装依赖：
-
-```bash
-npm install
-```
-
-启动：
-
-```bash
-npm run dev
-```
-
-前端默认运行：
-
-```text
-http://localhost:5173
-```
-
----
-
-# 🧪 Build
-
-## Backend
-
-Windows：
-
-```bash
-cd server
-
-.\mvnw.cmd clean compile
-```
-
----
-
-## Frontend
-
-```bash
-cd web
-
-npm run build
-```
-
----
-
-# 🤖 AI Service
-
-LifeInbox 从 V0.2 开始逐步加入独立的：
-
-```text
-ai-engine
-```
-
-Python 服务。
-
-V0.2 Task 7 让 IMAGE 与 TEXT、URL、FILE 复用同一套 AI Analyze Pipeline。Capture 始终先独立保存；Analyze 可由保留的手工按钮触发，也可在 Task 10 开关启用后于提交完成后自动触发。截图或文字图片由 Python 使用本地 RapidOCR 临时提取文字，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
-
-V0.2 Task 8 在 Java 业务层为统一 `InboxItem` 增加 AI Processing Status。更新后端前需先执行：
-
-```text
-docs/sql/v0.2-task8-add-ai-processing-status.sql
-```
-
-状态只有四种：`NOT_PROCESSED`、`PROCESSING`、`SUCCESS`、`FAILED`。新 Capture 立即保存为 `NOT_PROCESSED`；Analyze 在基础校验后用数据库条件 UPDATE 原子领取任务并提交 `PROCESSING`，因此同一条记录的重复请求会返回 409。远程 Python/LLM 调用不处于数据库事务中；五类结果全部持久化成功后，才在同一个短事务中设置 `SUCCESS`。任何提取、OCR、LLM、校验或持久化失败都会另用短事务设置 `FAILED`，但不会清空上一次成功结果。
-
-V0.2 Task 9 增加手动 Retry、stale PROCESSING 恢复和 Attempt 并发保护。更新后端前还需执行：
-
-```text
-docs/sql/v0.2-task9-add-ai-attempt-id.sql
-```
-
-每次点击统一 Analyze 接口都会生成新的 `ai_attempt_id`。FAILED 和 SUCCESS 可直接开始新 Attempt；未超过阈值的 PROCESSING 仍返回 409，超过 `life-inbox.ai.processing-stale-after` 的 PROCESSING 可以由用户手动接管。默认阈值是 5 分钟，它明显大于当前 Java 30 秒 Analyze 读取超时，也为网页提取、PDF、OCR 和较慢 LLM 留出余量。成功与失败写入都必须匹配当前 attemptId，因此被接管的旧请求即使迟到也不能覆盖新结果或修改新状态。stale 是根据 `PROCESSING + aiStartedTime` 动态计算的 `aiProcessingStale`，不是第五种数据库状态。
-
-V0.2 Task 10 增加可选的 Capture 后自动 Analyze。默认保持关闭，只有在启动 Java 前显式设置下列环境变量才会启用：
+### 2. 启动 AI Engine
 
 ```powershell
-$env:LIFEINBOX_AI_AUTO_ANALYZE_ENABLED="true"
-```
-
-TEXT、URL、FILE、IMAGE 都先在短事务中正常保存；事务提交后，Spring `AFTER_COMMIT` 事件监听器才把 InboxItem id 投递到专用有界线程池（core 1、max 2、queue 20）。Capture 请求不等待网页提取、文件解析、OCR 或 LLM，后台任务仍只调用统一的 `InboxAnalyzeService.analyze(id)`，因此与手工 Analyze、Retry 和 stale Recovery 共用同一套状态领取、Attempt Guard 与原子持久化。不会新增 `PENDING` 状态：新记录短暂保持 `NOT_PROCESSED`，后台 Worker 领取后才变为 `PROCESSING`。
-
-队列已满时，已提交的 Capture 仍然成功；系统会尽量把仍为 `NOT_PROCESSED` 的记录标记成可手工重试的 `FAILED`。自动 Analyze 失败也不会删除 Capture 或清空上一次成功结果。当前没有启动扫描、历史数据回填、自动重试、Scheduler、MQ 或 Redis；Java 进程在任务运行中意外退出时，原有 stale Recovery 仍是恢复方式。Vue 只在 Capture 后做有限次数状态发现，并在存在 fresh `PROCESSING` 时每 1.5 秒刷新，任务完成或变成 stale 后停止，不会永久轮询 `NOT_PROCESSED`。
-
-进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
-
-```powershell
+Set-Location .\ai-engine
 uv sync
 
-$env:LIFEINBOX_LLM_API_KEY="<your-api-key>"
-$env:LIFEINBOX_LLM_MODEL="<your-model>"
-$env:LIFEINBOX_LLM_BASE_URL="https://your-provider.example/v1"
-$env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
+$env:LIFEINBOX_LLM_API_KEY = "<your-api-key>"
+$env:LIFEINBOX_LLM_MODEL = "<your-model>"
+$env:LIFEINBOX_LLM_BASE_URL = "https://your-provider.example/v1"
+$env:LIFEINBOX_LLM_TIMEOUT_SECONDS = "20"
 
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/analyze`、`/analyze/url`、`/analyze/file`、`/analyze/image` 和兼容的 `/summarize` 会返回 503。
+`.env.example` 只列变量名；项目没有自动加载 `.env`。不要把真实 Key 提交到 Git。缺少 LLM 配置不影响 `/health`，但 Analyze 会安全失败。
 
-Python 健康检查：
+### 3. 启动 Java
 
-```text
-GET http://localhost:8000/health
-```
-
-Spring Boot 集成检查：
-
-```text
-GET http://localhost:8080/api/ai/health
-```
-
-Python Analyze 接口：
-
-```text
-POST http://localhost:8000/analyze
-Request:  { "title": "可选标题", "text": "需要分析的正文" }
-Response: {
-  "summary": "生成后的摘要",
-  "category": "技术学习",
-  "tags": ["Spring AI", "Java"],
-  "keywords": ["ChatModel", "Tool Calling"],
-  "entities": [
-    { "name": "Spring AI", "type": "TECHNOLOGY" }
-  ]
-}
-```
-
-URL 使用独立的 Python 内部接口，但返回同一个 AnalyzeResult：
-
-```text
-POST http://localhost:8000/analyze/url
-Request:  { "title": "可选标题", "url": "https://example.com/article" }
-Response: 与 POST /analyze 相同
-```
-
-URL 抓取只允许 `http` 和 `https`，手工跟随并逐跳检查最多 5 次重定向；DNS 解析出的地址必须全部为公网地址。响应必须是 HTML，实际读取上限为 1 MiB，清洗后的正文最多向 Analyze Service 传递 20,000 个字符。动态 JavaScript 页面、PDF、图片和其他二进制内容当前不支持。
-
-FILE 使用 multipart Python 内部接口，并返回同一个 AnalyzeResult：
-
-```text
-POST http://localhost:8000/analyze/file
-Parts: file=<TXT/MD/PDF 文件内容>, title=<可选标题>
-Response: 与 POST /analyze 相同
-```
-
-文件仍由 Java 安全管理和读取，Python 不接收服务器绝对路径。FILE Analyze 仅支持 TXT、Markdown 和具有文本层的 PDF；文件最大 10 MiB、PDF 最多 100 页，规范化后的正文最多 20,000 个字符。UTF-8 文本支持 BOM；超长文档会明确失败而不是静默截断。扫描版 PDF、加密 PDF、PDF OCR、DOC/DOCX、PPT/PPTX 和 Excel 当前不支持。
-
-IMAGE 使用 multipart Python 内部接口，并返回同一个 AnalyzeResult：
-
-```text
-POST http://localhost:8000/analyze/image
-Parts: file=<JPG/PNG/WEBP 图片内容>, title=<可选标题>
-Response: 与 POST /analyze 相同
-```
-
-图片仍由 Java 安全管理和读取，Python 不接收服务器绝对路径。IMAGE Analyze 使用本地 RapidOCR + ONNX Runtime CPU，不需要 Tesseract、CUDA、云 OCR 或新的 API Key。当前支持 JPG/JPEG、PNG、WEBP，最大 10 MiB；宽高分别不能超过 10,000，总像素不能超过 20,000,000。OCR 文字最多 20,000 个字符，少于 4 个有效字母、数字或中文字符时不会调用 LLM。GIF/BMP 虽可 Capture，但当前不支持 OCR Analyze；普通照片的视觉描述、PDF OCR 和通用 Vision 仍未实现。
-
-允许的 Category 为：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 必须有 1～5 个，每个最长 64 个字符；Keywords 可以有 0～8 个；Entities 可以有 0～10 个，类型只能是 `PERSON`、`ORGANIZATION`、`LOCATION`、`TECHNOLOGY`、`PRODUCT`、`EVENT`、`OTHER`。旧 `POST /summarize` 暂时保留原请求和 `{ "summary": "..." }` 响应，但底层复用同一次 Analyze，不维护第二套 Prompt。
-
-产品接口：
-
-```text
-POST http://localhost:8080/api/inbox/{id}/ai/analyze
-```
-
-该产品接口同时支持 TEXT、URL、FILE 和 IMAGE。前端不需要知道 Java 内部调用的是 Python `/analyze`、`/analyze/url`、`/analyze/file` 还是 `/analyze/image`；IMAGE 当前只做 OCR-based Analyze，不做通用 Vision。
-
-`GET /api/inbox` 和 Analyze 响应会直接返回 `aiStatus`、`aiErrorMessage`、`aiStartedTime`、`aiFinishedTime`、`aiProcessingStale`，前端无需额外查询状态接口。`FAILED` 只表示最近一次尝试失败；如果条目已有旧结果，页面会继续展示并提示“正在显示上一次成功的 AI 结果”。FAILED 显示“重试分析”，fresh PROCESSING 禁止重复点击，stale PROCESSING 显示“恢复并重试”。手工 Analyze 接口继续保留；可选的自动 Analyze 只负责提交后在 Java 进程内异步调用它，不做自动重试或历史回填。
-
-旧 `POST /api/inbox/{id}/ai/summary` 也暂时保留为兼容入口，并委托同一个 Analyze Service。
-
-默认关闭自动 Analyze 时，可以在 PowerShell 中手工验证原有完整链路：
+在新的 PowerShell 会话：
 
 ```powershell
-$captureBody = @{
-  type = "TEXT"
-  title = "分析测试"
-  content = "Spring AI 是 Spring 生态面向 AI 应用开发的框架。"
-} | ConvertTo-Json
+Set-Location .\server
+$env:MYSQL_PASSWORD = "<your-mysql-password>"
+$env:AI_SERVICE_BASE_URL = "http://127.0.0.1:8000"
 
-$item = Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:8080/api/inbox" `
-  -ContentType "application/json" `
-  -Body $captureBody
-
-Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/analyze"
+.\mvnw.cmd spring-boot:run
 ```
 
-启用自动 Analyze 后，只执行上面的 Capture 请求即可立即拿到新条目；无需再调用手工 Analyze 接口。随后可观察状态从短暂的 `NOT_PROCESSED` 进入 `PROCESSING`，最终变为 `SUCCESS` 或 `FAILED`：
+后端默认运行在 `http://localhost:8080`。自动 Analyze 默认关闭；如需开启，必须在启动 Java 前显式设置：
 
 ```powershell
-1..20 | ForEach-Object {
-  $current = Invoke-RestMethod -Uri "http://localhost:8080/api/inbox"
-  $current | Where-Object { $_.id -eq $item.id } | Select-Object `
-    id, type, aiStatus, aiErrorMessage, aiStartedTime, aiFinishedTime
-  Start-Sleep -Seconds 1
-}
+$env:LIFEINBOX_AI_AUTO_ANALYZE_ENABLED = "true"
 ```
 
-验证 URL 时只需把 Capture 请求改为：
+常用 Java 配置：
+
+| 环境变量 | 对应配置 | 默认值 |
+| --- | --- | --- |
+| `MYSQL_PASSWORD` | 数据库密码 | 无 |
+| `AI_SERVICE_BASE_URL` | `life-inbox.ai.base-url` | `http://localhost:8000` |
+| `LIFE_INBOX_AI_ANALYSIS_READ_TIMEOUT` | Analyze 读取超时 | `30s` |
+| `LIFE_INBOX_AI_PROCESSING_STALE_AFTER` | PROCESSING stale 阈值 | `5m` |
+| `LIFEINBOX_AI_AUTO_ANALYZE_ENABLED` | 自动 Analyze | `false` |
+
+### 4. 启动前端
 
 ```powershell
-$captureBody = @{
-  type = "URL"
-  title = "公开文章"
-  sourceUrl = "https://example.com/article"
-} | ConvertTo-Json
+Set-Location .\web
+npm install
+npm run dev
 ```
 
-验证 FILE 时先上传，再调用同一个产品 Analyze 接口：
+前端默认运行在 `http://localhost:5173`。
+
+### 5. 健康检查
 
 ```powershell
-$item = Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:8080/api/inbox/file" `
-  -Form @{ file = Get-Item ".\notes.txt"; title = "学习笔记" }
-
-Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/analyze"
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8080/api/ai/health
 ```
 
-> Windows PowerShell 5.1 的 `Invoke-RestMethod` 不支持 `-Form`，可直接通过网页上传，或使用 PowerShell 7 执行上述示例。
+## 构建与测试
 
-随后刷新页面或重新请求 `GET /api/inbox`，应能看到数据库中的 `summary`、`category`、`tags`、`keywords`、`entities` 和 AI 状态字段。再次调用会把五项作为一组原子替换，而不是追加旧结果。Java 默认访问 `http://localhost:8000`，可通过 `AI_SERVICE_BASE_URL` 覆盖；健康检查读取超时为 5 秒，Analyze 读取超时为 30 秒。若提高 Python 的 LLM 超时，应同步把 Spring 属性 `life-inbox.ai.analysis-read-timeout` 调得更大。Python 的 LLM 故障仍使用原有 502/503/504 语义；URL、FILE 和 IMAGE 接口会额外区分各自的读取、解析或 OCR 错误。Java 只映射受控错误码，不向前端暴露网页、文件内容或上游内部响应。所有失败路径都会保留已有分析结果和原始 InboxItem，原有 Capture 功能仍可使用。
+```powershell
+# Java
+Set-Location .\server
+.\mvnw.cmd clean test
 
-目标架构：
+# Python（不请求真实网页或 LLM，不消耗 Token）
+Set-Location ..\ai-engine
+uv run pytest -p no:cacheprovider
 
-```text
-Spring Boot
-     │
-     │ JSON API
-     ▼
-   FastAPI
-     │
-     ▼
-AI Processing
+# Frontend
+Set-Location ..\web
+npm run build
 ```
 
-AI 服务失败时：
+前端当前没有自动化测试框架，因此以 Vite build 和 [人工验收清单](docs/manual-acceptance.md) 补充验证。
 
-```text
-TEXT
-URL
-FILE
-IMAGE
-```
+## 文档
 
-等基础 Capture 功能仍然应该正常工作。
+- [Architecture](docs/architecture.md)
+- [Database](docs/database.md)
+- [API](docs/api.md)
+- [Roadmap](docs/roadmap.md)
+- [V0.2 Manual Acceptance](docs/manual-acceptance.md)
+- [V0.2 Fresh Install Schema](docs/sql/v0.2-schema.sql)
+- [AI Engine 说明](ai-engine/README.md)
 
-AI 是增强能力，而不是基础功能的前置条件。
+开发约束与长期原则见 [AGENTS.md](AGENTS.md)。
 
----
+## 已知限制
 
-# 🗺 Roadmap
+- 自动 Analyze 是 Java 进程内有界线程池，不是持久任务队列；进程中断后由 stale Recovery 手工接管；
+- 不做启动扫描、历史回填或无限自动重试；
+- URL 仅分析无需登录的静态 HTML；
+- FILE 仅支持 UTF-8 TXT/MD 与带文本层 PDF；
+- IMAGE 只做文字 OCR，不理解普通照片场景；
+- 删除 FILE/IMAGE 会清理当前关联文件，但不会扫描和删除历史版本可能已经遗留的孤立文件；
+- Tags 当前使用全局字典，删除 InboxItem 后不主动清理无引用 Tag；
+- 本地文件存储适合个人开发环境，不是分布式对象存储方案。
 
-## V0.1 — Capture ✅
-
-```text
-TEXT
-URL
-FILE
-IMAGE
-
-+
-Favorite
-Archive
-Delete
-```
-
----
-
-## V0.2 — Understand 🚧
-
-```text
-Python AI Engine
-        ↓
-TEXT + URL + FILE + IMAGE OCR AI Analyze
-Summary + Category + Tags
-  + Keywords + Entities
-        ↓
-AI Processing Status
-        +
-Manual Retry + Stale Recovery + Attempt Protection
-```
-
----
-
-## V0.3 — Retrieve
-
-计划：
-
-```text
-Keyword Search
-       +
-Semantic Search
-       +
-Embedding
-       +
-Rerank
-```
-
-目标：
-
-> 不需要记住标题，也能重新找到以前保存过的信息。
-
----
-
-## V0.4 — Action
-
-计划：
-
-```text
-Information
-     ↓
-AI Understanding
-     ↓
-Action Extraction
-     ↓
-Todo / Deadline / Reminder
-```
-
-例如：
-
-```text
-“软件工程实验报告 8 月 25 日前提交”
-```
-
-未来 LifeInbox 可以识别：
-
-```text
-Todo:
-提交软件工程实验报告
-
-Deadline:
-8 月 25 日
-```
-
----
-
-## V0.5 — Relations
-
-未来尝试自动发现不同 InboxItem 之间的关系。
-
-例如：
-
-```text
-Redis
-├── Redis Lua
-├── Redisson
-├── Distributed Lock
-└── Cache Consistency
-```
-
----
-
-## V1.0 — Personal AI
-
-长期目标是让 AI 能够基于用户自己的 LifeInbox 数据：
-
-* 搜索
-* 回顾
-* 总结
-* 问答
-* 推荐
-* 发现关系
-* 提取行动
-
-最终形成一个真正属于用户自己的个人信息系统。
-
----
-
-# 🔒 Security Principles
-
-当前开发过程中重点关注：
-
-* 文件路径穿越
-* 不安全文件访问
-* 文件上传校验
-* SSRF
-* 不可信 URL
-* 不可信文件名
-* 密码和 API Key 泄露
-* AI 输出未经校验直接进入业务系统
-
-LifeInbox 是个人项目，不追求过度工程化，但不会忽略明显的安全风险。
-
----
-
-# 📖 Development Principles
-
-LifeInbox 的开发遵循：
-
-```text
-Small Steps
-Simple First
-Real Requirement First
-```
-
-即：
-
-* 小步迭代
-* 优先简单实现
-* 不为不存在的需求提前设计复杂系统
-* 不为了技术栈而引入技术
-* 每次只解决一个清晰的问题
-* 完成功能后进行构建和测试
-* 保持代码能够被自己重新看懂
-
-更详细的开发约束请查看：
-
-```text
-AGENTS.md
-```
-
----
-
-# 🎯 Long-Term Goal
-
-LifeInbox 最终希望实现：
-
-```text
-Capture
-   ↓
-Understand
-   ↓
-Organize
-   ↓
-Retrieve
-   ↓
-Action
-```
-
-用户只需要负责：
-
-> **把值得留下的东西放进来。**
-
-剩下的整理、理解、关联和重新发现，可以逐步交给 LifeInbox。
+LifeInbox 继续遵循：小步迭代、简单优先、真实需求优先。V0.2 封版后停止扩展 AI Organizer，下一阶段是否进入 V0.3 由后续任务决定。

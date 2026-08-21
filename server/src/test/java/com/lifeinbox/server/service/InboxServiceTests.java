@@ -10,6 +10,8 @@ import com.lifeinbox.server.mapper.InboxItemMapper;
 import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.multipart.MultipartFile;
@@ -286,17 +288,34 @@ class InboxServiceTests {
     }
 
     @Test
-    void deleteRemovesExistingItem() {
+    void deleteRemovesExistingTextItemWithoutTouchingFileStorage() {
+        InboxItem item = savedItem(1L, "TEXT", "标题", "正文", null);
+        when(inboxItemMapper.selectById(1L)).thenReturn(item);
         when(inboxItemMapper.deleteById(1L)).thenReturn(1);
 
         assertDoesNotThrow(() -> inboxService.delete(1L));
 
         verify(inboxItemMapper).deleteById(1L);
+        verify(fileStorageService, never()).deleteByFileUrl(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"FILE", "IMAGE"})
+    void deleteRemovesManagedFileAfterDeletingStoredItem(String type) {
+        InboxItem item = savedItem(2L, type, "受管文件", null, null);
+        item.setFileUrl("/api/files/550e8400-e29b-41d4-a716-446655440000.pdf");
+        when(inboxItemMapper.selectById(2L)).thenReturn(item);
+        when(inboxItemMapper.deleteById(2L)).thenReturn(1);
+
+        assertDoesNotThrow(() -> inboxService.delete(2L));
+
+        verify(inboxItemMapper).deleteById(2L);
+        verify(fileStorageService).deleteByFileUrl(item.getFileUrl());
     }
 
     @Test
     void deleteReturnsNotFoundWhenItemDoesNotExist() {
-        when(inboxItemMapper.deleteById(99L)).thenReturn(0);
+        when(inboxItemMapper.selectById(99L)).thenReturn(null);
 
         ResponseStatusException exception = assertThrows(
                 ResponseStatusException.class,
@@ -304,6 +323,8 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+        verify(inboxItemMapper, never()).deleteById(99L);
+        verify(fileStorageService, never()).deleteByFileUrl(any());
     }
 
     @Test

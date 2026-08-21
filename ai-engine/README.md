@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-V0.2 Task 7 在现有 TEXT/URL/FILE Analyze 之外增加 IMAGE OCR。截图或文字图片识别成功后仍进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem、图片和分析结果仍由 Java 管理。
+V0.2 AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze。网页、文档或截图文字提取成功后进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem、文件和分析结果仍由 Java 管理。
 
 ## 安装依赖
 
