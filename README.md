@@ -158,6 +158,7 @@ V0.3 Task 1 — Basic Keyword Search  ✅ Completed
 V0.3 Task 2 — AI-derived Field Search  ✅ Completed
 V0.3 Task 3 — Search Filter + Ranking + Highlight  ✅ Completed
 V0.3 Task 4 — Searchable Content Preparation  ✅ Completed
+V0.3 Task 5 — Embedding Pipeline  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
@@ -167,7 +168,9 @@ its original `content`; URL, FILE, and IMAGE store normalized, rebuildable extra
 `inbox_item.searchable_content`. Relation-table matches use `EXISTS`, so
 one item remains one result even when several AI-derived values match. Results use deterministic
 field-based ranking, and Vue safely highlights matching plain text without backend highlight HTML.
-Embedding, vector retrieval, semantic retrieval, hybrid retrieval, and reranking remain future work.
+FastAPI now exposes an internal, on-demand `POST /embedding` capability that converts validated text
+to a strictly checked `{model, dimension, embedding}` result. It does not persist vectors or run
+automatically. Vector storage/indexing, semantic retrieval, hybrid retrieval, and reranking remain future work.
 
 It is not the final definition of V0.3.
 

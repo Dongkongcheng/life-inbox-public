@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-V0.2 AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze。网页、文档或截图文字提取成功后进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem、文件和分析结果仍由 Java 管理。
+AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供独立的 Embedding Generation。Python 不连接 MySQL，InboxItem、Searchable Content、文件和未来向量索引的业务生命周期仍由 Java 管理。
 
 ## 安装依赖
 
@@ -13,6 +13,7 @@ uv sync
 ```powershell
 $env:LIFEINBOX_LLM_API_KEY="<your-api-key>"
 $env:LIFEINBOX_LLM_MODEL="<your-model>"
+$env:LIFEINBOX_EMBEDDING_MODEL="<your-embedding-model>" # 可选；只在调用 /embedding 时需要
 $env:LIFEINBOX_LLM_BASE_URL="https://your-provider.example/v1"
 $env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
 
@@ -30,7 +31,7 @@ LLM Client 调用可配置 Base URL 下的 `/chat/completions`，使用 Bearer A
 }
 ```
 
-即使缺少 LLM 环境变量，健康检查仍然可用；只有调用 Analyze 或兼容 Summary 接口时才会返回配置错误。
+即使缺少 LLM 或 Embedding 环境变量，健康检查仍然可用。Analyze 与 Embedding 分别在实际调用时惰性读取自己的模型配置；缺少 Embedding Model 不影响 Analyze、网页/文档提取或 OCR。
 
 ## 分析 TEXT
 
@@ -175,6 +176,39 @@ Invoke-RestMethod -Method Post `
 | 413 | `IMAGE_TEXT_TOO_LONG` | OCR 文字超过 Analyze 输入上限 |
 
 当前只做 OCR-based IMAGE Analyze。普通照片内容理解、图片描述、Qwen-VL 等通用 Vision，以及扫描 PDF OCR 均未实现。
+
+## 生成 Embedding
+
+`POST /embedding` 把 Task 24 已准备好的文本转换为瞬时向量：
+
+```powershell
+$body = @{ text = "Redis 分布式锁需要正确处理锁过期与误释放。" } | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/embedding" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+响应结构：
+
+```json
+{
+  "model": "provider-returned-embedding-model",
+  "dimension": 3,
+  "embedding": [0.0123, -0.0456, 0.0789]
+}
+```
+
+- 使用 `LIFEINBOX_EMBEDDING_MODEL` 独立配置 Embedding Model；不会把 `LIFEINBOX_LLM_MODEL` 当作向量模型；
+- Base URL、API Key 和 Timeout 复用 `LIFEINBOX_LLM_BASE_URL`、`LIFEINBOX_LLM_API_KEY`、`LIFEINBOX_LLM_TIMEOUT_SECONDS`；
+- 调用 OpenAI-compatible `POST {base_url}/embeddings`，请求体为 `{model, input}`；
+- 文本只做 trim 和基础校验，最大 20,000 字符；超限返回 422，不截断、不分块；
+- `dimension` 按真实向量长度计算；空向量、多个向量、缺失模型、null、NaN、Infinity 和非数字元素全部拒绝；
+- 未配置模型返回 503，超时返回 504，Provider HTTP 错误返回 503，非法响应返回 502；
+- 日志和错误不记录 API Key、完整输入、完整 Provider 响应或完整向量。
+
+Task 25 只提供 `Text → EmbeddingResult` 能力。当前没有 Vector Store、Qdrant、Vector Collection、向量持久化、自动索引、Backfill、Semantic Search 或 Query Embedding Search Flow。
 
 ## 运行测试
 
