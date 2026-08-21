@@ -11,7 +11,6 @@ import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -41,6 +40,7 @@ public class InboxService {
     private final UrlMetadataService urlMetadataService;
     private final FileStorageService fileStorageService;
     private final InboxAnalysisStatusService analysisStatusService;
+    private final InboxCapturePersistenceService capturePersistenceService;
 
     public InboxService(
             InboxItemMapper inboxItemMapper,
@@ -49,7 +49,8 @@ public class InboxService {
             InboxEntityMapper inboxEntityMapper,
             UrlMetadataService urlMetadataService,
             FileStorageService fileStorageService,
-            InboxAnalysisStatusService analysisStatusService
+            InboxAnalysisStatusService analysisStatusService,
+            InboxCapturePersistenceService capturePersistenceService
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.inboxTagMapper = inboxTagMapper;
@@ -58,6 +59,7 @@ public class InboxService {
         this.urlMetadataService = urlMetadataService;
         this.fileStorageService = fileStorageService;
         this.analysisStatusService = analysisStatusService;
+        this.capturePersistenceService = capturePersistenceService;
     }
 
     public List<InboxItem> list() {
@@ -104,17 +106,14 @@ public class InboxService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "暂不支持该 InboxItem 类型");
         }
 
-        inboxItemMapper.insert(inboxItem);
-        return inboxItemMapper.selectById(inboxItem.getId());
+        return capturePersistenceService.save(inboxItem);
     }
 
-    @Transactional
     public InboxItem createFile(MultipartFile file, String title) {
         FileStorageService.StoredFile storedFile = fileStorageService.store(file);
         return createStoredItem(storedFile, title, TYPE_FILE);
     }
 
-    @Transactional
     public InboxItem createImage(MultipartFile file, String title) {
         FileStorageService.StoredFile storedFile = fileStorageService.storeImage(file);
         return createStoredItem(storedFile, title, TYPE_IMAGE);
@@ -142,16 +141,7 @@ public class InboxService {
             inboxItem.setStatus(STATUS_ACTIVE);
             inboxItem.setFavorite(0);
 
-            int insertedRows = inboxItemMapper.insert(inboxItem);
-            if (insertedRows != 1) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "上传记录保存失败");
-            }
-
-            InboxItem savedItem = inboxItemMapper.selectById(inboxItem.getId());
-            if (savedItem == null) {
-                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "上传记录保存失败");
-            }
-            return savedItem;
+            return capturePersistenceService.save(inboxItem);
         } catch (RuntimeException | Error exception) {
             // 磁盘写入先于数据库 INSERT；后续任一步失败时删除文件，避免留下孤儿文件。
             fileStorageService.delete(storedFile.storedName());

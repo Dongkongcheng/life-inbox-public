@@ -151,21 +151,21 @@ V0.2 的目标是：
 * ✅ FastAPI `/health`
 * ✅ Java ↔ Python Health Integration
 * ✅ AI 服务不可用时返回结构化 503
-* ✅ TEXT AI Analyze（显式触发）
+* ✅ TEXT AI Analyze（手工或可选自动触发）
   * ✅ Summary
   * ✅ Category
   * ✅ Tags
   * ✅ Keywords
   * ✅ Entities
 * ✅ URL Content Extraction
-* ✅ URL AI Analyze（显式触发）
+* ✅ URL AI Analyze（手工或可选自动触发）
 * ✅ FILE Text Extraction
   * ✅ TXT
   * ✅ Markdown
   * ✅ PDF 文本层
-* ✅ FILE AI Analyze（显式触发）
+* ✅ FILE AI Analyze（手工或可选自动触发）
 * ✅ IMAGE OCR
-* ✅ IMAGE OCR-based AI Analyze（显式触发）
+* ✅ IMAGE OCR-based AI Analyze（手工或可选自动触发）
 * ⏳ General Image Vision
 * ✅ AI Processing Status
   * ✅ `NOT_PROCESSED`
@@ -175,8 +175,8 @@ V0.2 的目标是：
 * ✅ Manual AI Retry
 * ✅ Stale PROCESSING Recovery
 * ✅ AI Attempt Protection
-* ⏳ Automatic Analyze After Capture
-* ⏳ Background AI Processing
+* ✅ Automatic Analyze After Capture（默认关闭）
+* ✅ Bounded In-process Background AI Processing
 
 > 注意：以上带有 `⏳` 的功能属于开发计划，目前尚未完成。
 
@@ -650,7 +650,7 @@ ai-engine
 
 Python 服务。
 
-V0.2 Task 7 让 IMAGE 与 TEXT、URL、FILE 复用同一套 AI Analyze Pipeline。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；截图或文字图片由 Python 使用本地 RapidOCR 临时提取文字，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
+V0.2 Task 7 让 IMAGE 与 TEXT、URL、FILE 复用同一套 AI Analyze Pipeline。Capture 始终先独立保存；Analyze 可由保留的手工按钮触发，也可在 Task 10 开关启用后于提交完成后自动触发。截图或文字图片由 Python 使用本地 RapidOCR 临时提取文字，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
 
 V0.2 Task 8 在 Java 业务层为统一 `InboxItem` 增加 AI Processing Status。更新后端前需先执行：
 
@@ -658,7 +658,7 @@ V0.2 Task 8 在 Java 业务层为统一 `InboxItem` 增加 AI Processing Status�
 docs/sql/v0.2-task8-add-ai-processing-status.sql
 ```
 
-状态只有四种：`NOT_PROCESSED`、`PROCESSING`、`SUCCESS`、`FAILED`。新 Capture 仍立即保存为 `NOT_PROCESSED`，不会自动调用 AI；手工 Analyze 在基础校验后用数据库条件 UPDATE 原子领取任务并提交 `PROCESSING`，因此同一条记录的重复请求会返回 409。远程 Python/LLM 调用不处于数据库事务中；五类结果全部持久化成功后，才在同一个短事务中设置 `SUCCESS`。任何提取、OCR、LLM、校验或持久化失败都会另用短事务设置 `FAILED`，但不会清空上一次成功结果。
+状态只有四种：`NOT_PROCESSED`、`PROCESSING`、`SUCCESS`、`FAILED`。新 Capture 立即保存为 `NOT_PROCESSED`；Analyze 在基础校验后用数据库条件 UPDATE 原子领取任务并提交 `PROCESSING`，因此同一条记录的重复请求会返回 409。远程 Python/LLM 调用不处于数据库事务中；五类结果全部持久化成功后，才在同一个短事务中设置 `SUCCESS`。任何提取、OCR、LLM、校验或持久化失败都会另用短事务设置 `FAILED`，但不会清空上一次成功结果。
 
 V0.2 Task 9 增加手动 Retry、stale PROCESSING 恢复和 Attempt 并发保护。更新后端前还需执行：
 
@@ -667,6 +667,16 @@ docs/sql/v0.2-task9-add-ai-attempt-id.sql
 ```
 
 每次点击统一 Analyze 接口都会生成新的 `ai_attempt_id`。FAILED 和 SUCCESS 可直接开始新 Attempt；未超过阈值的 PROCESSING 仍返回 409，超过 `life-inbox.ai.processing-stale-after` 的 PROCESSING 可以由用户手动接管。默认阈值是 5 分钟，它明显大于当前 Java 30 秒 Analyze 读取超时，也为网页提取、PDF、OCR 和较慢 LLM 留出余量。成功与失败写入都必须匹配当前 attemptId，因此被接管的旧请求即使迟到也不能覆盖新结果或修改新状态。stale 是根据 `PROCESSING + aiStartedTime` 动态计算的 `aiProcessingStale`，不是第五种数据库状态。
+
+V0.2 Task 10 增加可选的 Capture 后自动 Analyze。默认保持关闭，只有在启动 Java 前显式设置下列环境变量才会启用：
+
+```powershell
+$env:LIFEINBOX_AI_AUTO_ANALYZE_ENABLED="true"
+```
+
+TEXT、URL、FILE、IMAGE 都先在短事务中正常保存；事务提交后，Spring `AFTER_COMMIT` 事件监听器才把 InboxItem id 投递到专用有界线程池（core 1、max 2、queue 20）。Capture 请求不等待网页提取、文件解析、OCR 或 LLM，后台任务仍只调用统一的 `InboxAnalyzeService.analyze(id)`，因此与手工 Analyze、Retry 和 stale Recovery 共用同一套状态领取、Attempt Guard 与原子持久化。不会新增 `PENDING` 状态：新记录短暂保持 `NOT_PROCESSED`，后台 Worker 领取后才变为 `PROCESSING`。
+
+队列已满时，已提交的 Capture 仍然成功；系统会尽量把仍为 `NOT_PROCESSED` 的记录标记成可手工重试的 `FAILED`。自动 Analyze 失败也不会删除 Capture 或清空上一次成功结果。当前没有启动扫描、历史数据回填、自动重试、Scheduler、MQ 或 Redis；Java 进程在任务运行中意外退出时，原有 stale Recovery 仍是恢复方式。Vue 只在 Capture 后做有限次数状态发现，并在存在 fresh `PROCESSING` 时每 1.5 秒刷新，任务完成或变成 stale 后停止，不会永久轮询 `NOT_PROCESSED`。
 
 进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
@@ -751,11 +761,11 @@ POST http://localhost:8080/api/inbox/{id}/ai/analyze
 
 该产品接口同时支持 TEXT、URL、FILE 和 IMAGE。前端不需要知道 Java 内部调用的是 Python `/analyze`、`/analyze/url`、`/analyze/file` 还是 `/analyze/image`；IMAGE 当前只做 OCR-based Analyze，不做通用 Vision。
 
-`GET /api/inbox` 和 Analyze 响应会直接返回 `aiStatus`、`aiErrorMessage`、`aiStartedTime`、`aiFinishedTime`、`aiProcessingStale`，前端无需额外查询状态接口。`FAILED` 只表示最近一次尝试失败；如果条目已有旧结果，页面会继续展示并提示“正在显示上一次成功的 AI 结果”。FAILED 显示“重试分析”，fresh PROCESSING 禁止重复点击，stale PROCESSING 显示“恢复并重试”。当前 Analyze 仍是同步手工请求，不使用自动重试、Scheduler、后台线程、Redis 或 MQ。
+`GET /api/inbox` 和 Analyze 响应会直接返回 `aiStatus`、`aiErrorMessage`、`aiStartedTime`、`aiFinishedTime`、`aiProcessingStale`，前端无需额外查询状态接口。`FAILED` 只表示最近一次尝试失败；如果条目已有旧结果，页面会继续展示并提示“正在显示上一次成功的 AI 结果”。FAILED 显示“重试分析”，fresh PROCESSING 禁止重复点击，stale PROCESSING 显示“恢复并重试”。手工 Analyze 接口继续保留；可选的自动 Analyze 只负责提交后在 Java 进程内异步调用它，不做自动重试或历史回填。
 
 旧 `POST /api/inbox/{id}/ai/summary` 也暂时保留为兼容入口，并委托同一个 Analyze Service。
 
-可以在 PowerShell 中手工验证完整链路：
+默认关闭自动 Analyze 时，可以在 PowerShell 中手工验证原有完整链路：
 
 ```powershell
 $captureBody = @{
@@ -771,6 +781,17 @@ $item = Invoke-RestMethod -Method Post `
 
 Invoke-RestMethod -Method Post `
   -Uri "http://localhost:8080/api/inbox/$($item.id)/ai/analyze"
+```
+
+启用自动 Analyze 后，只执行上面的 Capture 请求即可立即拿到新条目；无需再调用手工 Analyze 接口。随后可观察状态从短暂的 `NOT_PROCESSED` 进入 `PROCESSING`，最终变为 `SUCCESS` 或 `FAILED`：
+
+```powershell
+1..20 | ForEach-Object {
+  $current = Invoke-RestMethod -Uri "http://localhost:8080/api/inbox"
+  $current | Where-Object { $_.id -eq $item.id } | Select-Object `
+    id, type, aiStatus, aiErrorMessage, aiStartedTime, aiFinishedTime
+  Start-Sleep -Seconds 1
+}
 ```
 
 验证 URL 时只需把 Capture 请求改为：

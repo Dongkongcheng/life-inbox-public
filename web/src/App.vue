@@ -20,6 +20,12 @@ const analysisErrorItemId = ref(null)
 const analysisErrorMessage = ref('')
 const errorMessage = ref('')
 
+const AI_STATUS_POLL_INTERVAL_MS = 1500
+const CAPTURE_STATUS_DISCOVERY_REFRESHES = 3
+let inboxPollTimer = null
+let captureStatusDiscoveryRemaining = 0
+let pageUnmounted = false
+
 // Entity Type 由 Analyze 契约限制为有限集合，前端只负责转换成便于阅读的中文标签。
 const entityTypeLabels = {
   PERSON: '人物',
@@ -67,19 +73,53 @@ const handleFileChange = (event) => {
   }
 }
 
-const loadInbox = async () => {
+const clearInboxPoll = () => {
+  if (inboxPollTimer !== null) {
+    window.clearTimeout(inboxPollTimer)
+    inboxPollTimer = null
+  }
+}
+
+const scheduleInboxPollIfNeeded = () => {
+  clearInboxPoll()
+  if (pageUnmounted) return
+  const hasFreshProcessing = inboxItems.value.some(
+    (item) => item.aiStatus === 'PROCESSING' && item.aiProcessingStale !== true
+  )
+
+  if (hasFreshProcessing) {
+    // 一旦看到后台任务已领取状态，就只跟随真实 PROCESSING，直到成功或失败。
+    captureStatusDiscoveryRemaining = 0
+  } else if (captureStatusDiscoveryRemaining > 0) {
+    // Capture 提交与后台领取之间存在很短的 NOT_PROCESSED 窗口，只做有限次数发现刷新。
+    captureStatusDiscoveryRemaining -= 1
+  } else {
+    return
+  }
+
+  inboxPollTimer = window.setTimeout(() => {
+    inboxPollTimer = null
+    loadInbox({ background: true })
+  }, AI_STATUS_POLL_INTERVAL_MS)
+}
+
+const loadInbox = async ({ background = false } = {}) => {
   // 所有写操作成功后都重新查询一次，避免前端自行拼装状态而与后端不一致。
-  loading.value = true
-  errorMessage.value = ''
+  clearInboxPoll()
+  if (!background) {
+    loading.value = true
+    errorMessage.value = ''
+  }
   try {
     const response = await fetch('/api/inbox')
     if (!response.ok) throw new Error('加载 Inbox 失败')
     inboxItems.value = await response.json()
+    scheduleInboxPollIfNeeded()
   } catch (error) {
     console.error(error)
     errorMessage.value = '加载 Inbox 失败，请确认后端服务已启动。'
   } finally {
-    loading.value = false
+    if (!background) loading.value = false
   }
 }
 
@@ -151,6 +191,8 @@ const saveItem = async () => {
     content.value = ''
     sourceUrl.value = ''
     clearSelectedUpload()
+    // 自动 Analyze 在 AFTER_COMMIT 后领取任务；有限刷新用于跨过最初的 NOT_PROCESSED 窗口。
+    captureStatusDiscoveryRemaining = CAPTURE_STATUS_DISCOVERY_REFRESHES
     await loadInbox()
   } catch (error) {
     console.error(error)
@@ -315,8 +357,15 @@ const analysisButtonLabel = (item) => {
 
 const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
-onMounted(loadInbox)
-onBeforeUnmount(clearSelectedUpload)
+onMounted(() => {
+  pageUnmounted = false
+  loadInbox()
+})
+onBeforeUnmount(() => {
+  pageUnmounted = true
+  clearSelectedUpload()
+  clearInboxPoll()
+})
 </script>
 
 <template>

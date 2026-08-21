@@ -89,6 +89,23 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
             @Param("errorMessage") String errorMessage
     );
 
+    /** 队列拒绝发生在 Attempt 创建前，只能把仍未处理的新 Capture 标记为可重试失败。 */
+    @Update("""
+            UPDATE inbox_item
+            SET ai_status = #{failedStatus},
+                ai_error_message = #{errorMessage},
+                ai_started_time = NULL,
+                ai_finished_time = CURRENT_TIMESTAMP
+            WHERE id = #{id}
+              AND ai_status = #{notProcessedStatus}
+            """)
+    int markAutoSchedulingFailed(
+            @Param("id") Long id,
+            @Param("notProcessedStatus") AiProcessingStatus notProcessedStatus,
+            @Param("failedStatus") AiProcessingStatus failedStatus,
+            @Param("errorMessage") String errorMessage
+    );
+
     /** 普通 Inbox 操作只更新自己的列，避免用旧实体覆盖并发中的 AI 状态。 */
     @Update("UPDATE inbox_item SET status = #{status} WHERE id = #{id}")
     int updateInboxStatus(@Param("id") Long id, @Param("status") String status);
