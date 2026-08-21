@@ -11,6 +11,9 @@ const imagePreviewUrl = ref('')
 const captureType = ref('TEXT')
 const inboxItems = ref([])
 const loading = ref(false)
+const searchQuery = ref('')
+const activeSearchQuery = ref('')
+const searchErrorMessage = ref('')
 const saving = ref(false)
 const deletingId = ref(null)
 const archivingId = ref(null)
@@ -99,28 +102,70 @@ const scheduleInboxPollIfNeeded = () => {
 
   inboxPollTimer = window.setTimeout(() => {
     inboxPollTimer = null
-    loadInbox({ background: true })
+    refreshCurrentView({ background: true })
   }, AI_STATUS_POLL_INTERVAL_MS)
 }
 
-const loadInbox = async ({ background = false } = {}) => {
-  // 所有写操作成功后都重新查询一次，避免前端自行拼装状态而与后端不一致。
+const refreshCurrentView = async ({ background = false } = {}) => {
+  // 写操作和 AI 轮询都刷新当前视图，避免搜索结果被普通 Inbox 列表意外覆盖。
   clearInboxPoll()
+  const searching = activeSearchQuery.value !== ''
   if (!background) {
     loading.value = true
-    errorMessage.value = ''
+    if (searching) searchErrorMessage.value = ''
+    else errorMessage.value = ''
   }
   try {
-    const response = await fetch('/api/inbox')
-    if (!response.ok) throw new Error('加载 Inbox 失败')
+    const endpoint = searching
+      ? `/api/search?q=${encodeURIComponent(activeSearchQuery.value)}`
+      : '/api/inbox'
+    const response = await fetch(endpoint)
+    if (!response.ok) {
+      let message = searching ? '搜索失败，请稍后重试。' : '加载 Inbox 失败，请稍后重试。'
+      try {
+        const problem = await response.json()
+        message = problem.detail || problem.message || message
+      } catch {
+        // 搜索与列表错误不保证带 JSON 正文，保留安全的用户提示。
+      }
+      throw new Error(message)
+    }
     inboxItems.value = await response.json()
     scheduleInboxPollIfNeeded()
   } catch (error) {
     console.error(error)
-    errorMessage.value = '加载 Inbox 失败，请确认后端服务已启动。'
+    if (searching) {
+      if (!background) inboxItems.value = []
+      searchErrorMessage.value = error.message || '搜索失败，请确认后端服务已启动。'
+    } else {
+      errorMessage.value = error.message || '加载 Inbox 失败，请确认后端服务已启动。'
+    }
   } finally {
     if (!background) loading.value = false
   }
+}
+
+const searchInbox = async () => {
+  const normalizedQuery = searchQuery.value.trim()
+  searchErrorMessage.value = ''
+  if (!normalizedQuery) {
+    searchErrorMessage.value = '请输入搜索关键词。'
+    return
+  }
+  if (normalizedQuery.length > 200) {
+    searchErrorMessage.value = '搜索关键词长度不能超过 200。'
+    return
+  }
+
+  activeSearchQuery.value = normalizedQuery
+  await refreshCurrentView()
+}
+
+const clearSearch = async () => {
+  searchQuery.value = ''
+  activeSearchQuery.value = ''
+  searchErrorMessage.value = ''
+  await refreshCurrentView()
 }
 
 const saveItem = async () => {
@@ -193,7 +238,7 @@ const saveItem = async () => {
     clearSelectedUpload()
     // 自动 Analyze 在 AFTER_COMMIT 后领取任务；有限刷新用于跨过最初的 NOT_PROCESSED 窗口。
     captureStatusDiscoveryRemaining = CAPTURE_STATUS_DISCOVERY_REFRESHES
-    await loadInbox()
+    await refreshCurrentView()
   } catch (error) {
     console.error(error)
     errorMessage.value = error.message || '保存失败，请稍后重试。'
@@ -218,8 +263,8 @@ const deleteItem = async (id) => {
       throw new Error('DELETE_FAILED')
     }
 
-    // 成功后统一重新加载，确保页面状态与数据库结果一致。
-    await loadInbox()
+    // 成功后刷新当前视图；搜索模式下删除的条目会从当前结果中消失。
+    await refreshCurrentView()
   } catch (error) {
     console.error(error)
     errorMessage.value = error.message === 'NOT_FOUND'
@@ -246,8 +291,8 @@ const archiveItem = async (id) => {
       throw new Error('ARCHIVE_FAILED')
     }
 
-    // GET 只返回 ACTIVE，刷新后已归档条目会自然从主 Inbox 消失。
-    await loadInbox()
+    // 普通列表和搜索都只返回 ACTIVE，归档后刷新当前视图即可自然移除条目。
+    await refreshCurrentView()
   } catch (error) {
     console.error(error)
     errorMessage.value = error.message === 'NOT_FOUND'
@@ -276,7 +321,7 @@ const toggleFavorite = async (item) => {
     }
 
     // 用后端返回的最新列表刷新 favorite，避免乐观更新失败后的回滚复杂度。
-    await loadInbox()
+    await refreshCurrentView()
   } catch (error) {
     console.error(error)
     errorMessage.value = error.message === 'NOT_FOUND'
@@ -311,14 +356,14 @@ const analyzeItem = async (item) => {
     }
 
     // 成功后重新读取 Java 持久化的数据，确保五类分析结果作为一组展示。
-    await loadInbox()
+    await refreshCurrentView()
   } catch (error) {
     console.error(error)
     // 不在前端清空旧分析结果；重新分析失败时，用户仍能查看上一次的有效结果。
     analysisErrorItemId.value = item.id
     analysisErrorMessage.value = error.message || 'AI 分析失败，请稍后重试。'
     // Java 已把最近一次尝试记为 FAILED；重新加载后展示持久化状态和安全错误摘要。
-    await loadInbox()
+    await refreshCurrentView()
   } finally {
     analyzingId.value = null
   }
@@ -359,7 +404,7 @@ const formatTime = (value) => value ? new Date(value).toLocaleString() : ''
 
 onMounted(() => {
   pageUnmounted = false
-  loadInbox()
+  refreshCurrentView()
 })
 onBeforeUnmount(() => {
   pageUnmounted = true
@@ -495,14 +540,46 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="inbox-section" aria-labelledby="inbox-heading">
+      <form class="search-form" role="search" @submit.prevent="searchInbox">
+        <label for="inbox-search">搜索 Inbox</label>
+        <div class="search-controls">
+          <input
+            id="inbox-search"
+            v-model="searchQuery"
+            type="search"
+            maxlength="200"
+            placeholder="搜索标题、内容、摘要或分类"
+          />
+          <button type="submit" :disabled="loading">搜索</button>
+          <button
+            v-if="activeSearchQuery"
+            class="clear-search-button"
+            type="button"
+            :disabled="loading"
+            @click="clearSearch"
+          >
+            清除搜索
+          </button>
+        </div>
+      </form>
+      <p v-if="searchErrorMessage" class="search-error" role="alert">
+        {{ searchErrorMessage }}
+      </p>
       <div class="section-heading">
-        <h2 id="inbox-heading">Inbox</h2>
+        <h2 id="inbox-heading">{{ activeSearchQuery ? '搜索结果' : 'Inbox' }}</h2>
         <span>{{ inboxItems.length }} 条</span>
       </div>
+      <p v-if="activeSearchQuery" class="search-context">
+        关键词：{{ activeSearchQuery }}
+      </p>
 
-      <p v-if="loading" class="empty-state">正在加载…</p>
-      <p v-else-if="inboxItems.length === 0" class="empty-state">Inbox 还是空的，先保存一条信息吧。</p>
-      <div v-else class="item-list">
+      <p v-if="loading" class="empty-state">
+        {{ activeSearchQuery ? '正在搜索…' : '正在加载…' }}
+      </p>
+      <p v-else-if="inboxItems.length === 0 && !searchErrorMessage" class="empty-state">
+        {{ activeSearchQuery ? '没有找到匹配内容。' : 'Inbox 还是空的，先保存一条信息吧。' }}
+      </p>
+      <div v-else-if="inboxItems.length > 0" class="item-list">
         <article
           v-for="item in inboxItems"
           :key="item.id"

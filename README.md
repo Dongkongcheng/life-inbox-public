@@ -151,6 +151,16 @@ Search           Search
 
 Keyword Search is the first implementation step.
 
+Current implementation status:
+
+```text
+V0.3 Task 1 — Basic Keyword Search  ✅ Completed
+```
+
+The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot. MySQL matches
+ACTIVE InboxItems on persisted `title`, `content`, `summary`, or `category` fields.
+Tags, Keywords, Entities, semantic retrieval, hybrid retrieval, and reranking remain future work.
+
 It is not the final definition of V0.3.
 
 V0.3 should gradually move toward meaningful semantic retrieval so that queries do not depend entirely on exact words.

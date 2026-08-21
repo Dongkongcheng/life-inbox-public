@@ -5,10 +5,31 @@ import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+
+import java.util.List;
 
 @Mapper
 public interface InboxItemMapper extends BaseMapper<InboxItem> {
+
+    /**
+     * 搜索只读取业务主表中的四个已持久化字段。ESCAPE 使用固定的 !，
+     * 让 Service 转义后的用户输入按普通文本匹配，而不是控制 LIKE 通配范围。
+     */
+    @Select("""
+            SELECT *
+            FROM inbox_item
+            WHERE status = 'ACTIVE'
+              AND (
+                    title LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR content LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR summary LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+                    OR category LIKE CONCAT('%', #{escapedQuery}, '%') ESCAPE '!'
+              )
+            ORDER BY created_time DESC, id DESC
+            """)
+    List<InboxItem> searchActiveByKeyword(@Param("escapedQuery") String escapedQuery);
 
     /**
      * 只更新本次 AI 分析拥有的列；同时取得该 InboxItem 的行锁，串行化并发重分析。

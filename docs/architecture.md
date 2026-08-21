@@ -723,7 +723,7 @@ Hybrid Search
 Rerank
 ```
 
-当前第一步：
+已实现第一步：
 
 ```text
 Basic Keyword Search
@@ -737,7 +737,7 @@ Basic Keyword Search
 
 # 15. 当前 Keyword Search 架构
 
-初始阶段：
+Task 1 当前实现：
 
 ```text
 Vue Search UI
@@ -751,19 +751,17 @@ Keyword Search
 InboxItem Results
 ```
 
-Keyword Search 可以逐步利用：
+当前只查询业务主表中已持久化的：
 
 ```text
 title
 content
 summary
 category
-tags
-keywords
-entities
 ```
 
-但每个 Task 只加入当前需要的字段。
+查询由 Spring Boot 参数化调用 MySQL，限制为 ACTIVE，并按创建时间倒序返回现有 InboxItem 表示。
+tags、keywords、entities 等字段留给后续独立 Task。
 
 不要一次把所有 Search 功能全部实现。
 

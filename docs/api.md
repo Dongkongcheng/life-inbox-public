@@ -1,4 +1,4 @@
-# LifeInbox V0.2 API
+# LifeInbox V0.3 API
 
 默认开发地址：Java `http://localhost:8080`，Python `http://localhost:8000`。浏览器只应调用 Java 产品 API；Python 路由是 Java 与 AI Engine 之间的内部协议。
 
@@ -7,6 +7,7 @@
 | Method | Path | 说明 |
 | --- | --- | --- |
 | GET | `/api/inbox` | 查询 ACTIVE InboxItem，并聚合 AI 状态与五类结果 |
+| GET | `/api/search?q={keyword}` | Basic Keyword Search；查询 ACTIVE InboxItem |
 | POST | `/api/inbox` | JSON Capture；当前支持 TEXT、URL |
 | POST | `/api/inbox/file` | multipart FILE Capture |
 | POST | `/api/inbox/image` | multipart IMAGE Capture |
@@ -18,6 +19,18 @@
 | PUT | `/api/inbox/{id}/archive` | 归档；归档项不再出现在主列表 |
 | DELETE | `/api/inbox/{id}` | 删除条目；FILE/IMAGE 同时尽力清理本地文件 |
 | GET | `/api/ai/health` | Browser/Client → Java → Python 健康链路 |
+
+### Basic Keyword Search
+
+`GET /api/search?q={keyword}` 由 Spring Boot 直接查询 MySQL，不调用 FastAPI，也不会触发 AI Analyze。
+
+- `q` 会先去除首尾空白，空白查询返回 400；
+- 最长 200 个 Java 字符，超长查询返回 400；
+- 仅匹配 ACTIVE InboxItem 的 `title`、`content`、`summary`、`category`，四个字段使用 OR 语义；
+- `%`、`_` 按普通搜索文本处理，不作为用户可控的 LIKE 通配符；
+- 结果按 `created_time DESC, id DESC` 排序；
+- 响应仍是与 `GET /api/inbox` 相同的 InboxItem 数组，合法查询无结果时返回空数组；
+- 当前不搜索 tags、keywords、entities、sourceUrl 或 fileUrl。
 
 ### JSON Capture
 

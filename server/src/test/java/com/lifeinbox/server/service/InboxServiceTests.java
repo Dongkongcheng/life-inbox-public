@@ -84,6 +84,53 @@ class InboxServiceTests {
     }
 
     @Test
+    void searchTrimsEscapesLikeWildcardsAndReturnsExistingInboxRepresentation() {
+        InboxItem item = savedItem(1L, "TEXT", "CPU 使用率 50%", "路径 \\logs", null);
+        when(inboxItemMapper.searchActiveByKeyword("50!%!_!!\\path")).thenReturn(List.of(item));
+        when(inboxTagMapper.selectTagNamesByInboxItemId(1L)).thenReturn(List.of("性能"));
+        when(inboxKeywordMapper.selectKeywordsByInboxItemId(1L)).thenReturn(List.of("CPU"));
+        when(inboxEntityMapper.selectEntitiesByInboxItemId(1L)).thenReturn(List.of());
+
+        List<InboxItem> result = inboxService.search("  50%_!\\path  ");
+
+        assertEquals(List.of(item), result);
+        assertEquals(List.of("性能"), result.getFirst().getTags());
+        assertEquals(List.of("CPU"), result.getFirst().getKeywords());
+        verify(inboxItemMapper).searchActiveByKeyword("50!%!_!!\\path");
+        verify(analysisStatusService).isProcessingStale(item);
+    }
+
+    @Test
+    void searchReturnsEmptyListWhenKeywordHasNoMatch() {
+        when(inboxItemMapper.searchActiveByKeyword("missing")).thenReturn(List.of());
+
+        assertEquals(List.of(), inboxService.search("missing"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "\t\n"})
+    void searchRejectsBlankQuery(String query) {
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search(query)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(any());
+    }
+
+    @Test
+    void searchRejectsQueryLongerThanTwoHundredCharacters() {
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("a".repeat(201))
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(any());
+    }
+
+    @Test
     void createTextKeepsExistingTextBehavior() {
         CreateInboxItemRequest request = createRequest("TEXT", "文字标题", "文字内容", null);
         InboxItem savedItem = savedItem(1L, "TEXT", "文字标题", "文字内容", null);
