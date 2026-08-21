@@ -6,6 +6,7 @@ import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -196,6 +197,40 @@ class InboxAnalysisStatusServiceTests {
     }
 
     @Test
+    void autoSchedulingFailureOnlyChangesNotProcessedItem() {
+        when(inboxItemMapper.markAutoSchedulingFailed(
+                1L,
+                AiProcessingStatus.NOT_PROCESSED,
+                AiProcessingStatus.FAILED,
+                "自动分析队列繁忙，请手动重试"
+        )).thenReturn(1);
+
+        assertTrue(statusService.markAutoSchedulingFailed(
+                1L,
+                "自动分析队列繁忙，请手动重试"
+        ));
+
+        verify(inboxItemMapper).markAutoSchedulingFailed(
+                1L,
+                AiProcessingStatus.NOT_PROCESSED,
+                AiProcessingStatus.FAILED,
+                "自动分析队列繁忙，请手动重试"
+        );
+    }
+
+    @Test
+    void autoSchedulingFailureDoesNotOverwriteAlreadyClaimedItem() {
+        when(inboxItemMapper.markAutoSchedulingFailed(
+                1L,
+                AiProcessingStatus.NOT_PROCESSED,
+                AiProcessingStatus.FAILED,
+                "AI 分析失败"
+        )).thenReturn(0);
+
+        assertFalse(statusService.markAutoSchedulingFailed(1L, null));
+    }
+
+    @Test
     void rejectsNonPositiveStaleThreshold() {
         assertThrows(
                 IllegalArgumentException.class,
@@ -212,9 +247,18 @@ class InboxAnalysisStatusServiceTests {
                 String.class,
                 String.class
         );
+        Method schedulingFailed = InboxAnalysisStatusService.class.getMethod(
+                "markAutoSchedulingFailed",
+                Long.class,
+                String.class
+        );
 
         assertTrue(processing.isAnnotationPresent(Transactional.class));
         assertTrue(failed.isAnnotationPresent(Transactional.class));
+        Transactional schedulingTransaction = schedulingFailed.getAnnotation(
+                Transactional.class
+        );
+        assertEquals(Propagation.REQUIRES_NEW, schedulingTransaction.propagation());
     }
 
     private String startAnalyzeTogether(CountDownLatch start) throws InterruptedException {

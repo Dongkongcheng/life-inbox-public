@@ -29,3 +29,5 @@ life-inbox:
     analysis-read-timeout: 30s
     # 超过该时间的 PROCESSING 可由用户手动接管；应明显大于一次正常 Analyze 的预期耗时。
     processing-stale-after: 5m
+    # 自动 Analyze 默认关闭，避免升级后未经用户确认就调用真实 LLM 并产生费用。
+    auto-analyze-enabled: ${LIFEINBOX_AI_AUTO_ANALYZE_ENABLED:false}

@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -17,7 +18,7 @@ import java.util.UUID;
 
 /**
  * 管理 Analyze 开始与失败状态；每个方法都是独立、立即提交的短事务。
- * 当前只在用户手动 Analyze 时懒恢复 stale PROCESSING，不做自动重试或定时扫描，Capture 仍不依赖 AI。
+ * stale PROCESSING 仍只在新 Analyze 时懒恢复，不做自动重试或定时扫描。
  */
 @Service
 public class InboxAnalysisStatusService {
@@ -77,12 +78,7 @@ public class InboxAnalysisStatusService {
      */
     @Transactional
     public boolean markFailed(Long inboxItemId, String attemptId, String errorMessage) {
-        String candidate = errorMessage == null || errorMessage.isBlank()
-                ? "AI 分析失败"
-                : errorMessage;
-        String safeMessage = candidate.length() <= MAX_ERROR_MESSAGE_CHARS
-                ? candidate
-                : candidate.substring(0, MAX_ERROR_MESSAGE_CHARS);
+        String safeMessage = normalizeErrorMessage(errorMessage);
         int updatedRows = inboxItemMapper.markAnalysisFailed(
                 inboxItemId,
                 attemptId,
@@ -91,6 +87,21 @@ public class InboxAnalysisStatusService {
                 safeMessage
         );
         // 返回 0 表示该 Attempt 已被接管；旧失败必须静默放弃，不能破坏新请求。
+        return updatedRows == 1;
+    }
+
+    /**
+     * AFTER_COMMIT 阶段已结束原 Capture 事务，因此必须用 REQUIRES_NEW 提交排队失败状态。
+     * 条件 UPDATE 不会覆盖已被手工 Analyze 领取的 PROCESSING。
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean markAutoSchedulingFailed(Long inboxItemId, String errorMessage) {
+        int updatedRows = inboxItemMapper.markAutoSchedulingFailed(
+                inboxItemId,
+                AiProcessingStatus.NOT_PROCESSED,
+                AiProcessingStatus.FAILED,
+                normalizeErrorMessage(errorMessage)
+        );
         return updatedRows == 1;
     }
 
@@ -107,5 +118,14 @@ public class InboxAnalysisStatusService {
         }
         LocalDateTime staleBefore = LocalDateTime.now(clock).minus(processingStaleAfter);
         return !startedTime.isAfter(staleBefore);
+    }
+
+    private String normalizeErrorMessage(String errorMessage) {
+        String candidate = errorMessage == null || errorMessage.isBlank()
+                ? "AI 分析失败"
+                : errorMessage;
+        return candidate.length() <= MAX_ERROR_MESSAGE_CHARS
+                ? candidate
+                : candidate.substring(0, MAX_ERROR_MESSAGE_CHARS);
     }
 }

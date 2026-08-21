@@ -38,6 +38,9 @@ class InboxServiceTests {
     private final InboxAnalysisStatusService analysisStatusService = mock(
             InboxAnalysisStatusService.class
     );
+    private final InboxCapturePersistenceService capturePersistenceService = mock(
+            InboxCapturePersistenceService.class
+    );
     private final InboxService inboxService = new InboxService(
             inboxItemMapper,
             inboxTagMapper,
@@ -45,7 +48,8 @@ class InboxServiceTests {
             inboxEntityMapper,
             urlMetadataService,
             fileStorageService,
-            analysisStatusService
+            analysisStatusService,
+            capturePersistenceService
     );
 
     @Test
@@ -87,7 +91,7 @@ class InboxServiceTests {
 
         assertEquals(savedItem, result);
         ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
-        verify(inboxItemMapper).insert(captor.capture());
+        verify(capturePersistenceService).save(captor.capture());
         assertEquals("TEXT", captor.getValue().getType());
         assertEquals("文字标题", captor.getValue().getTitle());
         assertEquals("文字内容", captor.getValue().getContent());
@@ -117,7 +121,7 @@ class InboxServiceTests {
 
         assertEquals(savedItem, result);
         ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
-        verify(inboxItemMapper).insert(captor.capture());
+        verify(capturePersistenceService).save(captor.capture());
         assertEquals("URL", captor.getValue().getType());
         assertEquals("OpenAI Java", captor.getValue().getTitle());
         assertEquals(null, captor.getValue().getContent());
@@ -138,7 +142,7 @@ class InboxServiceTests {
 
         assertEquals(savedItem, result);
         ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
-        verify(inboxItemMapper).insert(captor.capture());
+        verify(capturePersistenceService).save(captor.capture());
         assertEquals("openai/openai-java", captor.getValue().getTitle());
         verify(urlMetadataService).resolveTitle(sourceUrl);
     }
@@ -153,7 +157,7 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+        verify(capturePersistenceService, never()).save(any(InboxItem.class));
     }
 
     @Test
@@ -166,7 +170,7 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+        verify(capturePersistenceService, never()).save(any(InboxItem.class));
     }
 
     @Test
@@ -179,7 +183,7 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+        verify(capturePersistenceService, never()).save(any(InboxItem.class));
     }
 
     @Test
@@ -192,7 +196,7 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).insert(any(InboxItem.class));
+        verify(capturePersistenceService, never()).save(any(InboxItem.class));
     }
 
     @Test
@@ -202,23 +206,18 @@ class InboxServiceTests {
         when(fileStorageService.store(file)).thenReturn(
                 new FileStorageService.StoredFile(storedName, "操作系统实验报告.pdf")
         );
-        when(inboxItemMapper.insert(any(InboxItem.class))).thenAnswer(invocation -> {
-            InboxItem itemToInsert = invocation.getArgument(0);
-            itemToInsert.setId(4L);
-            return 1;
-        });
         InboxItem savedItem = new InboxItem();
         savedItem.setId(4L);
         savedItem.setType("FILE");
         savedItem.setTitle("操作系统实验报告.pdf");
         savedItem.setFileUrl("/api/files/" + storedName);
-        when(inboxItemMapper.selectById(4L)).thenReturn(savedItem);
+        when(capturePersistenceService.save(any(InboxItem.class))).thenReturn(savedItem);
 
         InboxItem result = inboxService.createFile(file, " ");
 
         assertEquals(savedItem, result);
         ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
-        verify(inboxItemMapper).insert(captor.capture());
+        verify(capturePersistenceService).save(captor.capture());
         assertEquals("FILE", captor.getValue().getType());
         assertEquals("操作系统实验报告.pdf", captor.getValue().getTitle());
         assertEquals("/api/files/" + storedName, captor.getValue().getFileUrl());
@@ -235,7 +234,7 @@ class InboxServiceTests {
         when(fileStorageService.store(file)).thenReturn(
                 new FileStorageService.StoredFile(storedName, "笔记.txt")
         );
-        when(inboxItemMapper.insert(any(InboxItem.class)))
+        when(capturePersistenceService.save(any(InboxItem.class)))
                 .thenThrow(new IllegalStateException("database unavailable"));
 
         assertThrows(IllegalStateException.class, () -> inboxService.createFile(file, null));
@@ -250,23 +249,18 @@ class InboxServiceTests {
         when(fileStorageService.storeImage(image)).thenReturn(
                 new FileStorageService.StoredFile(storedName, "微信截图.png")
         );
-        when(inboxItemMapper.insert(any(InboxItem.class))).thenAnswer(invocation -> {
-            InboxItem itemToInsert = invocation.getArgument(0);
-            itemToInsert.setId(5L);
-            return 1;
-        });
         InboxItem savedItem = new InboxItem();
         savedItem.setId(5L);
         savedItem.setType("IMAGE");
         savedItem.setTitle("旅行照片");
         savedItem.setFileUrl("/api/files/" + storedName);
-        when(inboxItemMapper.selectById(5L)).thenReturn(savedItem);
+        when(capturePersistenceService.save(any(InboxItem.class))).thenReturn(savedItem);
 
         InboxItem result = inboxService.createImage(image, " 旅行照片 ");
 
         assertEquals(savedItem, result);
         ArgumentCaptor<InboxItem> captor = ArgumentCaptor.forClass(InboxItem.class);
-        verify(inboxItemMapper).insert(captor.capture());
+        verify(capturePersistenceService).save(captor.capture());
         assertEquals("IMAGE", captor.getValue().getType());
         assertEquals("旅行照片", captor.getValue().getTitle());
         assertEquals("/api/files/" + storedName, captor.getValue().getFileUrl());
@@ -283,7 +277,7 @@ class InboxServiceTests {
         when(fileStorageService.storeImage(image)).thenReturn(
                 new FileStorageService.StoredFile(storedName, "照片.jpg")
         );
-        when(inboxItemMapper.insert(any(InboxItem.class)))
+        when(capturePersistenceService.save(any(InboxItem.class)))
                 .thenThrow(new IllegalStateException("database unavailable"));
 
         assertThrows(IllegalStateException.class, () -> inboxService.createImage(image, null));
@@ -422,12 +416,7 @@ class InboxServiceTests {
     }
 
     private void prepareInsert(InboxItem savedItem) {
-        when(inboxItemMapper.insert(any(InboxItem.class))).thenAnswer(invocation -> {
-            InboxItem itemToInsert = invocation.getArgument(0);
-            itemToInsert.setId(savedItem.getId());
-            return 1;
-        });
-        when(inboxItemMapper.selectById(savedItem.getId())).thenReturn(savedItem);
+        when(capturePersistenceService.save(any(InboxItem.class))).thenReturn(savedItem);
     }
 
     private InboxEntity entity(String name, String type) {
