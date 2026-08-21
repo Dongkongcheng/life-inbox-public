@@ -1,6 +1,7 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -43,6 +45,9 @@ public class FileStorageService {
             "jpg", "jpeg", "png", "webp", "gif", "bmp"
     );
     private static final Set<String> AI_ANALYZE_EXTENSIONS = Set.of("txt", "md", "pdf");
+    private static final Set<String> AI_ANALYZE_IMAGE_EXTENSIONS = Set.of(
+            "jpg", "jpeg", "png", "webp"
+    );
     private static final String FILE_URL_PREFIX = "/api/files/";
     private static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES = Map.ofEntries(
             Map.entry("pdf", Set.of("application/pdf")),
@@ -158,20 +163,50 @@ public class FileStorageService {
      * 返回内存 Resource 而不是本地路径，避免 Python 与 Java 磁盘目录耦合。
      */
     public AnalyzableFile loadForAnalysis(String fileUrl) {
-        String storedName = storedNameFromFileUrl(fileUrl);
+        return loadAnalyzableContent(
+                fileUrl,
+                AI_ANALYZE_EXTENSIONS,
+                FileAnalyzeException::fileNotFound,
+                FileAnalyzeException::typeUnsupported,
+                FileAnalyzeException::fileReadFailed,
+                FileAnalyzeException::fileTooLarge
+        );
+    }
+
+    /** IMAGE 仍由 Java 安全读取，仅把内容发送给 Python OCR，不暴露磁盘路径。 */
+    public AnalyzableFile loadImageForAnalysis(String fileUrl) {
+        return loadAnalyzableContent(
+                fileUrl,
+                AI_ANALYZE_IMAGE_EXTENSIONS,
+                ImageAnalyzeException::imageNotFound,
+                ImageAnalyzeException::typeUnsupported,
+                ImageAnalyzeException::imageReadFailed,
+                ImageAnalyzeException::imageTooLarge
+        );
+    }
+
+    private AnalyzableFile loadAnalyzableContent(
+            String fileUrl,
+            Set<String> allowedExtensions,
+            Supplier<? extends RuntimeException> notFound,
+            Supplier<? extends RuntimeException> typeUnsupported,
+            Supplier<? extends RuntimeException> readFailed,
+            Supplier<? extends RuntimeException> tooLarge
+    ) {
+        String storedName = storedNameFromFileUrl(fileUrl, notFound);
         String extension = extensionOf(storedName);
-        if (!AI_ANALYZE_EXTENSIONS.contains(extension)) {
-            throw FileAnalyzeException.typeUnsupported();
+        if (!allowedExtensions.contains(extension)) {
+            throw typeUnsupported.get();
         }
 
         Path filePath;
         try {
             filePath = resolveStoredPath(storedName);
         } catch (ResponseStatusException exception) {
-            throw FileAnalyzeException.fileNotFound();
+            throw notFound.get();
         }
         if (!Files.isRegularFile(filePath, LinkOption.NOFOLLOW_LINKS)) {
-            throw FileAnalyzeException.fileNotFound();
+            throw notFound.get();
         }
 
         byte[] content;
@@ -182,10 +217,10 @@ public class FileStorageService {
         )) {
             content = inputStream.readNBytes((int) MAX_AI_ANALYZE_FILE_SIZE + 1);
         } catch (IOException | UnsupportedOperationException exception) {
-            throw FileAnalyzeException.fileReadFailed();
+            throw readFailed.get();
         }
         if (content.length > MAX_AI_ANALYZE_FILE_SIZE) {
-            throw FileAnalyzeException.fileTooLarge();
+            throw tooLarge.get();
         }
 
         Resource resource = new NamedByteArrayResource(content, storedName);
@@ -238,13 +273,18 @@ public class FileStorageService {
         return extension;
     }
 
-    private String storedNameFromFileUrl(String fileUrl) {
+    private String storedNameFromFileUrl(
+            String fileUrl,
+            Supplier<? extends RuntimeException> notFound
+    ) {
         if (fileUrl == null || !fileUrl.startsWith(FILE_URL_PREFIX)) {
-            throw FileAnalyzeException.fileNotFound();
+            throw notFound.get();
         }
         String storedName = fileUrl.substring(FILE_URL_PREFIX.length());
-        if (storedName.contains("/") || storedName.contains("\\")) {
-            throw FileAnalyzeException.fileNotFound();
+        if (storedName.contains("/")
+                || storedName.contains("\\")
+                || !STORED_NAME_PATTERN.matcher(storedName).matches()) {
+            throw notFound.get();
         }
         return storedName;
     }

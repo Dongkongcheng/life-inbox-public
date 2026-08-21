@@ -1,6 +1,7 @@
 package com.lifeinbox.server.client;
 
 import com.lifeinbox.server.dto.AiHealthResponse;
+import com.lifeinbox.server.dto.AiImageErrorResponse;
 import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiFileErrorResponse;
@@ -10,6 +11,7 @@ import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
 import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -153,14 +155,7 @@ public class AiServiceClient {
 
     /** 将 Java 安全读取的受管文件作为 multipart 内容发送给 Python。 */
     public AiAnalyzeResponse analyzeFile(String title, Resource file, MediaType contentType) {
-        HttpHeaders fileHeaders = new HttpHeaders();
-        fileHeaders.setContentDispositionFormData("file", file.getFilename());
-        fileHeaders.setContentType(contentType);
-        MultiValueMap<String, Object> multipart = new LinkedMultiValueMap<>();
-        multipart.add("file", new HttpEntity<>(file, fileHeaders));
-        if (title != null && !title.isBlank()) {
-            multipart.add("title", title.trim());
-        }
+        MultiValueMap<String, Object> multipart = buildMultipart(title, file, contentType);
 
         try {
             AiAnalyzeResponse response = analysisRestClient.post()
@@ -187,6 +182,51 @@ public class AiServiceClient {
         }
     }
 
+    /** 将 Java 安全读取的受管图片作为 multipart 内容发送给 Python OCR。 */
+    public AiAnalyzeResponse analyzeImage(String title, Resource file, MediaType contentType) {
+        MultiValueMap<String, Object> multipart = buildMultipart(title, file, contentType);
+
+        try {
+            AiAnalyzeResponse response = analysisRestClient.post()
+                    .uri("/analyze/image")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(multipart)
+                    .retrieve()
+                    .body(AiAnalyzeResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回 IMAGE 分析结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException | ImageAnalyzeException exception) {
+            throw exception;
+        } catch (RestClientResponseException exception) {
+            ImageAnalyzeException knownFailure = parseKnownImageFailure(exception);
+            if (knownFailure != null) {
+                throw knownFailure;
+            }
+            // 未知 OCR 错误和 LLM 错误不能伪装成受信任的图片读取失败。
+            throw new AiServiceUnavailableException("AI IMAGE 分析服务暂不可用", exception);
+        } catch (RestClientException exception) {
+            throw new AiServiceUnavailableException("AI IMAGE 分析服务暂不可用", exception);
+        }
+    }
+
+    private MultiValueMap<String, Object> buildMultipart(
+            String title,
+            Resource file,
+            MediaType contentType
+    ) {
+        HttpHeaders fileHeaders = new HttpHeaders();
+        fileHeaders.setContentDispositionFormData("file", file.getFilename());
+        fileHeaders.setContentType(contentType);
+        MultiValueMap<String, Object> multipart = new LinkedMultiValueMap<>();
+        multipart.add("file", new HttpEntity<>(file, fileHeaders));
+        if (title != null && !title.isBlank()) {
+            multipart.add("title", title.trim());
+        }
+        return multipart;
+    }
+
     private UrlAnalyzeException parseKnownUrlFailure(RestClientResponseException exception) {
         try {
             AiUrlErrorResponse errorResponse = exception.getResponseBodyAs(AiUrlErrorResponse.class);
@@ -209,6 +249,23 @@ public class AiServiceClient {
                 return null;
             }
             return FileAnalyzeException.fromUpstream(
+                    errorResponse.code(),
+                    exception.getStatusCode().value()
+            ).orElse(null);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private ImageAnalyzeException parseKnownImageFailure(RestClientResponseException exception) {
+        try {
+            AiImageErrorResponse errorResponse = exception.getResponseBodyAs(
+                    AiImageErrorResponse.class
+            );
+            if (errorResponse == null) {
+                return null;
+            }
+            return ImageAnalyzeException.fromUpstream(
                     errorResponse.code(),
                     exception.getStatusCode().value()
             ).orElse(null);

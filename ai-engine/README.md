@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-V0.2 Task 6 在现有 TEXT/URL Analyze 之外增加 FILE 文本提取。TXT、Markdown 和带文本层的 PDF 提取成功后仍进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem、文件和分析结果仍由 Java 管理。
+V0.2 Task 7 在现有 TEXT/URL/FILE Analyze 之外增加 IMAGE OCR。截图或文字图片识别成功后仍进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem、图片和分析结果仍由 Java 管理。
 
 ## 安装依赖
 
@@ -139,6 +139,42 @@ Invoke-RestMethod -Method Post `
 | 422 | `FILE_PDF_NO_TEXT` | PDF 没有可提取文本，可能需要 OCR |
 | 413 | `FILE_DOCUMENT_TOO_LONG` | 页数或正文超过当前限制 |
 | 422 | `FILE_EXTRACTION_FAILED` | 文档损坏或解析失败 |
+
+## 分析 IMAGE
+
+`POST /analyze/image` 使用 multipart 接收图片内容和可选标题：
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/analyze/image" `
+  -Form @{ file = Get-Item ".\course-notice.png"; title = "课程通知" }
+```
+
+> Windows PowerShell 5.1 的 `Invoke-RestMethod` 没有 `-Form` 参数，可使用 PowerShell 7、浏览器产品界面或其他 multipart 客户端。
+
+处理规则：
+
+- 使用本地 RapidOCR + ONNX Runtime CPU 识别中英文截图，不调用云 OCR，不需要额外系统程序或 API Key；
+- 仅支持 `.jpg`、`.jpeg`、`.png`、`.webp`，并由 Pillow 实际打开和验证内容，不能只依赖扩展名；
+- 图片最大 10 MiB，宽高分别不能超过 10,000，总像素不能超过 20,000,000；Pillow 解压炸弹保护保持开启；
+- OCR 前使用 EXIF Orientation 做简单方向归一化；
+- OCR 文字执行 NFKC 和空白清理，最多 20,000 个字符，超限明确失败；
+- 少于 4 个有效字母、数字或中文字符时视为无有效文字，不调用 LLM；
+- OCR 原文只在当前请求中临时使用，不持久化；成功后复用现有 Analyze Service 和统一五字段结果。
+
+图片错误使用固定的 `{ "code": "...", "detail": "..." }` 结构：
+
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 415 | `IMAGE_TYPE_UNSUPPORTED` | 不是当前支持的 JPG/PNG/WEBP |
+| 413 | `IMAGE_TOO_LARGE` | 图片超过 10 MiB |
+| 413 | `IMAGE_DIMENSIONS_TOO_LARGE` | 宽高或总像素超过限制 |
+| 422 | `IMAGE_INVALID` | 图片损坏、伪装或内容无效 |
+| 422 | `IMAGE_OCR_FAILED` | 本地 OCR 执行失败 |
+| 422 | `IMAGE_TEXT_EMPTY` | 未识别到足够的文字，不调用 LLM |
+| 413 | `IMAGE_TEXT_TOO_LONG` | OCR 文字超过 Analyze 输入上限 |
+
+当前只做 OCR-based IMAGE Analyze。普通照片内容理解、图片描述、Qwen-VL 等通用 Vision，以及扫描 PDF OCR 均未实现。
 
 ## 运行测试
 

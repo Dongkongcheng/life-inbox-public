@@ -3,6 +3,7 @@ package com.lifeinbox.server.controller;
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import com.lifeinbox.server.service.InboxAnalyzeService;
 import com.lifeinbox.server.service.InboxService;
@@ -80,5 +81,25 @@ class InboxControllerTests {
                 .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.code").value("FILE_PDF_NO_TEXT"))
                 .andExpect(jsonPath("$.detail").value("无法从 PDF 提取有效文本，文件可能需要 OCR"));
+    }
+
+    @Test
+    void analyzeEndpointReturnsSafeStructuredImageFailure() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        InboxAnalyzeService analyzeService = mock(InboxAnalyzeService.class);
+        InboxController controller = new InboxController(inboxService, analyzeService);
+        ImageAnalyzeException noText = ImageAnalyzeException.fromUpstream(
+                "IMAGE_TEXT_EMPTY",
+                422
+        ).orElseThrow();
+        when(analyzeService.analyze(10L)).thenThrow(noText);
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(post("/api/inbox/10/ai/analyze"))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("IMAGE_TEXT_EMPTY"))
+                .andExpect(jsonPath("$.detail").value("当前图片未识别到足够的文字内容"));
     }
 }

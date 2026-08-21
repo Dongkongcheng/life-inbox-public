@@ -2,6 +2,7 @@ package com.lifeinbox.server.controller;
 
 import com.lifeinbox.server.dto.AiHealthErrorResponse;
 import com.lifeinbox.server.exception.FileAnalyzeException;
+import com.lifeinbox.server.exception.ImageAnalyzeException;
 import com.lifeinbox.server.exception.UrlAnalyzeException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -44,6 +45,22 @@ class ApiExceptionHandlerTests {
         assertEquals(Map.of(
                 "code", "FILE_PDF_NO_TEXT",
                 "detail", "无法从 PDF 提取有效文本，文件可能需要 OCR"
+        ), response.getBody());
+    }
+
+    @Test
+    void returnsSafeStructuredImageError() {
+        ImageAnalyzeException exception = ImageAnalyzeException.fromUpstream(
+                "IMAGE_TEXT_EMPTY",
+                422
+        ).orElseThrow();
+
+        ResponseEntity<Map<String, String>> response = handler.handleImageAnalyze(exception);
+
+        assertEquals(HttpStatus.UNPROCESSABLE_CONTENT, response.getStatusCode());
+        assertEquals(Map.of(
+                "code", "IMAGE_TEXT_EMPTY",
+                "detail", "当前图片未识别到足够的文字内容"
         ), response.getBody());
     }
 

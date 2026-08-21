@@ -14,6 +14,8 @@ from app.services.document_text_extractor import (
     DocumentTextExtractor,
 )
 from app.services.file_analyze_service import FileAnalyzeService
+from app.services.image_analyze_service import ImageAnalyzeService
+from app.services.image_text_extractor import ImageExtractionError, ImageTextExtractor
 from app.services.llm_client import (
     LlmClient,
     LlmInvalidResponseError,
@@ -41,6 +43,8 @@ url_content_extractor = UrlContentExtractor()
 url_analyze_service = UrlAnalyzeService(url_content_extractor, analyze_service)
 document_text_extractor = DocumentTextExtractor()
 file_analyze_service = FileAnalyzeService(document_text_extractor, analyze_service)
+image_text_extractor = ImageTextExtractor()
+image_analyze_service = ImageAnalyzeService(image_text_extractor, analyze_service)
 
 
 def get_analyze_service() -> AnalyzeService:
@@ -65,6 +69,12 @@ def get_file_analyze_service() -> FileAnalyzeService:
     """提供 FILE Analyze 编排服务，测试可以替换文档解析和 LLM。"""
 
     return file_analyze_service
+
+
+def get_image_analyze_service() -> ImageAnalyzeService:
+    """提供 IMAGE OCR Analyze 编排服务，测试可替换 OCR 与 LLM。"""
+
+    return image_analyze_service
 
 
 @app.exception_handler(LlmConfigurationError)
@@ -137,6 +147,19 @@ def handle_document_extraction_error(
     )
 
 
+@app.exception_handler(ImageExtractionError)
+def handle_image_extraction_error(
+    request: Request,
+    exception: ImageExtractionError,
+) -> JSONResponse:
+    """只返回固定 OCR 错误码，不暴露图片内容、模型路径或内部异常。"""
+
+    return JSONResponse(
+        status_code=exception.status_code,
+        content={"code": exception.code, "detail": exception.detail},
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     """提供轻量健康检查，为 Java 与 Python 的第一条通信链路服务。"""
@@ -171,6 +194,17 @@ def analyze_file(
     service: FileAnalyzeService = Depends(get_file_analyze_service),
 ) -> AnalyzeResult:
     """接收 Java 管理的文件内容，提取文本后复用统一 Analyze Pipeline。"""
+
+    return service.analyze(file, title)
+
+
+@app.post("/analyze/image", response_model=AnalyzeResult)
+def analyze_image(
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str | None, Form(max_length=255)] = None,
+    service: ImageAnalyzeService = Depends(get_image_analyze_service),
+) -> AnalyzeResult:
+    """接收 Java 管理的图片内容，本地 OCR 后复用统一 Analyze Pipeline。"""
 
     return service.analyze(file, title)
 

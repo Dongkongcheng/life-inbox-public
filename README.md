@@ -164,7 +164,9 @@ V0.2 的目标是：
   * ✅ Markdown
   * ✅ PDF 文本层
 * ✅ FILE AI Analyze（显式触发）
-* ⏳ IMAGE OCR / Vision
+* ✅ IMAGE OCR
+* ✅ IMAGE OCR-based AI Analyze（显式触发）
+* ⏳ General Image Vision
 * ⏳ AI Processing Status
 * ⏳ AI Failure Handling
 
@@ -640,7 +642,7 @@ ai-engine
 
 Python 服务。
 
-V0.2 Task 6 让 FILE 与 TEXT、URL 复用同一套 AI Analyze Pipeline。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；TXT、Markdown 和带文本层的 PDF 由 Python 临时提取正文，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
+V0.2 Task 7 让 IMAGE 与 TEXT、URL、FILE 复用同一套 AI Analyze Pipeline。Capture 仍然先独立保存，只有用户点击“AI 分析”时才调用 Python 和 LLM；截图或文字图片由 Python 使用本地 RapidOCR 临时提取文字，再进入现有 Analyze Service。一次调用返回 `summary`、有限 `category`、最多 5 个 `tags`、最多 8 个 `keywords` 和最多 10 个 `entities`，Java 二次校验后在短事务中统一持久化。
 
 进入 `ai-engine` 后安装依赖，并在当前 PowerShell 会话配置一个 OpenAI-compatible Chat Completions 服务：
 
@@ -655,7 +657,7 @@ $env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/analyze`、`/analyze/url`、`/analyze/file` 和兼容的 `/summarize` 会返回 503。
+`.env.example` 只提供变量名示例；项目没有加载 `.env` 的额外依赖，因此本地启动时仍需由终端或部署环境注入变量。缺少 LLM 配置不会影响 `/health`，但 `/analyze`、`/analyze/url`、`/analyze/file`、`/analyze/image` 和兼容的 `/summarize` 会返回 503。
 
 Python 健康检查：
 
@@ -703,7 +705,17 @@ Parts: file=<TXT/MD/PDF 文件内容>, title=<可选标题>
 Response: 与 POST /analyze 相同
 ```
 
-文件仍由 Java 安全管理和读取，Python 不接收服务器绝对路径。FILE Analyze 仅支持 TXT、Markdown 和具有文本层的 PDF；文件最大 10 MiB、PDF 最多 100 页，规范化后的正文最多 20,000 个字符。UTF-8 文本支持 BOM；超长文档会明确失败而不是静默截断。扫描版 PDF、加密 PDF、OCR、DOC/DOCX、PPT/PPTX 和 Excel 当前不支持。
+文件仍由 Java 安全管理和读取，Python 不接收服务器绝对路径。FILE Analyze 仅支持 TXT、Markdown 和具有文本层的 PDF；文件最大 10 MiB、PDF 最多 100 页，规范化后的正文最多 20,000 个字符。UTF-8 文本支持 BOM；超长文档会明确失败而不是静默截断。扫描版 PDF、加密 PDF、PDF OCR、DOC/DOCX、PPT/PPTX 和 Excel 当前不支持。
+
+IMAGE 使用 multipart Python 内部接口，并返回同一个 AnalyzeResult：
+
+```text
+POST http://localhost:8000/analyze/image
+Parts: file=<JPG/PNG/WEBP 图片内容>, title=<可选标题>
+Response: 与 POST /analyze 相同
+```
+
+图片仍由 Java 安全管理和读取，Python 不接收服务器绝对路径。IMAGE Analyze 使用本地 RapidOCR + ONNX Runtime CPU，不需要 Tesseract、CUDA、云 OCR 或新的 API Key。当前支持 JPG/JPEG、PNG、WEBP，最大 10 MiB；宽高分别不能超过 10,000，总像素不能超过 20,000,000。OCR 文字最多 20,000 个字符，少于 4 个有效字母、数字或中文字符时不会调用 LLM。GIF/BMP 虽可 Capture，但当前不支持 OCR Analyze；普通照片的视觉描述、PDF OCR 和通用 Vision 仍未实现。
 
 允许的 Category 为：`技术学习`、`学习成长`、`工作`、`求职`、`生活`、`财务`、`想法`、`资讯`、`其他`。Tags 必须有 1～5 个，每个最长 64 个字符；Keywords 可以有 0～8 个；Entities 可以有 0～10 个，类型只能是 `PERSON`、`ORGANIZATION`、`LOCATION`、`TECHNOLOGY`、`PRODUCT`、`EVENT`、`OTHER`。旧 `POST /summarize` 暂时保留原请求和 `{ "summary": "..." }` 响应，但底层复用同一次 Analyze，不维护第二套 Prompt。
 
@@ -713,7 +725,7 @@ Response: 与 POST /analyze 相同
 POST http://localhost:8080/api/inbox/{id}/ai/analyze
 ```
 
-该产品接口同时支持 TEXT、URL 和 FILE。前端不需要知道 Java 内部调用的是 Python `/analyze`、`/analyze/url` 还是 `/analyze/file`；IMAGE 当前仍明确不支持 AI Analyze。
+该产品接口同时支持 TEXT、URL、FILE 和 IMAGE。前端不需要知道 Java 内部调用的是 Python `/analyze`、`/analyze/url`、`/analyze/file` 还是 `/analyze/image`；IMAGE 当前只做 OCR-based Analyze，不做通用 Vision。
 
 旧 `POST /api/inbox/{id}/ai/summary` 也暂时保留为兼容入口，并委托同一个 Analyze Service。
 
@@ -811,7 +823,7 @@ Delete
 ```text
 Python AI Engine
         ↓
-TEXT + URL + FILE AI Analyze
+TEXT + URL + FILE + IMAGE OCR AI Analyze
 Summary + Category + Tags
   + Keywords + Entities
 ```
