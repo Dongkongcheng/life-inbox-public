@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-V0.2 Task 4 在统一 TEXT Analyze 中增加 `keywords` 和 `entities`。一次 LLM 调用返回完整结构化结果；Python 不连接 MySQL，InboxItem 和分析结果仍由 Java 持久化。
+V0.2 Task 5 在现有 TEXT Analyze 之外增加 URL 正文提取。URL 抓取成功后仍进入同一个 Analyze Pipeline，并通过一次 LLM 调用返回 `summary`、`category`、`tags`、`keywords` 和 `entities`；Python 不连接 MySQL，InboxItem 和分析结果仍由 Java 持久化。
 
 ## 安装依赖
 
@@ -68,10 +68,49 @@ Keywords 允许 0～8 个，每项最长 64 个字符。Python 会执行 NFKC �
 
 旧 `POST /summarize` 暂时保留相同请求和 `{ "summary": "..." }` 响应，用于兼容已有调用方；它内部复用包含全部五个字段的 Analyze Service，不会维护第二套 Prompt 或再次调用 LLM。
 
+## 分析 URL
+
+`POST /analyze/url` 接收网页 URL 和可选标题：
+
+```powershell
+$body = @{
+  url = "https://example.com/article"
+  title = "可选的 InboxItem 标题"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/analyze/url" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+响应继续使用与 TEXT 完全相同的 AnalyzeResult。Python 使用普通 HTTP 请求和 Beautiful Soup 提取 `article`、`main` 或 `body` 中的正文，不执行 JavaScript；动态页面若没有可用的初始 HTML 正文，会返回 `URL_CONTENT_EMPTY`。
+
+URL 抓取采用以下边界：
+
+- URL 最长 1,000 个字符，只允许 `http`、`https`，拒绝含账号密码的地址；
+- 每一跳都解析并检查全部 DNS 地址，只允许公网 IP；连接固定到已检查 IP，同时保留原始 Host 和 HTTPS SNI，避免 DNS 重绑定绕过；
+- 关闭环境代理和自动重定向，最多手动处理 5 次重定向，每一跳重新执行安全检查；
+- Connect Timeout 为 3 秒，Read Timeout 为 8 秒；
+- 只接收 HTML，流式读取上限为 1 MiB；
+- 提取后的正文最多 20,000 个字符，再交给现有 Analyze Service；提取失败时不会调用 LLM。
+
+网页读取错误使用固定的 `{ "code": "...", "detail": "..." }` 结构：
+
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 400 | `URL_INVALID` | URL 无效或 Scheme 不支持 |
+| 403 | `URL_BLOCKED` | URL 被 SSRF 安全策略阻止 |
+| 408 | `URL_FETCH_TIMEOUT` | 网页请求超时 |
+| 424 | `URL_FETCH_FAILED` | 网页访问失败 |
+| 415 | `URL_CONTENT_TYPE_UNSUPPORTED` | 不是受支持的 HTML |
+| 413 | `URL_RESPONSE_TOO_LARGE` | 网页响应超过 1 MiB |
+| 422 | `URL_CONTENT_EMPTY` | 无法提取有效正文 |
+
 ## 运行测试
 
 ```powershell
 uv run pytest
 ```
 
-自动化测试使用 Fake Service 和 `httpx.MockTransport`，不会请求真实 LLM 或消耗付费 Token。
+自动化测试使用 Fake Service、假 DNS 和 `httpx.MockTransport`，不会请求真实网页或 LLM，也不会消耗付费 Token。

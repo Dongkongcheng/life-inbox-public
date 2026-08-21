@@ -261,7 +261,7 @@ const analyzeItem = async (item) => {
       throw new Error(message)
     }
 
-    // 成功后重新读取 Java 持久化的数据，确保摘要、分类和标签作为一组展示。
+    // 成功后重新读取 Java 持久化的数据，确保五类分析结果作为一组展示。
     await loadInbox()
   } catch (error) {
     console.error(error)
@@ -273,6 +273,8 @@ const analyzeItem = async (item) => {
   }
 }
 
+// TEXT 和 URL 复用同一个产品 Analyze API；FILE/IMAGE 暂不开放分析入口。
+const isAnalyzableItem = (item) => item.type === 'TEXT' || item.type === 'URL'
 const hasTags = (item) => Array.isArray(item.tags) && item.tags.length > 0
 // Tags 面向整理，Keywords 面向内容理解；两者保持独立展示，不在前端互相推导。
 const hasKeywords = (item) => Array.isArray(item.keywords) && item.keywords.length > 0
@@ -495,81 +497,81 @@ onBeforeUnmount(clearSelectedUpload)
           <template v-else>
             <h3 v-if="item.title">{{ item.title }}</h3>
             <p>{{ item.content }}</p>
-            <section
-              v-if="item.type === 'TEXT' && hasAnalysis(item)"
-              class="analysis-block"
-              aria-label="AI 分析结果"
-              aria-live="polite"
-            >
-              <h4>AI 分析</h4>
-              <div v-if="item.summary" class="analysis-field">
-                <strong class="analysis-label">摘要</strong>
-                <p>{{ item.summary }}</p>
-              </div>
-              <div v-if="item.category" class="analysis-field">
-                <strong class="analysis-label">分类</strong>
-                <span class="analysis-category">{{ item.category }}</span>
-              </div>
-              <div v-if="hasTags(item)" class="analysis-field">
-                <strong class="analysis-label">标签</strong>
-                <ul class="analysis-tags" aria-label="AI 标签">
-                  <li
-                    v-for="(tag, index) in item.tags"
-                    :key="`${item.id}-${index}-${tag}`"
-                    class="analysis-tag"
-                  >
-                    {{ tag }}
-                  </li>
-                </ul>
-              </div>
-              <div v-if="hasKeywords(item)" class="analysis-field">
-                <strong class="analysis-label">关键词</strong>
-                <ul class="analysis-keywords" aria-label="AI 关键词">
-                  <li
-                    v-for="(keyword, index) in item.keywords"
-                    :key="`${item.id}-keyword-${index}-${keyword}`"
-                    class="analysis-keyword"
-                  >
-                    {{ keyword }}
-                  </li>
-                </ul>
-              </div>
-              <div v-if="hasEntities(item)" class="analysis-field">
-                <strong class="analysis-label">实体</strong>
-                <ul class="analysis-entities" aria-label="AI 实体">
-                  <li
-                    v-for="(entity, index) in item.entities"
-                    :key="`${item.id}-entity-${index}-${entity.type}-${entity.name}`"
-                    class="analysis-entity"
-                  >
-                    <span class="analysis-entity-name">{{ entity.name }}</span>
-                    <span class="analysis-entity-type">{{ entityTypeLabel(entity.type) }}</span>
-                  </li>
-                </ul>
-              </div>
-            </section>
-            <div v-if="item.type === 'TEXT'" class="analysis-actions" aria-live="polite">
-              <button
-                class="analysis-button"
-                type="button"
-                :disabled="analyzingId !== null || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
-                @click="analyzeItem(item)"
-              >
-                {{ analyzingId === item.id
-                  ? '分析中…'
-                  : hasAnalysis(item)
-                    ? '重新分析'
-                    : 'AI 分析' }}
-              </button>
-            </div>
-            <p
-              v-if="analysisErrorItemId === item.id"
-              class="analysis-error"
-              role="alert"
-            >
-              {{ analysisErrorMessage }}
-            </p>
           </template>
+          <section
+            v-if="isAnalyzableItem(item) && hasAnalysis(item)"
+            class="analysis-block"
+            aria-label="AI 分析结果"
+            aria-live="polite"
+          >
+            <h4>AI 分析</h4>
+            <div v-if="item.summary" class="analysis-field">
+              <strong class="analysis-label">摘要</strong>
+              <p>{{ item.summary }}</p>
+            </div>
+            <div v-if="item.category" class="analysis-field">
+              <strong class="analysis-label">分类</strong>
+              <span class="analysis-category">{{ item.category }}</span>
+            </div>
+            <div v-if="hasTags(item)" class="analysis-field">
+              <strong class="analysis-label">标签</strong>
+              <ul class="analysis-tags" aria-label="AI 标签">
+                <li
+                  v-for="(tag, index) in item.tags"
+                  :key="`${item.id}-${index}-${tag}`"
+                  class="analysis-tag"
+                >
+                  {{ tag }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="hasKeywords(item)" class="analysis-field">
+              <strong class="analysis-label">关键词</strong>
+              <ul class="analysis-keywords" aria-label="AI 关键词">
+                <li
+                  v-for="(keyword, index) in item.keywords"
+                  :key="`${item.id}-keyword-${index}-${keyword}`"
+                  class="analysis-keyword"
+                >
+                  {{ keyword }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="hasEntities(item)" class="analysis-field">
+              <strong class="analysis-label">实体</strong>
+              <ul class="analysis-entities" aria-label="AI 实体">
+                <li
+                  v-for="(entity, index) in item.entities"
+                  :key="`${item.id}-entity-${index}-${entity.type}-${entity.name}`"
+                  class="analysis-entity"
+                >
+                  <span class="analysis-entity-name">{{ entity.name }}</span>
+                  <span class="analysis-entity-type">{{ entityTypeLabel(entity.type) }}</span>
+                </li>
+              </ul>
+            </div>
+          </section>
+          <div v-if="isAnalyzableItem(item)" class="analysis-actions" aria-live="polite">
+            <button
+              class="analysis-button"
+              type="button"
+              :disabled="analyzingId !== null || deletingId === item.id || archivingId === item.id || favoritingId === item.id"
+              @click="analyzeItem(item)"
+            >
+              {{ analyzingId === item.id
+                ? '分析中…'
+                : hasAnalysis(item)
+                  ? '重新分析'
+                  : 'AI 分析' }}
+            </button>
+          </div>
+          <p
+            v-if="isAnalyzableItem(item) && analysisErrorItemId === item.id"
+            class="analysis-error"
+            role="alert"
+          >
+            {{ analysisErrorMessage }}
+          </p>
         </article>
       </div>
     </section>

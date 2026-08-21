@@ -20,12 +20,13 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 编排 TEXT 的统一 AI Analyze：一次 LLM 调用得到全部结构化理解结果。
+ * 编排 TEXT/URL 的统一 AI Analyze：内容准备方式不同，但共享结果校验和持久化。
  */
 @Service
 public class InboxAnalyzeService {
 
     private static final String TYPE_TEXT = "TEXT";
+    private static final String TYPE_URL = "URL";
     private static final int MAX_INPUT_CHARS = 20_000;
     private static final int MAX_SUMMARY_CHARS = 2_000;
     private static final int MAX_TAGS = 5;
@@ -78,12 +79,11 @@ public class InboxAnalyzeService {
      */
     public InboxItem analyze(Long id) {
         InboxItem inboxItem = inboxItemMapper.selectById(id);
-        validateInboxItem(inboxItem);
+        if (inboxItem == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+        }
 
-        AiAnalyzeResponse aiResponse = aiServiceClient.analyze(
-                inboxItem.getTitle(),
-                inboxItem.getContent()
-        );
+        AiAnalyzeResponse aiResponse = requestAnalysis(inboxItem);
         ValidatedAnalysis analysis = validateAnalysis(aiResponse);
 
         return persistenceService.replaceAnalysis(
@@ -96,13 +96,23 @@ public class InboxAnalyzeService {
         );
     }
 
-    private void validateInboxItem(InboxItem inboxItem) {
-        if (inboxItem == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+    private AiAnalyzeResponse requestAnalysis(InboxItem inboxItem) {
+        if (TYPE_TEXT.equals(inboxItem.getType())) {
+            validateText(inboxItem);
+            return aiServiceClient.analyze(inboxItem.getTitle(), inboxItem.getContent());
         }
-        if (!TYPE_TEXT.equals(inboxItem.getType())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前只支持分析 TEXT");
+        if (TYPE_URL.equals(inboxItem.getType())) {
+            String sourceUrl = inboxItem.getSourceUrl();
+            if (sourceUrl == null || sourceUrl.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "URL 的 sourceUrl 不能为空");
+            }
+            // Java 不抓取网页正文；Python 完成 SSRF 校验、正文提取后再复用统一 Analyze。
+            return aiServiceClient.analyzeUrl(inboxItem.getTitle(), sourceUrl.trim());
         }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前只支持分析 TEXT 或 URL");
+    }
+
+    private void validateText(InboxItem inboxItem) {
         if (inboxItem.getContent() == null || inboxItem.getContent().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "TEXT 内容不能为空");
         }
