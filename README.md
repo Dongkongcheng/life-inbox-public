@@ -161,6 +161,7 @@ V0.3 Task 4 — Searchable Content Preparation  ✅ Completed
 V0.3 Task 5 — Embedding Pipeline  ✅ Completed
 V0.3 Task 6 — Vector Storage / Indexing Lifecycle  ✅ Completed
 V0.3 Task 7 — Semantic Search  ✅ Completed
+V0.3 Task 8 — Hybrid Search  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
@@ -176,7 +177,10 @@ Attempt-guarded content preparation, and removes points after Archive/Delete. My
 source of truth; Qdrant is a disabled-by-default, rebuildable derived index. `/api/search` remains keyword
 by default and supports an explicit semantic mode: FastAPI reuses the same Embedding model to retrieve
 bounded Qdrant candidates, then Java batch-resolves ACTIVE InboxItems and business filters from MySQL in
-Qdrant score order. Hybrid retrieval and reranking remain future work.
+Qdrant score order. An explicit hybrid mode now retrieves bounded Keyword and Semantic candidate lists,
+deduplicates them by InboxItem ID, and applies Reciprocal Rank Fusion with `RRF_K = 60`. Hybrid degrades
+to the surviving branch when one retrieval path fails, while explicit Semantic keeps its existing error
+behavior. Reranking and V0.3 final acceptance remain future work.
 
 It is not the final definition of V0.3.
 

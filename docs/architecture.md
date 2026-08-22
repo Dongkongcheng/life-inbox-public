@@ -725,7 +725,7 @@ Hybrid Search
 Rerank
 ```
 
-已实现前七步：
+已实现前八步：
 
 ```text
 Basic Keyword Search
@@ -741,6 +741,8 @@ Embedding Pipeline
 Vector Storage / Indexing Lifecycle
         ↓
 Semantic Search
+        ↓
+Hybrid Search
 ```
 
 只是 V0.3 的起点，
@@ -827,7 +829,7 @@ Embedding Model 的 SHA-256 与真实维度；切换模型或维度进入不同 
 
 ---
 
-# 16. 当前 Semantic Search
+# 16. 当前 Semantic / Hybrid Search
 
 Task 27 在 Keyword Search 之外增加独立的 Semantic Mode：
 
@@ -855,19 +857,34 @@ Query 与 Document 复用相同 EmbeddingService。物理 Collection 由 Provide
 目标 Collection 缺失不会在查询时自动创建，存在其他受管模型/维度 Collection 时也不会静默跨空间搜索。
 Qdrant 默认返回最多 2 倍候选并保持 100 上限，Java 过滤后最多返回请求的产品数量；过滤不足时允许少于目标条数。
 
-Keyword 仍是默认且完全独立的 MySQL 路径。后续 Hybrid 才会考虑：
+Keyword 仍是默认且完全独立的 MySQL 路径。Task 28 由 Java 在 Service 层协调两条检索分支：
 
 ```text
-Keyword Results
-       +
-Semantic Results
-       ↓
-Candidate Merge
-       ↓
-Rerank
-       ↓
-Final Results
+                         Query
+                           │
+               ┌───────────┴───────────┐
+               ▼                       ▼
+     MySQL Keyword Retrieval   FastAPI Semantic Retrieval
+               │                       │
+               └───────────┬───────────┘
+                           ▼
+                 Reciprocal Rank Fusion
+                    RRF_K = 60
+                           ↓
+                    Hybrid Results
+                           ↓
+                    Future Reranker
 ```
+
+两条分支分别最多获取 `min(limit × 2, 100)` 个候选。Fusion 只使用候选在各自列表中的一基排名，按
+`Σ 1 / (60 + rank)` 累加，不直接混加 Keyword 字段权重与 Qdrant Cosine Score。同一 InboxItem 以 MySQL ID
+去重，双方都命中时获得两份贡献；RRF Score 只存在于当前 Java 请求，不持久化也不返回前端。
+
+Keyword 分支已经由 MySQL 应用 ACTIVE 与业务 Filter；Semantic 分支继续批量回查同一 MySQL 条件并恢复 Qdrant
+顺序，因此 Fusion 输入都来自当前业务事实。Semantic/Vector 失败时 Hybrid 返回 Keyword-only，Keyword 失败但
+Semantic 成功时返回 Semantic-only；两个分支都失败才返回受控错误。显式 `mode=semantic` 仍不自动回退。
+
+RRF 只负责 Retrieval Fusion，不判断候选内容本身，不能替代后续 Task 29 的 Rerank。
 
 例如：
 
@@ -1454,12 +1471,12 @@ Searchable Content Preparation
 Embedding Pipeline
 Vector Storage / Indexing Lifecycle
 Semantic Search
+Hybrid Search
 ```
 
 后续目标：
 
 ```text
-Hybrid Search
 Rerank
 ```
 

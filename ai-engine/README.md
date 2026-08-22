@@ -287,7 +287,8 @@ Invoke-RestMethod -Method Post `
 - 内部 `limit` 默认 20、最大 100，不设置固定 Score Threshold，不返回 Payload 或完整 Vector；
 - Python 只返回 ID/Score Candidate，Java 再用 MySQL 解析 ACTIVE InboxItem 和业务过滤；
 - 本地若设置了 HTTP(S) 代理，应保留 `NO_PROXY=127.0.0.1,localhost`，否则 Python Client 可能无法访问已启动的 Qdrant；
-- 没有 Startup Backfill、Batch Reindex、Chunk、Hybrid Search 或 Rerank。
+- 没有 Startup Backfill、Batch Reindex、Chunk 或 Rerank；Hybrid Fusion 由 Java 协调现有 Keyword 与 Semantic
+  分支，Python 不增加反向调用 Java 的 Hybrid API。
 
 ## 运行测试
 

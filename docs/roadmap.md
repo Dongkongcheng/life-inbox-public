@@ -30,10 +30,11 @@ Roadmap 只描述方向；未标记完成的内容不是当前产品能力。
 - ✅ Task 5 — Embedding Pipeline（独立模型配置，严格向量校验，内部按需调用）
 - ✅ Task 6 — Vector Storage / Indexing Lifecycle（Qdrant 派生索引、模型/维度隔离、异步 Upsert/Delete）
 - ✅ Task 7 — Semantic Search（Query Embedding、Qdrant Top K、MySQL 权威解析、独立 Search Mode）
-- Task 8 / Overall Task 28 — Hybrid Search（Planned）
+- ✅ Task 8 / Overall Task 28 — Hybrid Search（有界双路候选、RRF、ID 去重、单分支故障降级）
 - Task 9 / Overall Task 29 — Rerank（Planned）
+- Task 10 / Overall Task 30 — V0.3 Final Acceptance（Planned）
 
-V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、安全高亮、统一可搜正文、Embedding、条目级 Vector Index 生命周期和独立 Semantic Search；整个版本仍在进行中，Hybrid Search 与 Rerank 尚未实现。
+V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、安全高亮、统一可搜正文、Embedding、条目级 Vector Index 生命周期、独立 Semantic Search 和 RRF Hybrid Search；整个版本仍在进行中，Rerank 与 V0.3 Final Acceptance 尚未完成。
 
 ## V0.4 — Action Extractor（Planned）
 

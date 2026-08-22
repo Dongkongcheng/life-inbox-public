@@ -21,8 +21,10 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
      * 过滤条件与 ACTIVE 一起位于 OR 匹配之外，所有匹配路径都必须满足当前筛选。
      * CASE 集中表达基础相关性优先级，值只参与本次排序，不写入数据库也不暴露给前端。
      * ESCAPE 使用固定的 !，让用户输入按普通文本匹配，而不是控制 LIKE 通配范围。
+     * candidateLimit 只在 Hybrid 候选阶段传入；null 保持既有 Keyword 产品结果行为。
      */
     @Select("""
+            <script>
             SELECT i.*
             FROM inbox_item i
             WHERE i.status = 'ACTIVE'
@@ -85,13 +87,18 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
             END DESC,
             i.created_time DESC,
             i.id DESC
+            <if test="candidateLimit != null">
+              LIMIT #{candidateLimit}
+            </if>
+            </script>
             """)
     List<InboxItem> searchActiveByKeyword(
             @Param("query") String query,
             @Param("escapedQuery") String escapedQuery,
             @Param("type") String type,
             @Param("category") String category,
-            @Param("favorite") Integer favorite
+            @Param("favorite") Integer favorite,
+            @Param("candidateLimit") Integer candidateLimit
     );
 
     /**
