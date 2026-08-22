@@ -10,6 +10,9 @@ import com.lifeinbox.server.dto.AiFileErrorResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
 import com.lifeinbox.server.dto.AiUrlErrorResponse;
+import com.lifeinbox.server.dto.AiVectorDeleteResponse;
+import com.lifeinbox.server.dto.AiVectorIndexRequest;
+import com.lifeinbox.server.dto.AiVectorIndexResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.ImageAnalyzeException;
@@ -28,6 +31,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
 import java.time.Duration;
+import java.util.regex.Pattern;
 
 /**
  * 集中封装 Spring Boot 对 Python AI Service 的 HTTP 调用。
@@ -38,6 +42,7 @@ public class AiServiceClient {
 
     private static final String EXPECTED_STATUS = "ok";
     private static final String EXPECTED_SERVICE = "life-inbox-ai";
+    private static final Pattern SHA_256_HEX = Pattern.compile("[0-9a-f]{64}");
 
     private final RestClient healthRestClient;
     private final RestClient analysisRestClient;
@@ -127,6 +132,44 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // 不透传 Python 或 Provider 的响应正文，Embedding 故障也不影响既有产品流程。
             throw new AiServiceUnavailableException("AI Embedding 服务暂不可用", exception);
+        }
+    }
+
+    /** 由 Python 统一执行 Embedding 与 Qdrant Upsert，Java 只负责业务生命周期触发。 */
+    public AiVectorIndexResponse indexVector(Long inboxItemId, String text) {
+        try {
+            AiVectorIndexResponse response = analysisRestClient.post()
+                    .uri("/vector/index")
+                    .body(new AiVectorIndexRequest(inboxItemId, text))
+                    .retrieve()
+                    .body(AiVectorIndexResponse.class);
+            if (!isValidVectorIndexResponse(inboxItemId, response)) {
+                throw new AiServiceUnavailableException("AI 服务返回了无效的 Vector Index 结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // 索引只是派生检索增强；不透传 Python/Qdrant 内部错误或配置。
+            throw new AiServiceUnavailableException("AI Vector Index 服务暂不可用", exception);
+        }
+    }
+
+    /** 删除稳定 Point ID；Point 不存在或 Vector Store 关闭都由 Python 作为幂等结果处理。 */
+    public AiVectorDeleteResponse deleteVector(Long inboxItemId) {
+        try {
+            AiVectorDeleteResponse response = analysisRestClient.delete()
+                    .uri("/vector/index/{inboxItemId}", inboxItemId)
+                    .retrieve()
+                    .body(AiVectorDeleteResponse.class);
+            if (response == null || !inboxItemId.equals(response.inboxItemId())) {
+                throw new AiServiceUnavailableException("AI 服务返回了无效的 Vector Delete 结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            throw new AiServiceUnavailableException("AI Vector Delete 服务暂不可用", exception);
         }
     }
 
@@ -331,6 +374,29 @@ public class AiServiceClient {
         return response.embedding().stream().allMatch(
                 value -> value != null && Double.isFinite(value)
         );
+    }
+
+    private boolean isValidVectorIndexResponse(
+            Long expectedInboxItemId,
+            AiVectorIndexResponse response
+    ) {
+        if (response == null || !expectedInboxItemId.equals(response.inboxItemId())) {
+            return false;
+        }
+        if (!response.indexed()) {
+            return response.collection() == null
+                    && response.model() == null
+                    && response.dimension() == null
+                    && response.contentHash() == null;
+        }
+        return response.collection() != null
+                && !response.collection().isBlank()
+                && response.model() != null
+                && !response.model().isBlank()
+                && response.dimension() != null
+                && response.dimension() > 0
+                && response.contentHash() != null
+                && SHA_256_HEX.matcher(response.contentHash()).matches();
     }
 
     private UrlAnalyzeException parseKnownUrlFailure(RestClientResponseException exception) {

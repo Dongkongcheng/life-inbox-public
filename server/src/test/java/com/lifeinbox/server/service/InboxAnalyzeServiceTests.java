@@ -49,13 +49,17 @@ class InboxAnalyzeServiceTests {
     private final InboxSearchableContentService searchableContentService = mock(
             InboxSearchableContentService.class
     );
+    private final InboxVectorIndexScheduler vectorIndexScheduler = mock(
+            InboxVectorIndexScheduler.class
+    );
     private final InboxAnalyzeService analyzeService = new InboxAnalyzeService(
             inboxItemMapper,
             aiServiceClient,
             fileStorageService,
             statusService,
             persistenceService,
-            searchableContentService
+            searchableContentService,
+            vectorIndexScheduler
     );
 
     @BeforeEach
@@ -124,6 +128,7 @@ class InboxAnalyzeServiceTests {
                 ATTEMPT_ID,
                 "URL 正文"
         );
+        verify(vectorIndexScheduler).scheduleIndex(1L, ATTEMPT_ID);
         verify(aiServiceClient).analyze("Spring AI 文档", "URL 正文");
         verify(persistenceService).replaceAnalysis(
                 1L,
@@ -597,6 +602,8 @@ class InboxAnalyzeServiceTests {
                 ATTEMPT_ID,
                 "新网页正文"
         );
+        // 内容准备成功即进入 Vector 生命周期，后续 LLM 失败不会撤销已派生正文或索引任务。
+        verify(vectorIndexScheduler).scheduleIndex(1L, ATTEMPT_ID);
         verifyNoInteractions(persistenceService);
     }
 

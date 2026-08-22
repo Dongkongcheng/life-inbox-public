@@ -1,14 +1,23 @@
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, File, Form, Request, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Path, Request, UploadFile, status
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from app.config import EmbeddingConfigurationError, LlmConfigurationError
+from app.config import (
+    EmbeddingConfigurationError,
+    LlmConfigurationError,
+    VectorStoreConfigurationError,
+)
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
 from app.schemas.embedding import EmbeddingRequest, EmbeddingResult
 from app.schemas.summary import SummaryRequest, SummaryResponse
 from app.schemas.url_analyze import UrlAnalyzeRequest
+from app.schemas.vector_index import (
+    VectorDeleteResult,
+    VectorIndexRequest,
+    VectorIndexResult,
+)
 from app.services.analyze_service import AnalyzeService
 from app.services.document_text_extractor import (
     DocumentExtractionError,
@@ -33,6 +42,14 @@ from app.services.llm_client import (
 from app.services.summary_service import SummaryService
 from app.services.url_analyze_service import UrlAnalyzeService
 from app.services.url_content_extractor import UrlContentError, UrlContentExtractor
+from app.services.vector_index_service import VectorIndexService
+from app.services.vector_store_service import (
+    VectorStoreCompatibilityError,
+    VectorStoreError,
+    VectorStoreInvalidResponseError,
+    VectorStoreService,
+    VectorStoreTimeoutError,
+)
 
 
 class HealthResponse(BaseModel):
@@ -55,6 +72,8 @@ image_text_extractor = ImageTextExtractor()
 image_analyze_service = ImageAnalyzeService(image_text_extractor, analyze_service)
 embedding_client = EmbeddingClient()
 embedding_service = EmbeddingService(embedding_client)
+vector_store_service = VectorStoreService()
+vector_index_service = VectorIndexService(embedding_service, vector_store_service)
 
 
 def get_analyze_service() -> AnalyzeService:
@@ -91,6 +110,12 @@ def get_embedding_service() -> EmbeddingService:
     """Embedding 配置按请求读取，未配置时不阻止 FastAPI 与既有能力启动。"""
 
     return embedding_service
+
+
+def get_vector_index_service() -> VectorIndexService:
+    """Qdrant Client 与配置都在真实索引时惰性初始化，健康检查不依赖 Vector Store。"""
+
+    return vector_index_service
 
 
 @app.exception_handler(LlmConfigurationError)
@@ -145,6 +170,61 @@ def handle_embedding_service_error(
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "Embedding 服务暂不可用"},
+    )
+
+
+@app.exception_handler(VectorStoreConfigurationError)
+def handle_vector_store_configuration_error(
+    request: Request,
+    exception: VectorStoreConfigurationError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Vector Store 配置不完整"},
+    )
+
+
+@app.exception_handler(VectorStoreTimeoutError)
+def handle_vector_store_timeout(
+    request: Request,
+    exception: VectorStoreTimeoutError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content={"detail": "Vector Store 请求超时"},
+    )
+
+
+@app.exception_handler(VectorStoreCompatibilityError)
+def handle_vector_store_compatibility_error(
+    request: Request,
+    exception: VectorStoreCompatibilityError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={"detail": "Vector Collection 与当前 Embedding 不兼容"},
+    )
+
+
+@app.exception_handler(VectorStoreInvalidResponseError)
+def handle_vector_store_invalid_response(
+    request: Request,
+    exception: VectorStoreInvalidResponseError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": "Vector Store 返回无效响应"},
+    )
+
+
+@app.exception_handler(VectorStoreError)
+def handle_vector_store_error(
+    request: Request,
+    exception: VectorStoreError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Vector Store 暂不可用"},
     )
 
 
@@ -245,6 +325,26 @@ def embedding(
     """内部能力仅执行 Text → Vector；不保存向量，也不触发索引或搜索。"""
 
     return service.embed(request)
+
+
+@app.post("/vector/index", response_model=VectorIndexResult)
+def index_vector(
+    request: VectorIndexRequest,
+    service: VectorIndexService = Depends(get_vector_index_service),
+) -> VectorIndexResult:
+    """内部按条目生成并 Upsert 最新向量；不提供产品搜索或向量读取能力。"""
+
+    return service.index(request)
+
+
+@app.delete("/vector/index/{inbox_item_id}", response_model=VectorDeleteResult)
+def delete_vector(
+    inbox_item_id: Annotated[int, Path(gt=0)],
+    service: VectorIndexService = Depends(get_vector_index_service),
+) -> VectorDeleteResult:
+    """内部幂等删除稳定 Point ID；Qdrant 故障由 Java 业务层按增强能力降级。"""
+
+    return service.delete(inbox_item_id)
 
 
 @app.post("/analyze/url", response_model=AnalyzeResult)

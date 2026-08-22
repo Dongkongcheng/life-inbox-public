@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供独立的 Embedding Generation。Python 不连接 MySQL，InboxItem、Searchable Content、文件和未来向量索引的业务生命周期仍由 Java 管理。
+AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供 Embedding Generation 与 Qdrant Vector Index。Python 不连接 MySQL；InboxItem、Searchable Content、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
 
 ## 安装依赖
 
@@ -16,6 +16,11 @@ $env:LIFEINBOX_LLM_MODEL="<your-model>"
 $env:LIFEINBOX_EMBEDDING_MODEL="<your-embedding-model>" # 可选；只在调用 /embedding 时需要
 $env:LIFEINBOX_LLM_BASE_URL="https://your-provider.example/v1"
 $env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
+$env:LIFEINBOX_VECTOR_STORE_ENABLED="false" # 默认关闭
+$env:LIFEINBOX_QDRANT_URL="http://127.0.0.1:6333"
+$env:LIFEINBOX_QDRANT_COLLECTION="lifeinbox_items" # 物理 Collection 前缀
+$env:LIFEINBOX_QDRANT_API_KEY="" # 本地无鉴权时留空
+$env:LIFEINBOX_QDRANT_TIMEOUT_SECONDS="5"
 
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -208,7 +213,51 @@ Invoke-RestMethod -Method Post `
 - 未配置模型返回 503，超时返回 504，Provider HTTP 错误返回 503，非法响应返回 502；
 - 日志和错误不记录 API Key、完整输入、完整 Provider 响应或完整向量。
 
-Task 25 只提供 `Text → EmbeddingResult` 能力。当前没有 Vector Store、Qdrant、Vector Collection、向量持久化、自动索引、Backfill、Semantic Search 或 Query Embedding Search Flow。
+`POST /embedding` 仍只提供 `Text → EmbeddingResult`，不会单独保存向量或触发搜索。Task 26 的 VectorIndexService 在另一条内部路由中协调该能力与 Qdrant。
+
+## Qdrant Vector Index
+
+本地开发可以使用官方镜像和命名卷启动 Qdrant：
+
+```powershell
+docker volume create lifeinbox_qdrant_data
+docker run --name lifeinbox-qdrant -p 6333:6333 -p 6334:6334 `
+  -v lifeinbox_qdrant_data:/qdrant/storage qdrant/qdrant
+```
+
+REST API 位于 `http://127.0.0.1:6333`，Dashboard 位于 `http://127.0.0.1:6333/dashboard`。未启用鉴权的本地端口不要暴露到不可信网络。
+
+启用后，Java 通过内部接口索引当前 Searchable Content：
+
+```powershell
+$body = @{
+  inboxItemId = 123
+  text = "Redis 分布式锁需要正确处理锁过期与误释放。"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/vector/index" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+成功响应包含 `inboxItemId`、`indexed`、物理 `collection`、`model`、真实 `dimension` 和 `contentHash`，不返回完整向量。删除使用：
+
+```powershell
+Invoke-RestMethod -Method Delete -Uri "http://localhost:8000/vector/index/123"
+```
+
+实现边界：
+
+- `LIFEINBOX_VECTOR_STORE_ENABLED` 默认 `false`；关闭时 Index/Delete 返回 skip，不调用 Embedding 或 Qdrant；
+- 首次真实 Index 才惰性连接 Qdrant，并按 EmbeddingResult 的真实维度创建 Cosine Collection；
+- `LIFEINBOX_QDRANT_COLLECTION` 是逻辑前缀，物理名称为 `<prefix>__m_<model-sha256>__d_<dimension>`；不同模型或维度不会静默混入同一向量空间；
+- 已有 Collection 的维度或距离不兼容时明确失败，不会自动 DROP；
+- Point ID 直接使用 InboxItem ID；重复 Index 是同一点 Upsert，不产生版本点；
+- Payload 只有 `inboxItemId`、`embeddingModel`、`contentHash`、`indexedTime`，不保存 Searchable Content 或业务 JSON；
+- Delete 会清理该前缀下所有 LifeInbox 管理的模型/维度 Collection，因此 Archive/Delete 后不会因切回旧模型而重新出现；
+- Qdrant 或 Embedding 故障只影响派生索引，不改变 MySQL、AI Status 或当前 Keyword Search；
+- 没有 Startup Backfill、Batch Reindex、Chunk、Query Embedding Search、Vector Search、Semantic Search、Hybrid Search 或 Rerank。
 
 ## 运行测试
 

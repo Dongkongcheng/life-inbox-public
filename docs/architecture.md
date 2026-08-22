@@ -792,8 +792,8 @@ FastAPI /analyze 生成结构化 AI 结果
 查询由 Spring Boot 参数化调用 MySQL，限制为 ACTIVE，并使用确定性的字段优先级排序返回现有 InboxItem 表示。
 tags、keywords、entities 使用相关 EXISTS 子查询，既在数据库内判断候选，也不会因多个匹配关系产生重复主表行。
 
-当前仍是条目级统一正文，不拆分 document chunk。Task 25 只增加按需 Embedding Generation：
-Python 从独立配置的 Embedding Model 生成并校验瞬时向量，Java 具备最小内部 Client，但当前流程不会自动调用或保存结果。
+当前仍是条目级统一正文，不拆分 document chunk。Task 25 的 EmbeddingService 继续只负责 `Text → Vector`；
+Task 26 由独立 VectorIndexService 编排 Embedding 与 VectorStoreService，并由 Python 独占 Qdrant 访问。
 
 ```text
 InboxItem 原始数据 / 受管文件 / URL
@@ -804,11 +804,20 @@ Embedding Service（可重建派生数据）
                 ↓
 EmbeddingResult：model + dimension + vector
                 ↓
-Future Vector Index（可重建派生索引）
+VectorIndexService
+                ↓
+Qdrant Item-level Point（可重建派生索引）
 ```
 
-Embedding 配置缺失或 Provider 故障只影响本次内部调用，不影响 Capture、Analyze 或当前 MySQL Keyword Search。
-向量何时生成、保存、更新和删除属于 Task 26；当前没有 Vector Store、Collection、自动索引或 Backfill。
+TEXT Capture 提交后、或 URL/FILE/IMAGE 正文以 Attempt Guard 成功更新后，Java 复用现有有界执行器异步调用
+FastAPI `/vector/index`。Worker 调用前重新读取 MySQL，校验 ACTIVE、当前 Attempt 和当前正文；同一 InboxItem
+使用稳定 Point ID，并串行执行 Index/Delete。Re-analyze 对同一点 Upsert，Archive/Delete 则 best-effort 删除。
+Vector 或 Embedding 失败只记录日志，不改变 Analyze SUCCESS/FAILED、不回滚业务事务，也不清除 Searchable Content。
+
+Qdrant 默认关闭，首次真实索引才惰性连接和创建 Cosine Collection。配置的 Collection 名是前缀，物理名称绑定
+Embedding Model 的 SHA-256 与真实维度；切换模型或维度进入不同 Collection，不会静默混用，也不会自动 DROP
+旧索引。Qdrant 只保存 Point ID、`inboxItemId`、`embeddingModel`、`contentHash` 和 `indexedTime`；完整正文和业务状态
+仍只属于 MySQL。当前没有 Startup Backfill、Batch Reindex、Chunk、Vector Search 或 Query Embedding Search。
 
 ---
 
@@ -1435,12 +1444,12 @@ AI-derived Field Search
 Search Filter / Ranking / Highlight
 Searchable Content Preparation
 Embedding Pipeline
+Vector Storage / Indexing Lifecycle
 ```
 
 后续目标：
 
 ```text
-Vector Storage / Indexing
 Semantic Search
 Hybrid Search
 Rerank

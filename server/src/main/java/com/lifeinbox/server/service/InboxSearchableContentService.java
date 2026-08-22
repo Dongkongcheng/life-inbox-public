@@ -6,6 +6,7 @@ import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.text.Normalizer;
@@ -48,6 +49,7 @@ public class InboxSearchableContentService {
     /**
      * 提取成功后立即以当前 Attempt 做短写入；后续 LLM 失败不会清空这份已成功派生的正文。
      */
+    @Transactional
     public String replaceExtractedContent(Long inboxItemId, String attemptId, String content) {
         String normalized = normalize(content);
         if (normalized == null || normalized.length() > MAX_SEARCHABLE_CONTENT_CHARS) {

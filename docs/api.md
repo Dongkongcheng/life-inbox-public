@@ -96,6 +96,8 @@ fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，�
 | GET | `/health` | 无 | `{status, service}` |
 | POST | `/analyze` | JSON `{title?, text}` | AnalyzeResult |
 | POST | `/embedding` | JSON `{text}` | `{model, dimension, embedding}`；只生成并校验瞬时向量 |
+| POST | `/vector/index` | JSON `{inboxItemId, text}` | 生成 Embedding 并按稳定 Point ID Upsert 到 Qdrant |
+| DELETE | `/vector/index/{inboxItemId}` | 路径 ID | 幂等删除该 Collection 前缀下的受管 Point |
 | POST | `/prepare/url` | JSON `{title?, url}` | `{title?, text}`；只复用安全网页提取，不调用 LLM |
 | POST | `/prepare/file` | multipart `file`, `title?` | `{title?, text}`；只复用文档提取，不调用 LLM |
 | POST | `/prepare/image` | multipart `file`, `title?` | `{title?, text}`；只复用 OCR，不调用 LLM |
@@ -141,7 +143,41 @@ Java 的当前 Analyze 流程对 URL/FILE/IMAGE 先调用对应 `/prepare/*`，�
 缺失模型、非法数值、NaN 和 Infinity。未配置 Embedding Model 返回 503；超时返回 504；Provider 状态错误返回 503；
 畸形响应返回 502。错误不会包含 API Key、完整输入、Provider 正文或完整向量。
 
-这是 Java → Python 的内部能力，不是浏览器产品 API。Task 25 不保存向量、不自动处理 InboxItem，也不修改 Keyword Search。
+这是 Java → Python 的内部 Embedding 能力，不是浏览器产品 API。`/embedding` 本身仍不保存向量或理解 InboxItem。
+
+### Vector Index 内部协议
+
+`POST /vector/index` 只接收 Java 从当前 MySQL 状态解析出的稳定 ID 和 Task 24 Searchable Content：
+
+```json
+{"inboxItemId": 123, "text": "Redis 分布式锁需要避免误释放。"}
+```
+
+Vector Store 启用且 Upsert 成功时返回：
+
+```json
+{
+  "inboxItemId": 123,
+  "indexed": true,
+  "collection": "lifeinbox_items__m_<model-sha256>__d_1024",
+  "model": "configured-embedding-model",
+  "dimension": 1024,
+  "contentHash": "<searchable-content-sha256>"
+}
+```
+
+默认关闭时返回 `indexed=false`，其余向量元数据为 `null`，并且不会调用 Embedding Provider。Point ID 直接使用
+`InboxItem.id`；Payload 只有 `inboxItemId`、`embeddingModel`、`contentHash`、`indexedTime`，不保存完整正文。
+Collection 使用 Cosine，首次索引时以真实 `dimension` 惰性创建；配置名作为前缀，物理名称同时绑定完整模型 Hash
+与维度。已有同名 Collection 的维度或距离不匹配会返回 409，绝不自动 DROP。
+
+`DELETE /vector/index/{inboxItemId}` 会从该配置前缀下所有 LifeInbox 管理的模型/维度 Collection 中幂等删除同一
+Point ID；Vector Store 关闭时返回 `deleted=false`。Qdrant 超时返回 504，配置或服务故障返回 503，不兼容返回
+409，非法响应返回 502；响应不会包含 API Key、正文、完整向量或 Qdrant 内部响应。
+
+Spring Boot 只在 Capture 提交或 Attempt-guarded 正文更新后异步触发 Index，并在 Archive/Delete 后异步触发
+Delete。当前产品 `/api/search` 仍只查询 MySQL；这些内部接口不实现 Vector Search、Semantic Search 或 Query
+Embedding Search。
 
 ## 主要限制
 

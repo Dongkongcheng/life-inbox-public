@@ -159,6 +159,7 @@ V0.3 Task 2 — AI-derived Field Search  ✅ Completed
 V0.3 Task 3 — Search Filter + Ranking + Highlight  ✅ Completed
 V0.3 Task 4 — Searchable Content Preparation  ✅ Completed
 V0.3 Task 5 — Embedding Pipeline  ✅ Completed
+V0.3 Task 6 — Vector Storage / Indexing Lifecycle  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
@@ -168,9 +169,11 @@ its original `content`; URL, FILE, and IMAGE store normalized, rebuildable extra
 `inbox_item.searchable_content`. Relation-table matches use `EXISTS`, so
 one item remains one result even when several AI-derived values match. Results use deterministic
 field-based ranking, and Vue safely highlights matching plain text without backend highlight HTML.
-FastAPI now exposes an internal, on-demand `POST /embedding` capability that converts validated text
-to a strictly checked `{model, dimension, embedding}` result. It does not persist vectors or run
-automatically. Vector storage/indexing, semantic retrieval, hybrid retrieval, and reranking remain future work.
+FastAPI exposes the internal Embedding capability and now stores item-level vectors in Qdrant through
+internal index/delete routes. Spring Boot triggers best-effort indexing only after committed Capture or
+Attempt-guarded content preparation, and removes points after Archive/Delete. MySQL remains the business
+source of truth; Qdrant is a disabled-by-default, rebuildable derived index. Semantic retrieval, hybrid
+retrieval, and reranking remain future work, and the existing `/api/search` still uses MySQL only.
 
 It is not the final definition of V0.3.
 
