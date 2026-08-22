@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InboxItemMapperSearchSqlTests {
 
     private final String searchSql = normalizedSearchSql();
+    private final String semanticResolutionSql = normalizedSemanticResolutionSql();
 
     @Test
     void searchKeepsExistingFieldsAndAddsAllAiDerivedMatchPaths() {
@@ -96,6 +97,32 @@ class InboxItemMapperSearchSqlTests {
         );
     }
 
+    @Test
+    void semanticCandidatesUseOneParameterizedActiveBatchQueryWithBusinessFilters() {
+        assertAll(
+                () -> assertTrue(semanticResolutionSql.startsWith(
+                        "<script> SELECT i.* FROM inbox_item i WHERE i.status = 'ACTIVE'"
+                )),
+                () -> assertTrue(semanticResolutionSql.contains(
+                        "AND (#{type,jdbcType=VARCHAR} IS NULL"
+                                + " OR i.type = #{type,jdbcType=VARCHAR})"
+                )),
+                () -> assertTrue(semanticResolutionSql.contains(
+                        "AND (#{category,jdbcType=VARCHAR} IS NULL"
+                                + " OR i.category = #{category,jdbcType=VARCHAR})"
+                )),
+                () -> assertTrue(semanticResolutionSql.contains(
+                        "AND (#{favorite,jdbcType=TINYINT} IS NULL"
+                                + " OR i.favorite = #{favorite,jdbcType=TINYINT})"
+                )),
+                () -> assertTrue(semanticResolutionSql.contains("AND i.id IN")),
+                () -> assertTrue(semanticResolutionSql.contains(
+                        "<foreach collection=\"ids\" item=\"id\""
+                )),
+                () -> assertTrue(semanticResolutionSql.contains("#{id}"))
+        );
+    }
+
     private String normalizedSearchSql() {
         try {
             Method method = InboxItemMapper.class.getMethod(
@@ -110,6 +137,22 @@ class InboxItemMapperSearchSqlTests {
             return String.join(" ", select.value()).replaceAll("\\s+", " ").trim();
         } catch (NoSuchMethodException exception) {
             throw new AssertionError("Search Mapper 方法不存在", exception);
+        }
+    }
+
+    private String normalizedSemanticResolutionSql() {
+        try {
+            Method method = InboxItemMapper.class.getMethod(
+                    "selectActiveByIdsAndFilters",
+                    java.util.List.class,
+                    String.class,
+                    String.class,
+                    Integer.class
+            );
+            Select select = method.getAnnotation(Select.class);
+            return String.join(" ", select.value()).replaceAll("\\s+", " ").trim();
+        } catch (NoSuchMethodException exception) {
+            throw new AssertionError("Semantic Candidate 批量解析 Mapper 方法不存在", exception);
         }
     }
 

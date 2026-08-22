@@ -5,6 +5,7 @@ import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
+import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
 import com.lifeinbox.server.dto.AiVectorIndexResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -797,6 +798,87 @@ class AiServiceClientTests {
 
             assertEquals(true, response.deleted());
             assertEquals("DELETE", method.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void semanticSearchPostsBoundedQueryAndParsesOrderedCandidates() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/vector/search", exchange -> {
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = """
+                    {"results":[
+                      {"inboxItemId":123,"score":0.91},
+                      {"inboxItemId":456,"score":0.82}
+                    ]}
+                    """.strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiSemanticSearchResponse response = clientFor(server).searchVectors(
+                    "防止接口重复请求",
+                    40
+            );
+
+            assertEquals(List.of(123L, 456L), response.results().stream()
+                    .map(candidate -> candidate.inboxItemId())
+                    .toList());
+            assertEquals(
+                    "{\"query\":\"防止接口重复请求\",\"limit\":40}",
+                    requestBody.get()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void semanticSearchRejectsMalformedResponseAndHidesUpstreamFailure() throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/vector/search", exchange -> {
+            int index = requestIndex.getAndIncrement();
+            exchange.getRequestBody().readAllBytes();
+            String responseBody = index == 0
+                    ? "{\"results\":[{\"inboxItemId\":123,\"score\":null}]}"
+                    : "{\"detail\":\"secret qdrant response\"}";
+            int status = index == 0 ? 200 : 503;
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            AiServiceUnavailableException malformed = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.searchVectors("正文", 20)
+            );
+            AiServiceUnavailableException unavailable = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.searchVectors("正文", 20)
+            );
+
+            assertEquals(
+                    "AI 服务返回了无效的 Semantic Search 结果",
+                    malformed.getMessage()
+            );
+            assertEquals("AI Semantic Search 服务暂不可用", unavailable.getMessage());
+            assertEquals(false, unavailable.getMessage().contains("secret qdrant response"));
         } finally {
             server.stop(0);
         }

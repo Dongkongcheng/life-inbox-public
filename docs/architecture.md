@@ -131,6 +131,8 @@ MySQL
 FastAPI
 +
 Local File Storage
++
+Qdrant Derived Vector Index
 ```
 
 目前没有为了长期 Roadmap 提前加入：
@@ -138,7 +140,6 @@ Local File Storage
 ```text
 Redis
 MQ
-Qdrant
 Milvus
 Elasticsearch
 Neo4j
@@ -265,6 +266,7 @@ Keywords
 Entities
 Structured Analyze
 Embedding Generation
+Semantic Retrieval
 ```
 
 未来可以逐渐加入：
@@ -723,7 +725,7 @@ Hybrid Search
 Rerank
 ```
 
-已实现前五步：
+已实现前七步：
 
 ```text
 Basic Keyword Search
@@ -735,6 +737,10 @@ Filter / Ranking / Highlight
 Searchable Content
         ↓
 Embedding Pipeline
+        ↓
+Vector Storage / Indexing Lifecycle
+        ↓
+Semantic Search
 ```
 
 只是 V0.3 的起点，
@@ -817,31 +823,39 @@ Vector 或 Embedding 失败只记录日志，不改变 Analyze SUCCESS/FAILED、
 Qdrant 默认关闭，首次真实索引才惰性连接和创建 Cosine Collection。配置的 Collection 名是前缀，物理名称绑定
 Embedding Model 的 SHA-256 与真实维度；切换模型或维度进入不同 Collection，不会静默混用，也不会自动 DROP
 旧索引。Qdrant 只保存 Point ID、`inboxItemId`、`embeddingModel`、`contentHash` 和 `indexedTime`；完整正文和业务状态
-仍只属于 MySQL。当前没有 Startup Backfill、Batch Reindex、Chunk、Vector Search 或 Query Embedding Search。
+仍只属于 MySQL。当前没有 Startup Backfill、Batch Reindex 或 Chunk Retrieval。
 
 ---
 
-# 16. Future Semantic Search
+# 16. 当前 Semantic Search
 
-后续可能发展为：
+Task 27 在 Keyword Search 之外增加独立的 Semantic Mode：
 
 ```text
 User Query
      ↓
-Spring Boot
-     │
-     ├──────────────→ MySQL
-     │                Keyword Search
-     │
-     └──────────────→ FastAPI
-                      Query Embedding
-                           ↓
-                      Vector Store
-                           ↓
-                     Semantic Results
+Spring Boot /api/search?mode=semantic
+     ↓
+FastAPI /vector/search
+     ↓
+Existing EmbeddingService
+     ↓
+Qdrant Cosine Top K
+     ↓
+Candidate IDs + Scores
+     ↓
+Spring Boot 一次批量查询
+     ↓
+MySQL ACTIVE + type/category/favorite
+     ↓
+按 Qdrant 顺序重组 Authoritative InboxItems
 ```
 
-随后：
+Query 与 Document 复用相同 EmbeddingService。物理 Collection 由 Provider 返回的模型完整 Hash 和真实维度决定；
+目标 Collection 缺失不会在查询时自动创建，存在其他受管模型/维度 Collection 时也不会静默跨空间搜索。
+Qdrant 默认返回最多 2 倍候选并保持 100 上限，Java 过滤后最多返回请求的产品数量；过滤不足时允许少于目标条数。
+
+Keyword 仍是默认且完全独立的 MySQL 路径。后续 Hybrid 才会考虑：
 
 ```text
 Keyword Results
@@ -879,7 +893,7 @@ Redisson
 
 # 17. Search Data Ownership
 
-即使未来加入 Vector Store：
+加入 Vector Store 后：
 
 MySQL 仍然是：
 
@@ -935,7 +949,7 @@ MySQL
 
 # 18. Search Result Ownership
 
-未来 Semantic Search 可能返回：
+Semantic Search 返回：
 
 ```text
 inboxItemId
@@ -985,27 +999,21 @@ Authoritative InboxItem
 
 # 19. Search Failure Degradation
 
-未来如果：
+如果：
 
 ```text
 Embedding Service
 Vector Store
 Semantic Search
-Reranker
 ```
 
 发生故障，
 
-应该尽量降级为：
+显式 `mode=semantic` 返回受控错误，不静默伪装成 Keyword 结果；但是默认：
 
 ```text
-Keyword Search
-```
-
-而不是：
-
-```text
-整个 Search API 完全不可用
+mode=keyword
+依然只依赖 MySQL 并保持可用
 ```
 
 同时 Search 故障不能破坏：
@@ -1445,12 +1453,12 @@ Search Filter / Ranking / Highlight
 Searchable Content Preparation
 Embedding Pipeline
 Vector Storage / Indexing Lifecycle
+Semantic Search
 ```
 
 后续目标：
 
 ```text
-Semantic Search
 Hybrid Search
 Rerank
 ```

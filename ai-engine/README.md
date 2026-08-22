@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供 Embedding Generation 与 Qdrant Vector Index。Python 不连接 MySQL；InboxItem、Searchable Content、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
+AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供 Embedding Generation、Qdrant Vector Index 与 Semantic Candidate Retrieval。Python 不连接 MySQL；InboxItem、Searchable Content、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
 
 ## 安装依赖
 
@@ -13,7 +13,7 @@ uv sync
 ```powershell
 $env:LIFEINBOX_LLM_API_KEY="<your-api-key>"
 $env:LIFEINBOX_LLM_MODEL="<your-model>"
-$env:LIFEINBOX_EMBEDDING_MODEL="<your-embedding-model>" # 可选；只在调用 /embedding 时需要
+$env:LIFEINBOX_EMBEDDING_MODEL="<your-embedding-model>" # Embedding/Index/Semantic Search 使用
 $env:LIFEINBOX_LLM_BASE_URL="https://your-provider.example/v1"
 $env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
 $env:LIFEINBOX_VECTOR_STORE_ENABLED="false" # 默认关闭
@@ -21,6 +21,7 @@ $env:LIFEINBOX_QDRANT_URL="http://127.0.0.1:6333"
 $env:LIFEINBOX_QDRANT_COLLECTION="lifeinbox_items" # 物理 Collection 前缀
 $env:LIFEINBOX_QDRANT_API_KEY="" # 本地无鉴权时留空
 $env:LIFEINBOX_QDRANT_TIMEOUT_SECONDS="5"
+$env:NO_PROXY="127.0.0.1,localhost" # 本地代理环境必须绕过 Qdrant
 
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -247,6 +248,30 @@ Invoke-RestMethod -Method Post `
 Invoke-RestMethod -Method Delete -Uri "http://localhost:8000/vector/index/123"
 ```
 
+内部语义候选检索使用同一模型：
+
+```powershell
+$body = @{
+  query = "那个防止接口重复请求的 Redis 方案"
+  limit = 20
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/vector/search" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+响应只包含按 Cosine 相似度排列的候选：
+
+```json
+{
+  "results": [
+    {"inboxItemId": 123, "score": 0.91}
+  ]
+}
+```
+
 实现边界：
 
 - `LIFEINBOX_VECTOR_STORE_ENABLED` 默认 `false`；关闭时 Index/Delete 返回 skip，不调用 Embedding 或 Qdrant；
@@ -257,7 +282,12 @@ Invoke-RestMethod -Method Delete -Uri "http://localhost:8000/vector/index/123"
 - Payload 只有 `inboxItemId`、`embeddingModel`、`contentHash`、`indexedTime`，不保存 Searchable Content 或业务 JSON；
 - Delete 会清理该前缀下所有 LifeInbox 管理的模型/维度 Collection，因此 Archive/Delete 后不会因切回旧模型而重新出现；
 - Qdrant 或 Embedding 故障只影响派生索引，不改变 MySQL、AI Status 或当前 Keyword Search；
-- 没有 Startup Backfill、Batch Reindex、Chunk、Query Embedding Search、Vector Search、Semantic Search、Hybrid Search 或 Rerank。
+- Semantic Search 复用现有 EmbeddingService；Query 返回的模型与维度共同确定唯一物理 Collection；
+- Search 只读取已存在 Collection，不会自动创建空 Collection；目标缺失、模型/维度/距离不兼容均受控失败；
+- 内部 `limit` 默认 20、最大 100，不设置固定 Score Threshold，不返回 Payload 或完整 Vector；
+- Python 只返回 ID/Score Candidate，Java 再用 MySQL 解析 ACTIVE InboxItem 和业务过滤；
+- 本地若设置了 HTTP(S) 代理，应保留 `NO_PROXY=127.0.0.1,localhost`，否则 Python Client 可能无法访问已启动的 Qdrant；
+- 没有 Startup Backfill、Batch Reindex、Chunk、Hybrid Search 或 Rerank。
 
 ## 运行测试
 

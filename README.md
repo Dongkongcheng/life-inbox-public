@@ -160,6 +160,7 @@ V0.3 Task 3 — Search Filter + Ranking + Highlight  ✅ Completed
 V0.3 Task 4 — Searchable Content Preparation  ✅ Completed
 V0.3 Task 5 — Embedding Pipeline  ✅ Completed
 V0.3 Task 6 — Vector Storage / Indexing Lifecycle  ✅ Completed
+V0.3 Task 7 — Semantic Search  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
@@ -172,8 +173,10 @@ field-based ranking, and Vue safely highlights matching plain text without backe
 FastAPI exposes the internal Embedding capability and now stores item-level vectors in Qdrant through
 internal index/delete routes. Spring Boot triggers best-effort indexing only after committed Capture or
 Attempt-guarded content preparation, and removes points after Archive/Delete. MySQL remains the business
-source of truth; Qdrant is a disabled-by-default, rebuildable derived index. Semantic retrieval, hybrid
-retrieval, and reranking remain future work, and the existing `/api/search` still uses MySQL only.
+source of truth; Qdrant is a disabled-by-default, rebuildable derived index. `/api/search` remains keyword
+by default and supports an explicit semantic mode: FastAPI reuses the same Embedding model to retrieve
+bounded Qdrant candidates, then Java batch-resolves ACTIVE InboxItems and business filters from MySQL in
+Qdrant score order. Hybrid retrieval and reranking remain future work.
 
 It is not the final definition of V0.3.
 
@@ -308,15 +311,14 @@ Spring Boot
 ├── MySQL
 ├── Local File Storage
 └── FastAPI
-      ↓
-   Parser / OCR / AI
+      ├── Parser / OCR / AI
+      └── Qdrant (derived vector index, when enabled)
 ```
 
 Future infrastructure may include:
 
 ```text
 Redis
-Vector Store
 MQ
 ```
 
@@ -641,7 +643,7 @@ MySQL remains:
 Business Source of Truth
 ```
 
-A future Vector Store is:
+A Vector Store is:
 
 ```text
 Derived Retrieval Index
@@ -785,13 +787,14 @@ MySQL
 Spring Boot
 +
 FastAPI
++
+Qdrant (optional derived index)
 ```
 
 Future infrastructure may include:
 
 ```text
 Redis
-Vector Store
 MQ
 ```
 
@@ -805,7 +808,6 @@ Do not automatically add:
 * RocketMQ
 * Elasticsearch
 * Milvus
-* Qdrant
 * Neo4j
 
 just because they appear in the long-term roadmap.

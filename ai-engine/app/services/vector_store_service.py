@@ -1,4 +1,5 @@
 import hashlib
+import math
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -10,10 +11,19 @@ from qdrant_client import QdrantClient, models
 
 from app.config import VectorStoreSettings
 from app.schemas.embedding import EmbeddingResult
+from app.schemas.semantic_search import SemanticSearchCandidate
 
 
 class VectorStoreError(RuntimeError):
-    """Qdrant 连接、鉴权、创建或写入失败的受控基类。"""
+    """Qdrant 连接、鉴权、Collection 或读写失败的受控基类。"""
+
+
+class VectorStoreDisabledError(VectorStoreError):
+    """Semantic Search 需要显式启用派生 Vector Store。"""
+
+
+class VectorStoreCollectionMissingError(VectorStoreError):
+    """当前模型尚无可查询的派生 Collection。"""
 
 
 class VectorStoreTimeoutError(VectorStoreError):
@@ -29,7 +39,7 @@ class VectorStoreInvalidResponseError(VectorStoreError):
 
 
 class VectorStoreService:
-    """只负责将已生成的向量保存到 Qdrant，不负责生成 Embedding 或业务查询。"""
+    """负责 Qdrant 派生索引的存取，不生成 Embedding，也不拥有业务数据。"""
 
     def __init__(
         self,
@@ -95,9 +105,7 @@ class VectorStoreService:
             return
 
         client = self._client(settings)
-        managed_collection = re.compile(
-            rf"^{re.escape(settings.collection_prefix)}__m_[0-9a-f]{{64}}__d_[1-9][0-9]*$"
-        )
+        managed_collection = self._managed_collection_pattern(settings.collection_prefix)
         try:
             collections_response = client.get_collections()
             collections = getattr(collections_response, "collections", None)
@@ -120,6 +128,74 @@ class VectorStoreService:
             raise
         except Exception as exception:
             self._raise_controlled("Qdrant Delete 失败", exception)
+
+    def search(
+        self,
+        embedding: EmbeddingResult,
+        limit: int,
+    ) -> list[SemanticSearchCandidate]:
+        settings = self._settings_loader()
+        if not settings.enabled:
+            raise VectorStoreDisabledError("Semantic Search 未启用")
+
+        collection_name = self.collection_name(
+            settings.collection_prefix,
+            embedding.model,
+            embedding.dimension,
+        )
+        client = self._client(settings)
+        try:
+            exists = client.collection_exists(collection_name)
+            if not isinstance(exists, bool):
+                raise VectorStoreInvalidResponseError("Qdrant Collection 状态无效")
+            if not exists:
+                # 其他受管 Collection 说明索引使用了不同模型或维度；不能静默跨空间检索。
+                if self._managed_collection_names(client, settings.collection_prefix):
+                    raise VectorStoreCompatibilityError(
+                        "Query Embedding 与当前 Vector Index 不兼容"
+                    )
+                raise VectorStoreCollectionMissingError(
+                    "当前 Embedding 尚无 Vector Collection"
+                )
+
+            self._validate_collection(client, collection_name, embedding.dimension)
+            response = client.query_points(
+                collection_name=collection_name,
+                query=embedding.embedding,
+                limit=limit,
+                with_payload=False,
+                with_vectors=False,
+            )
+            points = getattr(response, "points", None)
+            if not isinstance(points, list):
+                raise VectorStoreInvalidResponseError("Qdrant Search 结果无效")
+
+            candidates: list[SemanticSearchCandidate] = []
+            for point in points:
+                point_id = getattr(point, "id", None)
+                raw_score = getattr(point, "score", None)
+                if (
+                    isinstance(point_id, bool)
+                    or not isinstance(point_id, int)
+                    or point_id <= 0
+                    or isinstance(raw_score, bool)
+                    or not isinstance(raw_score, (int, float))
+                    or not math.isfinite(float(raw_score))
+                ):
+                    raise VectorStoreInvalidResponseError(
+                        "Qdrant Candidate ID 或 Score 无效"
+                    )
+                candidates.append(
+                    SemanticSearchCandidate(
+                        inboxItemId=point_id,
+                        score=float(raw_score),
+                    )
+                )
+            return candidates
+        except VectorStoreError:
+            raise
+        except Exception as exception:
+            self._raise_controlled("Qdrant Search 失败", exception)
 
     @staticmethod
     def collection_name(prefix: str, model: str, dimension: int) -> str:
@@ -155,25 +231,55 @@ class VectorStoreService:
                             create_exception,
                         )
 
-            info = client.get_collection(collection_name)
-            vectors = getattr(
-                getattr(getattr(info, "config", None), "params", None),
-                "vectors",
-                None,
-            )
-            if not isinstance(vectors, models.VectorParams):
-                raise VectorStoreCompatibilityError(
-                    "Qdrant Collection 不是当前支持的单向量配置"
-                )
-            if vectors.size != dimension or vectors.distance != models.Distance.COSINE:
-                # 派生索引也不能被代码自动 DROP；运维应选择新前缀或显式处理旧数据。
-                raise VectorStoreCompatibilityError(
-                    "Qdrant Collection 的维度或距离与当前 Embedding 不兼容"
-                )
+            self._validate_collection(client, collection_name, dimension)
         except VectorStoreError:
             raise
         except Exception as exception:
             self._raise_controlled("Qdrant Collection 检查失败", exception)
+
+    def _validate_collection(
+        self,
+        client: Any,
+        collection_name: str,
+        dimension: int,
+    ) -> None:
+        info = client.get_collection(collection_name)
+        vectors = getattr(
+            getattr(getattr(info, "config", None), "params", None),
+            "vectors",
+            None,
+        )
+        if not isinstance(vectors, models.VectorParams):
+            raise VectorStoreCompatibilityError(
+                "Qdrant Collection 不是当前支持的单向量配置"
+            )
+        if vectors.size != dimension or vectors.distance != models.Distance.COSINE:
+            # 读写两条路径都拒绝不兼容空间，且绝不自动 DROP 已有派生索引。
+            raise VectorStoreCompatibilityError(
+                "Qdrant Collection 的维度或距离与当前 Embedding 不兼容"
+            )
+
+    def _managed_collection_names(self, client: Any, prefix: str) -> list[str]:
+        collections_response = client.get_collections()
+        collections = getattr(collections_response, "collections", None)
+        if not isinstance(collections, list):
+            raise VectorStoreInvalidResponseError("Qdrant Collection 列表无效")
+
+        pattern = self._managed_collection_pattern(prefix)
+        names: list[str] = []
+        for collection in collections:
+            collection_name = getattr(collection, "name", None)
+            if not isinstance(collection_name, str):
+                raise VectorStoreInvalidResponseError("Qdrant Collection 名称无效")
+            if pattern.fullmatch(collection_name) is not None:
+                names.append(collection_name)
+        return names
+
+    @staticmethod
+    def _managed_collection_pattern(prefix: str) -> re.Pattern[str]:
+        return re.compile(
+            rf"^{re.escape(prefix)}__m_[0-9a-f]{{64}}__d_[1-9][0-9]*$"
+        )
 
     def _client(self, settings: VectorStoreSettings) -> Any:
         with self._clients_lock:

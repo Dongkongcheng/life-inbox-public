@@ -1,6 +1,9 @@
 package com.lifeinbox.server.service;
 
+import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.dto.AiSemanticSearchCandidate;
+import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxEntity;
 import com.lifeinbox.server.entity.AiProcessingStatus;
@@ -47,6 +50,7 @@ class InboxServiceTests {
     private final InboxVectorIndexScheduler vectorIndexScheduler = mock(
             InboxVectorIndexScheduler.class
     );
+    private final AiServiceClient aiServiceClient = mock(AiServiceClient.class);
     private final InboxService inboxService = new InboxService(
             inboxItemMapper,
             inboxTagMapper,
@@ -56,7 +60,8 @@ class InboxServiceTests {
             fileStorageService,
             analysisStatusService,
             capturePersistenceService,
-            vectorIndexScheduler
+            vectorIndexScheduler,
+            aiServiceClient
     );
 
     @Test
@@ -115,6 +120,7 @@ class InboxServiceTests {
                 null
         );
         verify(analysisStatusService).isProcessingStale(item);
+        verifyNoInteractions(aiServiceClient);
     }
 
     @Test
@@ -205,6 +211,98 @@ class InboxServiceTests {
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
         verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void semanticSearchBatchResolvesFiltersAndRestoresQdrantOrder() {
+        InboxItem first = savedItem(123L, "URL", "Redis 分布式锁", null, null);
+        first.setStatus("ACTIVE");
+        InboxItem second = savedItem(456L, "URL", "Lua 幂等", null, null);
+        second.setStatus("ACTIVE");
+        when(aiServiceClient.searchVectors("防止接口重复请求", 40)).thenReturn(
+                new AiSemanticSearchResponse(List.of(
+                        new AiSemanticSearchCandidate(123L, 0.91),
+                        new AiSemanticSearchCandidate(456L, 0.82)
+                ))
+        );
+        // SQL IN 不保证顺序，Service 必须恢复 Qdrant 排名。
+        when(inboxItemMapper.selectActiveByIdsAndFilters(
+                List.of(123L, 456L),
+                "URL",
+                "技术学习",
+                1
+        )).thenReturn(List.of(second, first));
+
+        List<InboxItem> result = inboxService.search(
+                " 防止接口重复请求 ",
+                " url ",
+                " 技术学习 ",
+                true,
+                "semantic",
+                20
+        );
+
+        assertEquals(List.of(first, second), result);
+        verify(inboxItemMapper).selectActiveByIdsAndFilters(
+                List.of(123L, 456L),
+                "URL",
+                "技术学习",
+                1
+        );
+        verify(inboxItemMapper, never()).selectById(any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void semanticSearchSafelyIgnoresDeletedAndArchivedCandidates() {
+        InboxItem archived = savedItem(123L, "TEXT", "旧资料", "正文", null);
+        archived.setStatus("ARCHIVED");
+        when(aiServiceClient.searchVectors("旧资料", 40)).thenReturn(
+                new AiSemanticSearchResponse(List.of(
+                        new AiSemanticSearchCandidate(123L, 0.9),
+                        new AiSemanticSearchCandidate(999L, 0.8)
+                ))
+        );
+        // 999 已删除所以不在结果中；防御检查也拒绝意外返回的 ARCHIVED 123。
+        when(inboxItemMapper.selectActiveByIdsAndFilters(
+                List.of(123L, 999L), null, null, null
+        )).thenReturn(List.of(archived));
+
+        List<InboxItem> result = inboxService.search(
+                "旧资料", null, null, null, "semantic", null
+        );
+
+        assertEquals(List.of(), result);
+    }
+
+    @Test
+    void semanticSearchReturnsEmptyWithoutMysqlQueryWhenQdrantHasNoCandidates() {
+        when(aiServiceClient.searchVectors("missing", 40)).thenReturn(
+                new AiSemanticSearchResponse(List.of())
+        );
+
+        assertEquals(
+                List.of(),
+                inboxService.search("missing", null, null, null, "semantic", null)
+        );
+
+        verify(inboxItemMapper, never()).selectActiveByIdsAndFilters(any(), any(), any(), any());
+    }
+
+    @Test
+    void searchRejectsInvalidModeAndSemanticLimit() {
+        ResponseStatusException invalidMode = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("Redis", null, null, null, "hybrid", null)
+        );
+        ResponseStatusException invalidLimit = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("Redis", null, null, null, "semantic", 51)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, invalidMode.getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, invalidLimit.getStatusCode());
+        verifyNoInteractions(aiServiceClient);
     }
 
     @Test

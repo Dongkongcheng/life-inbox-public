@@ -1,7 +1,10 @@
 package com.lifeinbox.server.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.dto.AiSemanticSearchCandidate;
+import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxEntity;
 import com.lifeinbox.server.entity.InboxItem;
@@ -9,6 +12,8 @@ import com.lifeinbox.server.mapper.InboxEntityMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -16,8 +21,12 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -26,6 +35,7 @@ import java.util.Set;
 @Service
 public class InboxService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(InboxService.class);
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_ARCHIVED = "ARCHIVED";
     private static final String TYPE_TEXT = "TEXT";
@@ -36,6 +46,11 @@ public class InboxService {
     private static final int MAX_TITLE_LENGTH = 255;
     private static final int MAX_SEARCH_QUERY_LENGTH = 200;
     private static final int MAX_SEARCH_CATEGORY_LENGTH = 32;
+    private static final String SEARCH_MODE_KEYWORD = "keyword";
+    private static final String SEARCH_MODE_SEMANTIC = "semantic";
+    private static final int DEFAULT_SEMANTIC_RESULT_LIMIT = 20;
+    private static final int MAX_SEMANTIC_RESULT_LIMIT = 50;
+    private static final int MAX_SEMANTIC_CANDIDATE_LIMIT = 100;
     private static final Set<String> SEARCHABLE_TYPES = Set.of(
             TYPE_TEXT,
             TYPE_URL,
@@ -52,6 +67,7 @@ public class InboxService {
     private final InboxAnalysisStatusService analysisStatusService;
     private final InboxCapturePersistenceService capturePersistenceService;
     private final InboxVectorIndexScheduler vectorIndexScheduler;
+    private final AiServiceClient aiServiceClient;
 
     public InboxService(
             InboxItemMapper inboxItemMapper,
@@ -62,7 +78,8 @@ public class InboxService {
             FileStorageService fileStorageService,
             InboxAnalysisStatusService analysisStatusService,
             InboxCapturePersistenceService capturePersistenceService,
-            InboxVectorIndexScheduler vectorIndexScheduler
+            InboxVectorIndexScheduler vectorIndexScheduler,
+            AiServiceClient aiServiceClient
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.inboxTagMapper = inboxTagMapper;
@@ -73,6 +90,7 @@ public class InboxService {
         this.analysisStatusService = analysisStatusService;
         this.capturePersistenceService = capturePersistenceService;
         this.vectorIndexScheduler = vectorIndexScheduler;
+        this.aiServiceClient = aiServiceClient;
     }
 
     public List<InboxItem> list() {
@@ -82,11 +100,9 @@ public class InboxService {
         return enrichItems(inboxItemMapper.selectList(query));
     }
 
-    /**
-     * Search 只协调 MySQL 主表与已有 AI 元数据检索，不依赖 FastAPI 或触发新的 AI 分析。
-     */
+    /** 默认 Keyword 只查 MySQL；显式 Semantic 才请求派生候选，两个模式都不触发 AI Analyze。 */
     public List<InboxItem> search(String query) {
-        return search(query, null, null, null);
+        return search(query, null, null, null, null, null);
     }
 
     public List<InboxItem> search(
@@ -94,6 +110,17 @@ public class InboxService {
             String type,
             String category,
             Boolean favorite
+    ) {
+        return search(query, type, category, favorite, null, null);
+    }
+
+    public List<InboxItem> search(
+            String query,
+            String type,
+            String category,
+            Boolean favorite,
+            String mode,
+            Integer limit
     ) {
         String normalizedQuery = query == null ? "" : query.trim();
         if (normalizedQuery.isEmpty()) {
@@ -123,13 +150,102 @@ public class InboxService {
         }
 
         Integer favoriteValue = favorite == null ? null : (favorite ? 1 : 0);
-        return enrichItems(inboxItemMapper.searchActiveByKeyword(
+        String normalizedMode = normalizeOptionalFilter(mode);
+        if (normalizedMode == null) {
+            normalizedMode = SEARCH_MODE_KEYWORD;
+        } else {
+            normalizedMode = normalizedMode.toLowerCase(Locale.ROOT);
+        }
+
+        if (SEARCH_MODE_KEYWORD.equals(normalizedMode)) {
+            // 默认路径保持 Task 21～23 行为，不调用 FastAPI 或依赖 Qdrant。
+            return enrichItems(inboxItemMapper.searchActiveByKeyword(
+                    normalizedQuery,
+                    escapeLikeLiteral(normalizedQuery),
+                    normalizedType,
+                    normalizedCategory,
+                    favoriteValue
+            ));
+        }
+        if (!SEARCH_MODE_SEMANTIC.equals(normalizedMode)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的搜索模式");
+        }
+
+        int resultLimit = normalizeSemanticLimit(limit);
+        return semanticSearch(
                 normalizedQuery,
-                escapeLikeLiteral(normalizedQuery),
                 normalizedType,
                 normalizedCategory,
-                favoriteValue
-        ));
+                favoriteValue,
+                resultLimit
+        );
+    }
+
+    private List<InboxItem> semanticSearch(
+            String query,
+            String type,
+            String category,
+            Integer favorite,
+            int resultLimit
+    ) {
+        int candidateLimit = Math.min(MAX_SEMANTIC_CANDIDATE_LIMIT, resultLimit * 2);
+        AiSemanticSearchResponse semanticResponse = aiServiceClient.searchVectors(
+                query,
+                candidateLimit
+        );
+
+        // LinkedHashMap 同时保留 Qdrant 排序并防御性去重；Score 只存活于本次请求。
+        Map<Long, Double> candidateScores = new LinkedHashMap<>();
+        for (AiSemanticSearchCandidate candidate : semanticResponse.results()) {
+            candidateScores.putIfAbsent(candidate.inboxItemId(), candidate.score());
+        }
+        if (candidateScores.isEmpty()) {
+            return List.of();
+        }
+
+        List<InboxItem> authoritativeItems = inboxItemMapper.selectActiveByIdsAndFilters(
+                new ArrayList<>(candidateScores.keySet()),
+                type,
+                category,
+                favorite
+        );
+        Map<Long, InboxItem> itemsById = new HashMap<>();
+        for (InboxItem item : authoritativeItems) {
+            // Mapper 已限定 ACTIVE；这里再次守住业务边界，避免 stale Vector 影响产品结果。
+            if (item.getId() != null && STATUS_ACTIVE.equals(item.getStatus())) {
+                itemsById.put(item.getId(), item);
+            }
+        }
+
+        List<InboxItem> orderedItems = new ArrayList<>();
+        for (Long candidateId : candidateScores.keySet()) {
+            InboxItem item = itemsById.get(candidateId);
+            if (item != null) {
+                orderedItems.add(item);
+                if (orderedItems.size() == resultLimit) {
+                    break;
+                }
+            }
+        }
+        LOGGER.debug(
+                "Semantic Search 完成，Candidate={}，MySQL Result={}",
+                candidateScores.size(),
+                orderedItems.size()
+        );
+        return enrichItems(orderedItems);
+    }
+
+    private int normalizeSemanticLimit(Integer limit) {
+        if (limit == null) {
+            return DEFAULT_SEMANTIC_RESULT_LIMIT;
+        }
+        if (limit < 1 || limit > MAX_SEMANTIC_RESULT_LIMIT) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "语义搜索 limit 必须在 1 到 " + MAX_SEMANTIC_RESULT_LIMIT + " 之间"
+            );
+        }
+        return limit;
     }
 
     private String normalizeOptionalFilter(String value) {
