@@ -51,6 +51,7 @@ public class InboxService {
     private final FileStorageService fileStorageService;
     private final InboxAnalysisStatusService analysisStatusService;
     private final InboxCapturePersistenceService capturePersistenceService;
+    private final InboxVectorIndexScheduler vectorIndexScheduler;
 
     public InboxService(
             InboxItemMapper inboxItemMapper,
@@ -60,7 +61,8 @@ public class InboxService {
             UrlMetadataService urlMetadataService,
             FileStorageService fileStorageService,
             InboxAnalysisStatusService analysisStatusService,
-            InboxCapturePersistenceService capturePersistenceService
+            InboxCapturePersistenceService capturePersistenceService,
+            InboxVectorIndexScheduler vectorIndexScheduler
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.inboxTagMapper = inboxTagMapper;
@@ -70,6 +72,7 @@ public class InboxService {
         this.fileStorageService = fileStorageService;
         this.analysisStatusService = analysisStatusService;
         this.capturePersistenceService = capturePersistenceService;
+        this.vectorIndexScheduler = vectorIndexScheduler;
     }
 
     public List<InboxItem> list() {
@@ -272,6 +275,9 @@ public class InboxService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }
 
+        // MySQL 删除已经成功；Qdrant 只做后台 best-effort 清理，失败不能恢复或阻止业务删除。
+        vectorIndexScheduler.scheduleDelete(id);
+
         if ((TYPE_FILE.equals(inboxItem.getType()) || TYPE_IMAGE.equals(inboxItem.getType()))
                 && !isBlank(inboxItem.getFileUrl())) {
             // 先确认数据库删除成功，再尽力清理磁盘；两种存储无法组成同一个原子事务。
@@ -290,6 +296,8 @@ public class InboxService {
         if (updatedRows == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
         }
+        // 当前没有恢复 ACTIVE 的入口，归档后直接删除派生 Point，避免未来语义检索误召回。
+        vectorIndexScheduler.scheduleDelete(id);
     }
 
     public void favorite(Long id) {

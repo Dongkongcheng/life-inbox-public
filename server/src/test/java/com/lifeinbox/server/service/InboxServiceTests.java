@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 
@@ -43,6 +44,9 @@ class InboxServiceTests {
     private final InboxCapturePersistenceService capturePersistenceService = mock(
             InboxCapturePersistenceService.class
     );
+    private final InboxVectorIndexScheduler vectorIndexScheduler = mock(
+            InboxVectorIndexScheduler.class
+    );
     private final InboxService inboxService = new InboxService(
             inboxItemMapper,
             inboxTagMapper,
@@ -51,7 +55,8 @@ class InboxServiceTests {
             urlMetadataService,
             fileStorageService,
             analysisStatusService,
-            capturePersistenceService
+            capturePersistenceService,
+            vectorIndexScheduler
     );
 
     @Test
@@ -415,6 +420,7 @@ class InboxServiceTests {
         assertDoesNotThrow(() -> inboxService.delete(1L));
 
         verify(inboxItemMapper).deleteById(1L);
+        verify(vectorIndexScheduler).scheduleDelete(1L);
         verify(fileStorageService, never()).deleteByFileUrl(any());
     }
 
@@ -429,6 +435,7 @@ class InboxServiceTests {
         assertDoesNotThrow(() -> inboxService.delete(2L));
 
         verify(inboxItemMapper).deleteById(2L);
+        verify(vectorIndexScheduler).scheduleDelete(2L);
         verify(fileStorageService).deleteByFileUrl(item.getFileUrl());
     }
 
@@ -443,6 +450,7 @@ class InboxServiceTests {
 
         assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
         verify(inboxItemMapper, never()).deleteById(99L);
+        verify(vectorIndexScheduler, never()).scheduleDelete(99L);
         verify(fileStorageService, never()).deleteByFileUrl(any());
     }
 
@@ -457,6 +465,7 @@ class InboxServiceTests {
         assertDoesNotThrow(() -> inboxService.archive(1L));
 
         verify(inboxItemMapper).updateInboxStatus(1L, "ARCHIVED");
+        verify(vectorIndexScheduler).scheduleDelete(1L);
     }
 
     @Test
@@ -484,6 +493,7 @@ class InboxServiceTests {
 
         assertEquals("ACTIVE", inboxItem.getStatus());
         verify(inboxItemMapper).updateFavorite(1L, 1);
+        verifyNoInteractions(vectorIndexScheduler);
     }
 
     @Test

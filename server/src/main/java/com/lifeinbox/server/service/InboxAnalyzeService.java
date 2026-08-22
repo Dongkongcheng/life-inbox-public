@@ -76,6 +76,7 @@ public class InboxAnalyzeService {
     private final InboxAnalysisStatusService statusService;
     private final InboxAnalysisPersistenceService persistenceService;
     private final InboxSearchableContentService searchableContentService;
+    private final InboxVectorIndexScheduler vectorIndexScheduler;
 
     public InboxAnalyzeService(
             InboxItemMapper inboxItemMapper,
@@ -83,7 +84,8 @@ public class InboxAnalyzeService {
             FileStorageService fileStorageService,
             InboxAnalysisStatusService statusService,
             InboxAnalysisPersistenceService persistenceService,
-            InboxSearchableContentService searchableContentService
+            InboxSearchableContentService searchableContentService,
+            InboxVectorIndexScheduler vectorIndexScheduler
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.aiServiceClient = aiServiceClient;
@@ -91,6 +93,7 @@ public class InboxAnalyzeService {
         this.statusService = statusService;
         this.persistenceService = persistenceService;
         this.searchableContentService = searchableContentService;
+        this.vectorIndexScheduler = vectorIndexScheduler;
     }
 
     /**
@@ -109,6 +112,8 @@ public class InboxAnalyzeService {
         ValidatedAnalysis analysis;
         try {
             PreparedAnalysisInput prepared = prepareAnalysisInput(id, inboxItem, attemptId);
+            // 内容准备已经按当前 Attempt 提交；Vector 失败不应等待或改变后续 Analyze 语义。
+            vectorIndexScheduler.scheduleIndex(id, attemptId);
             AiAnalyzeResponse aiResponse = aiServiceClient.analyze(
                     prepared.title(),
                     prepared.text()

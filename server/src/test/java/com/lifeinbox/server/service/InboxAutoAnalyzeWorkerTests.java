@@ -46,13 +46,15 @@ class InboxAutoAnalyzeWorkerTests {
         InboxSearchableContentService searchableContentService = mock(
                 InboxSearchableContentService.class
         );
+        InboxVectorIndexScheduler vectorIndexScheduler = mock(InboxVectorIndexScheduler.class);
         InboxAnalyzeService analyzeService = new InboxAnalyzeService(
                 inboxItemMapper,
                 aiServiceClient,
                 fileStorageService,
                 statusService,
                 persistenceService,
-                searchableContentService
+                searchableContentService,
+                vectorIndexScheduler
         );
         InboxAutoAnalyzeWorker worker = new InboxAutoAnalyzeWorker(analyzeService);
         InboxItem item = new InboxItem();

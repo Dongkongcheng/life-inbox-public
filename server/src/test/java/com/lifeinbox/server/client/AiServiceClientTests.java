@@ -5,6 +5,8 @@ import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
+import com.lifeinbox.server.dto.AiVectorDeleteResponse;
+import com.lifeinbox.server.dto.AiVectorIndexResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.ImageAnalyzeException;
@@ -705,6 +707,96 @@ class AiServiceClientTests {
             );
 
             assertEquals("AI Embedding 服务暂不可用", exception.getMessage());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void vectorIndexPostsCurrentItemTextAndParsesMetadata() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/vector/index", exchange -> {
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = ("""
+                    {"inboxItemId":123,"indexed":true,"collection":"items__model__d_3",\
+                    "model":"embedding-model","dimension":3,"contentHash":"%s"}
+                    """).formatted("a".repeat(64)).strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiVectorIndexResponse response = clientFor(server).indexVector(123L, "当前正文");
+
+            assertEquals(true, response.indexed());
+            assertEquals("embedding-model", response.model());
+            assertEquals(3, response.dimension());
+            assertEquals("{\"inboxItemId\":123,\"text\":\"当前正文\"}", requestBody.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void vectorIndexAcceptsExplicitDisabledSkipAndRejectsMalformedSuccess() throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        String[] responses = {
+                "{\"inboxItemId\":123,\"indexed\":false,\"collection\":null,\"model\":null,"
+                        + "\"dimension\":null,\"contentHash\":null}",
+                "{\"inboxItemId\":123,\"indexed\":true,\"collection\":\"items\","
+                        + "\"model\":\"m\",\"dimension\":3,\"contentHash\":\"bad\"}"
+        };
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/vector/index", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = responses[requestIndex.getAndIncrement()]
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            assertEquals(false, client.indexVector(123L, "正文").indexed());
+            assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.indexVector(123L, "正文")
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void vectorDeleteUsesIdempotentInternalDeleteEndpoint() throws IOException {
+        AtomicReference<String> method = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/vector/index/123", exchange -> {
+            method.set(exchange.getRequestMethod());
+            byte[] body = "{\"inboxItemId\":123,\"deleted\":true}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiVectorDeleteResponse response = clientFor(server).deleteVector(123L);
+
+            assertEquals(true, response.deleted());
+            assertEquals("DELETE", method.get());
         } finally {
             server.stop(0);
         }
