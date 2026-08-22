@@ -91,7 +91,7 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .search-controls button { justify-self: stretch; margin: 0; }
 .search-filter-controls {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 .search-filter-controls label {

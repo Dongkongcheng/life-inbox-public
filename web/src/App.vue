@@ -14,6 +14,8 @@ const inboxItems = ref([])
 const loading = ref(false)
 const searchQuery = ref('')
 const activeSearchQuery = ref('')
+const searchMode = ref('keyword')
+const activeSearchMode = ref('keyword')
 const searchType = ref('')
 const searchCategory = ref('')
 const searchFavorite = ref('')
@@ -127,6 +129,7 @@ const refreshCurrentView = async ({ background = false } = {}) => {
     if (searching) {
       // 所有后台刷新和条目操作都从已执行的搜索状态生成 URL，避免丢失筛选条件。
       const params = new URLSearchParams({ q: activeSearchQuery.value })
+      params.set('mode', activeSearchMode.value)
       if (activeSearchType.value) params.set('type', activeSearchType.value)
       if (activeSearchCategory.value) params.set('category', activeSearchCategory.value)
       if (activeSearchFavorite.value) params.set('favorite', activeSearchFavorite.value)
@@ -134,7 +137,11 @@ const refreshCurrentView = async ({ background = false } = {}) => {
     }
     const response = await fetch(endpoint)
     if (!response.ok) {
-      let message = searching ? '搜索失败，请稍后重试。' : '加载 Inbox 失败，请稍后重试。'
+      let message = searching
+        ? activeSearchMode.value === 'semantic'
+          ? '语义搜索失败，请稍后重试。'
+          : '搜索失败，请稍后重试。'
+        : '加载 Inbox 失败，请稍后重试。'
       try {
         const problem = await response.json()
         message = problem.detail || problem.message || message
@@ -171,6 +178,7 @@ const searchInbox = async () => {
   }
 
   activeSearchQuery.value = normalizedQuery
+  activeSearchMode.value = searchMode.value
   activeSearchType.value = searchType.value
   activeSearchCategory.value = searchCategory.value.trim()
   activeSearchFavorite.value = searchFavorite.value
@@ -180,6 +188,8 @@ const searchInbox = async () => {
 const clearSearch = async () => {
   searchQuery.value = ''
   activeSearchQuery.value = ''
+  searchMode.value = 'keyword'
+  activeSearchMode.value = 'keyword'
   searchType.value = ''
   searchCategory.value = ''
   searchFavorite.value = ''
@@ -570,9 +580,13 @@ onBeforeUnmount(() => {
             v-model="searchQuery"
             type="search"
             maxlength="200"
-            placeholder="搜索标题、内容或 AI 整理信息"
+            :placeholder="searchMode === 'semantic'
+              ? '用自然语言描述你记得的内容'
+              : '搜索标题、内容或 AI 整理信息'"
           />
-          <button type="submit" :disabled="loading">搜索</button>
+          <button type="submit" :disabled="loading">
+            {{ searchMode === 'semantic' ? '语义搜索' : '搜索' }}
+          </button>
           <button
             v-if="activeSearchQuery"
             class="clear-search-button"
@@ -584,6 +598,13 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <div class="search-filter-controls">
+          <label>
+            模式
+            <select v-model="searchMode">
+              <option value="keyword">关键词</option>
+              <option value="semantic">语义</option>
+            </select>
+          </label>
           <label>
             类型
             <select v-model="searchType">
@@ -621,7 +642,8 @@ onBeforeUnmount(() => {
         <span>{{ inboxItems.length }} 条</span>
       </div>
       <p v-if="activeSearchQuery" class="search-context">
-        关键词：{{ activeSearchQuery }}
+        模式：{{ activeSearchMode === 'semantic' ? '语义' : '关键词' }}
+        · 查询：{{ activeSearchQuery }}
         <span v-if="activeSearchType"> · 类型：{{ activeSearchType }}</span>
         <span v-if="activeSearchCategory"> · 分类：{{ activeSearchCategory }}</span>
         <span v-if="activeSearchFavorite">
@@ -633,7 +655,11 @@ onBeforeUnmount(() => {
         {{ activeSearchQuery ? '正在搜索…' : '正在加载…' }}
       </p>
       <p v-else-if="inboxItems.length === 0 && !searchErrorMessage" class="empty-state">
-        {{ activeSearchQuery ? '没有找到匹配内容。' : 'Inbox 还是空的，先保存一条信息吧。' }}
+        {{ activeSearchQuery
+          ? activeSearchMode === 'semantic'
+            ? '没有找到相关内容。'
+            : '没有找到匹配内容。'
+          : 'Inbox 还是空的，先保存一条信息吧。' }}
       </p>
       <div v-else-if="inboxItems.length > 0" class="item-list">
         <article

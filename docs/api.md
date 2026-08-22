@@ -7,7 +7,7 @@
 | Method | Path | 说明 |
 | --- | --- | --- |
 | GET | `/api/inbox` | 查询 ACTIVE InboxItem，并聚合 AI 状态与五类结果 |
-| GET | `/api/search?q={keyword}` | Keyword Search；支持可选过滤、基础相关性排序，查询 ACTIVE InboxItem |
+| GET | `/api/search?q={query}` | 默认 Keyword Search；`mode=semantic` 使用语义候选并由 MySQL 解析 ACTIVE InboxItem |
 | POST | `/api/inbox` | JSON Capture；当前支持 TEXT、URL |
 | POST | `/api/inbox/file` | multipart FILE Capture |
 | POST | `/api/inbox/image` | multipart IMAGE Capture |
@@ -20,9 +20,9 @@
 | DELETE | `/api/inbox/{id}` | 删除条目；FILE/IMAGE 同时尽力清理本地文件 |
 | GET | `/api/ai/health` | Browser/Client → Java → Python 健康链路 |
 
-### Keyword Search
+### Search API
 
-`GET /api/search?q={keyword}` 由 Spring Boot 直接查询 MySQL，不调用 FastAPI，也不会触发 AI Analyze。已有只传 `q` 的调用保持兼容。
+`GET /api/search?q={query}` 默认由 Spring Boot 直接查询 MySQL，不调用 FastAPI，也不会触发 AI Analyze。已有只传 `q` 的调用保持兼容。
 
 可选参数：
 
@@ -31,9 +31,16 @@
 | `type` | `TEXT` / `URL` / `FILE` / `IMAGE` | 精确过滤 InboxItem 类型；非法类型返回 400 |
 | `category` | 最长 32 个字符 | 去除首尾空白后精确过滤已持久化分类；空值等同未提供 |
 | `favorite` | `true` / `false` | 分别只返回已收藏 / 未收藏条目；未提供时不过滤 |
+| `mode` | `keyword` / `semantic` | 默认 `keyword`；非法值返回 400，`hybrid` 尚未实现 |
+| `limit` | 1～50 | 只控制 Semantic 最终结果数；默认 20 |
 
-- `q` 会先去除首尾空白，空白查询返回 400；
+- 两种模式都先去除 `q` 首尾空白，空白查询返回 400；
 - 最长 200 个 Java 字符，超长查询返回 400；
+- Keyword 模式不依赖 FastAPI、Embedding 或 Qdrant；Semantic 故障不会影响默认路径；
+
+#### Keyword Mode
+
+- `mode` 缺失或为 `keyword` 时使用既有 MySQL Keyword Search；
 - `status = ACTIVE`、全部已提供过滤参数与八类 OR 匹配同时生效，归档项不能通过任一匹配路径返回；
 - 匹配字段为 `title`、`content`、`summary`、`category`、`tags`、`keywords`、`entities`、`searchable_content`，八类信息使用 OR 语义；
 - tags、keywords、entities 通过现有关系表或子表查询；同一条目有多个匹配值时仍只返回一次；
@@ -44,6 +51,26 @@
 - 相关性只用于数据库运行时排序，不持久化或返回 Search score；
 - 后端不返回高亮 HTML。Vue 将可见字段分为普通文本节点与 `<mark>` 节点，查询和内容均由 Vue 转义；
 - 当前不搜索 `sourceUrl` 或 `fileUrl`，也不返回匹配原因。
+
+#### Semantic Mode
+
+`GET /api/search?q={query}&mode=semantic` 执行：
+
+```text
+Query → FastAPI Query Embedding → Qdrant Cosine Top K
+      → Candidate IDs/Scores → Java 一次批量查询 MySQL
+      → ACTIVE + type/category/favorite → 按 Candidate 顺序返回 InboxItem[]
+```
+
+- Query 与文档索引复用同一 `EmbeddingService`、模型和向量空间；
+- Java 请求最多 `min(limit × 2, 100)` 个 Qdrant Candidate，再按 MySQL 业务过滤取前 `limit` 条；过滤后允许不足；
+- Qdrant Score 只用于恢复本次语义排序，不保存 MySQL、不加入 InboxItem、也不展示给前端；
+- 删除、不存在、ARCHIVED 或不满足 `type/category/favorite` 的 stale Candidate 会被安全忽略；
+- MySQL 使用一条 `id IN (...)` 批量查询，不为每个候选单独查询主表；
+- Semantic 不执行 Keyword 排名，不与 Keyword 结果合并，也不使用 Score Threshold；
+- 响应仍是原有 `InboxItem[]`。字面查询刚好出现在可见字段时仍可安全高亮，否则不生成假高亮；
+- Vector Store 关闭、Embedding/Qdrant 故障、Collection 缺失或模型/维度不兼容时返回受控 503；不会静默回退为 Keyword；
+- 当前只可召回已经建立 Point 的条目，没有 Startup/Batch Backfill。
 
 ### JSON Capture
 
@@ -98,6 +125,7 @@ fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，�
 | POST | `/embedding` | JSON `{text}` | `{model, dimension, embedding}`；只生成并校验瞬时向量 |
 | POST | `/vector/index` | JSON `{inboxItemId, text}` | 生成 Embedding 并按稳定 Point ID Upsert 到 Qdrant |
 | DELETE | `/vector/index/{inboxItemId}` | 路径 ID | 幂等删除该 Collection 前缀下的受管 Point |
+| POST | `/vector/search` | JSON `{query, limit?}` | Query Embedding + Qdrant Top K，返回 `{inboxItemId, score}` 候选 |
 | POST | `/prepare/url` | JSON `{title?, url}` | `{title?, text}`；只复用安全网页提取，不调用 LLM |
 | POST | `/prepare/file` | multipart `file`, `title?` | `{title?, text}`；只复用文档提取，不调用 LLM |
 | POST | `/prepare/image` | multipart `file`, `title?` | `{title?, text}`；只复用 OCR，不调用 LLM |
@@ -176,8 +204,33 @@ Point ID；Vector Store 关闭时返回 `deleted=false`。Qdrant 超时返回 50
 409，非法响应返回 502；响应不会包含 API Key、正文、完整向量或 Qdrant 内部响应。
 
 Spring Boot 只在 Capture 提交或 Attempt-guarded 正文更新后异步触发 Index，并在 Archive/Delete 后异步触发
-Delete。当前产品 `/api/search` 仍只查询 MySQL；这些内部接口不实现 Vector Search、Semantic Search 或 Query
-Embedding Search。
+Delete。Point 生命周期故障不会修改业务状态或破坏默认 Keyword Search。
+
+### Semantic Search 内部协议
+
+`POST /vector/search` 只供 Java 调用：
+
+```json
+{"query": "那个防止接口重复请求的 Redis 方案", "limit": 40}
+```
+
+成功响应：
+
+```json
+{
+  "results": [
+    {"inboxItemId": 123, "score": 0.91},
+    {"inboxItemId": 456, "score": 0.82}
+  ]
+}
+```
+
+`query` trim 后不能为空，最长 200 字符；`limit` 默认 20、范围 1～100。服务复用现有 EmbeddingService，按返回的
+`model + dimension` 计算 Task 26 物理 Collection，验证单向量配置、真实维度和 Cosine 后调用 Qdrant
+`query_points`。请求只取 ID/Score，不读取 Payload 或完整 Vector，也不创建缺失 Collection。
+
+Vector Store 关闭返回 503，Collection 不存在返回 404，模型/维度/距离不兼容返回 409，Qdrant 超时返回 504，
+其他安全封装的服务故障返回 502/503。Java 不向产品调用方透传 Python、Provider 或 Qdrant 的内部响应。
 
 ## 主要限制
 

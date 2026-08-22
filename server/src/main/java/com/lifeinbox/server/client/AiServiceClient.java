@@ -8,6 +8,9 @@ import com.lifeinbox.server.dto.AiEmbeddingRequest;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiFileErrorResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
+import com.lifeinbox.server.dto.AiSemanticSearchCandidate;
+import com.lifeinbox.server.dto.AiSemanticSearchRequest;
+import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
 import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
@@ -170,6 +173,28 @@ public class AiServiceClient {
             throw exception;
         } catch (RestClientException exception) {
             throw new AiServiceUnavailableException("AI Vector Delete 服务暂不可用", exception);
+        }
+    }
+
+    /** Query Embedding 与 Qdrant Search 均由 Python 执行，Java 只接收 ID/Score 候选。 */
+    public AiSemanticSearchResponse searchVectors(String query, int limit) {
+        try {
+            AiSemanticSearchResponse response = analysisRestClient.post()
+                    .uri("/vector/search")
+                    .body(new AiSemanticSearchRequest(query, limit))
+                    .retrieve()
+                    .body(AiSemanticSearchResponse.class);
+            if (!isValidSemanticSearchResponse(response)) {
+                throw new AiServiceUnavailableException(
+                        "AI 服务返回了无效的 Semantic Search 结果"
+                );
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // 不透传 Query、Vector、Provider 或 Qdrant 响应；Keyword Search 不经过此调用。
+            throw new AiServiceUnavailableException("AI Semantic Search 服务暂不可用", exception);
         }
     }
 
@@ -397,6 +422,22 @@ public class AiServiceClient {
                 && response.dimension() > 0
                 && response.contentHash() != null
                 && SHA_256_HEX.matcher(response.contentHash()).matches();
+    }
+
+    private boolean isValidSemanticSearchResponse(AiSemanticSearchResponse response) {
+        if (response == null || response.results() == null) {
+            return false;
+        }
+        for (AiSemanticSearchCandidate candidate : response.results()) {
+            if (candidate == null
+                    || candidate.inboxItemId() == null
+                    || candidate.inboxItemId() <= 0
+                    || candidate.score() == null
+                    || !Double.isFinite(candidate.score())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private UrlAnalyzeException parseKnownUrlFailure(RestClientResponseException exception) {

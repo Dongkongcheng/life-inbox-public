@@ -27,8 +27,10 @@ public class SearchController {
             @RequestParam("q") String query,
             @RequestParam(value = "type", required = false) String type,
             @RequestParam(value = "category", required = false) String category,
-            @RequestParam(value = "favorite", required = false) Boolean favorite
+            @RequestParam(value = "favorite", required = false) Boolean favorite,
+            @RequestParam(value = "mode", required = false) String mode,
+            @RequestParam(value = "limit", required = false) Integer limit
     ) {
-        return inboxService.search(query, type, category, favorite);
+        return inboxService.search(query, type, category, favorite, mode, limit);
     }
 }

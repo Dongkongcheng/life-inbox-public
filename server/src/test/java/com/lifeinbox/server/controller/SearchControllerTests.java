@@ -26,7 +26,8 @@ class SearchControllerTests {
         item.setId(1L);
         item.setTitle("Redis 分布式锁");
         item.setSummary("介绍 Redis 在高并发环境下的使用方式。");
-        when(inboxService.search(" Redis ", null, null, null)).thenReturn(List.of(item));
+        when(inboxService.search(" Redis ", null, null, null, null, null))
+                .thenReturn(List.of(item));
         MockMvc mockMvc = MockMvcBuilders
                 .standaloneSetup(new SearchController(inboxService))
                 .build();
@@ -37,13 +38,14 @@ class SearchControllerTests {
                 .andExpect(jsonPath("$[0].title").value("Redis 分布式锁"))
                 .andExpect(jsonPath("$[0].summary").value("介绍 Redis 在高并发环境下的使用方式。"))
                 .andExpect(jsonPath("$[0].searchableContent").doesNotExist());
-        verify(inboxService).search(" Redis ", null, null, null);
+        verify(inboxService).search(" Redis ", null, null, null, null, null);
     }
 
     @Test
     void searchForwardsOptionalFiltersToTheExistingSearchService() throws Exception {
         InboxService inboxService = mock(InboxService.class);
-        when(inboxService.search("Redis", "URL", "技术", true)).thenReturn(List.of());
+        when(inboxService.search("Redis", "URL", "技术", true, null, null))
+                .thenReturn(List.of());
         MockMvc mockMvc = MockMvcBuilders
                 .standaloneSetup(new SearchController(inboxService))
                 .build();
@@ -55,13 +57,31 @@ class SearchControllerTests {
                         .param("favorite", "true"))
                 .andExpect(status().isOk());
 
-        verify(inboxService).search("Redis", "URL", "技术", true);
+        verify(inboxService).search("Redis", "URL", "技术", true, null, null);
+    }
+
+    @Test
+    void searchForwardsSemanticModeAndLimit() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        when(inboxService.search("幂等方案", null, null, null, "semantic", 10))
+                .thenReturn(List.of());
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(new SearchController(inboxService))
+                .build();
+
+        mockMvc.perform(get("/api/search")
+                        .param("q", "幂等方案")
+                        .param("mode", "semantic")
+                        .param("limit", "10"))
+                .andExpect(status().isOk());
+
+        verify(inboxService).search("幂等方案", null, null, null, "semantic", 10);
     }
 
     @Test
     void blankQueryReturnsControlledBadRequest() throws Exception {
         InboxService inboxService = mock(InboxService.class);
-        when(inboxService.search(" ", null, null, null)).thenThrow(
+        when(inboxService.search(" ", null, null, null, null, null)).thenThrow(
                 new ResponseStatusException(HttpStatus.BAD_REQUEST, "搜索关键词不能为空")
         );
         MockMvc mockMvc = MockMvcBuilders
@@ -82,6 +102,22 @@ class SearchControllerTests {
         mockMvc.perform(get("/api/search")
                         .param("q", "Redis")
                         .param("favorite", "not-a-boolean"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void invalidSearchModeReturnsControlledBadRequest() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        when(inboxService.search("Redis", null, null, null, "hybrid", null)).thenThrow(
+                new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的搜索模式")
+        );
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(new SearchController(inboxService))
+                .build();
+
+        mockMvc.perform(get("/api/search")
+                        .param("q", "Redis")
+                        .param("mode", "hybrid"))
                 .andExpect(status().isBadRequest());
     }
 }

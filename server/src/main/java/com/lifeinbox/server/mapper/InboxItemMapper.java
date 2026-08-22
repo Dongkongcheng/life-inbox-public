@@ -95,6 +95,31 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
     );
 
     /**
+     * Semantic Candidate 一次批量回查 MySQL；ACTIVE 与业务过滤在事实来源处最终生效。
+     * SQL 的 IN 不承诺 Qdrant 顺序，Service 会按候选顺序重新组装并过滤 stale Point。
+     */
+    @Select("""
+            <script>
+            SELECT i.*
+            FROM inbox_item i
+            WHERE i.status = 'ACTIVE'
+              AND (#{type,jdbcType=VARCHAR} IS NULL OR i.type = #{type,jdbcType=VARCHAR})
+              AND (#{category,jdbcType=VARCHAR} IS NULL OR i.category = #{category,jdbcType=VARCHAR})
+              AND (#{favorite,jdbcType=TINYINT} IS NULL OR i.favorite = #{favorite,jdbcType=TINYINT})
+              AND i.id IN
+              <foreach collection="ids" item="id" open="(" separator="," close=")">
+                #{id}
+              </foreach>
+            </script>
+            """)
+    List<InboxItem> selectActiveByIdsAndFilters(
+            @Param("ids") List<Long> ids,
+            @Param("type") String type,
+            @Param("category") String category,
+            @Param("favorite") Integer favorite
+    );
+
+    /**
      * 内容准备在事务外完成；单条条件 UPDATE 只允许当前 PROCESSING Attempt 写入派生正文。
      */
     @Update("""

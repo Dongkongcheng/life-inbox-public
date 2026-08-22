@@ -11,6 +11,7 @@ from app.config import (
 )
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
 from app.schemas.embedding import EmbeddingRequest, EmbeddingResult
+from app.schemas.semantic_search import SemanticSearchRequest, SemanticSearchResponse
 from app.schemas.summary import SummaryRequest, SummaryResponse
 from app.schemas.url_analyze import UrlAnalyzeRequest
 from app.schemas.vector_index import (
@@ -40,11 +41,14 @@ from app.services.llm_client import (
     LlmTimeoutError,
 )
 from app.services.summary_service import SummaryService
+from app.services.semantic_search_service import SemanticSearchService
 from app.services.url_analyze_service import UrlAnalyzeService
 from app.services.url_content_extractor import UrlContentError, UrlContentExtractor
 from app.services.vector_index_service import VectorIndexService
 from app.services.vector_store_service import (
+    VectorStoreCollectionMissingError,
     VectorStoreCompatibilityError,
+    VectorStoreDisabledError,
     VectorStoreError,
     VectorStoreInvalidResponseError,
     VectorStoreService,
@@ -74,6 +78,7 @@ embedding_client = EmbeddingClient()
 embedding_service = EmbeddingService(embedding_client)
 vector_store_service = VectorStoreService()
 vector_index_service = VectorIndexService(embedding_service, vector_store_service)
+semantic_search_service = SemanticSearchService(embedding_service, vector_store_service)
 
 
 def get_analyze_service() -> AnalyzeService:
@@ -116,6 +121,12 @@ def get_vector_index_service() -> VectorIndexService:
     """Qdrant Client 与配置都在真实索引时惰性初始化，健康检查不依赖 Vector Store。"""
 
     return vector_index_service
+
+
+def get_semantic_search_service() -> SemanticSearchService:
+    """Query Embedding 与文档索引复用同一模型配置和 Vector Store。"""
+
+    return semantic_search_service
 
 
 @app.exception_handler(LlmConfigurationError)
@@ -181,6 +192,28 @@ def handle_vector_store_configuration_error(
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "Vector Store 配置不完整"},
+    )
+
+
+@app.exception_handler(VectorStoreDisabledError)
+def handle_vector_store_disabled(
+    request: Request,
+    exception: VectorStoreDisabledError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Semantic Search 未启用"},
+    )
+
+
+@app.exception_handler(VectorStoreCollectionMissingError)
+def handle_vector_store_collection_missing(
+    request: Request,
+    exception: VectorStoreCollectionMissingError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"detail": "Semantic Search 索引不存在"},
     )
 
 
@@ -345,6 +378,16 @@ def delete_vector(
     """内部幂等删除稳定 Point ID；Qdrant 故障由 Java 业务层按增强能力降级。"""
 
     return service.delete(inbox_item_id)
+
+
+@app.post("/vector/search", response_model=SemanticSearchResponse)
+def search_vector(
+    request: SemanticSearchRequest,
+    service: SemanticSearchService = Depends(get_semantic_search_service),
+) -> SemanticSearchResponse:
+    """内部只返回 Qdrant 候选；ACTIVE 与业务过滤必须由 Java/MySQL 最终确认。"""
+
+    return service.search(request)
 
 
 @app.post("/analyze/url", response_model=AnalyzeResult)
