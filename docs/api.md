@@ -7,7 +7,7 @@
 | Method | Path | 说明 |
 | --- | --- | --- |
 | GET | `/api/inbox` | 查询 ACTIVE InboxItem，并聚合 AI 状态与五类结果 |
-| GET | `/api/search?q={query}` | 默认 Keyword Search；`mode=semantic` 使用语义候选并由 MySQL 解析 ACTIVE InboxItem |
+| GET | `/api/search?q={query}` | 默认 Keyword Search；支持显式 `semantic` 与 `hybrid` 模式 |
 | POST | `/api/inbox` | JSON Capture；当前支持 TEXT、URL |
 | POST | `/api/inbox/file` | multipart FILE Capture |
 | POST | `/api/inbox/image` | multipart IMAGE Capture |
@@ -31,10 +31,10 @@
 | `type` | `TEXT` / `URL` / `FILE` / `IMAGE` | 精确过滤 InboxItem 类型；非法类型返回 400 |
 | `category` | 最长 32 个字符 | 去除首尾空白后精确过滤已持久化分类；空值等同未提供 |
 | `favorite` | `true` / `false` | 分别只返回已收藏 / 未收藏条目；未提供时不过滤 |
-| `mode` | `keyword` / `semantic` | 默认 `keyword`；非法值返回 400，`hybrid` 尚未实现 |
-| `limit` | 1～50 | 只控制 Semantic 最终结果数；默认 20 |
+| `mode` | `keyword` / `semantic` / `hybrid` | 默认 `keyword`；非法值返回 400 |
+| `limit` | 1～50 | 控制 Semantic / Hybrid 最终结果数；默认 20 |
 
-- 两种模式都先去除 `q` 首尾空白，空白查询返回 400；
+- 三种模式都先去除 `q` 首尾空白，空白查询返回 400；
 - 最长 200 个 Java 字符，超长查询返回 400；
 - Keyword 模式不依赖 FastAPI、Embedding 或 Qdrant；Semantic 故障不会影响默认路径；
 
@@ -71,6 +71,31 @@ Query → FastAPI Query Embedding → Qdrant Cosine Top K
 - 响应仍是原有 `InboxItem[]`。字面查询刚好出现在可见字段时仍可安全高亮，否则不生成假高亮；
 - Vector Store 关闭、Embedding/Qdrant 故障、Collection 缺失或模型/维度不兼容时返回受控 503；不会静默回退为 Keyword；
 - 当前只可召回已经建立 Point 的条目，没有 Startup/Batch Backfill。
+
+#### Hybrid Mode
+
+`GET /api/search?q={query}&mode=hybrid` 由 Java 同时协调现有两条检索路径：
+
+```text
+Keyword Rank ──┐
+               ├─ RRF by InboxItem.id ─ MySQL-authoritative InboxItem[]
+Semantic Rank ─┘
+```
+
+- Keyword 和 Semantic 各取最多 `min(limit × 2, 100)` 个候选；Keyword 的 `LIMIT` 在 MySQL 执行，Semantic 的
+  Top K 在 Qdrant 执行，均不会读取全部数据；
+- Fusion 使用 Reciprocal Rank Fusion：`RRFScore(d) = Σ 1 / (60 + rank_i(d))`，rank 从 1 开始；`60` 是集中定义的
+  排名平滑参数，不是相似度阈值；
+- Keyword 字段权重、Qdrant Cosine Score 和 RRF Score 不直接混加。三种 Score 都不持久化，产品响应也不返回；
+- 同一条目按 `InboxItem.id` 去重；同时在两边出现时累加两份 RRF contribution，Keyword-only 与 Semantic-only
+  条目也都会保留；
+- RRF 同分时先比较最佳分支排名，再优先保持 Keyword 排名，然后比较 Semantic 排名和 ID，保证结果确定；
+- `ACTIVE/type/category/favorite` 复用两个现有分支的 MySQL 条件，不建立第三套 Hybrid Filter；stale Qdrant Point、
+  ARCHIVED 和已删除条目仍会被忽略；
+- Semantic/Embedding/Qdrant 不可用时降级为 Keyword-only；Keyword 分支失败但 Semantic 成功时降级为
+  Semantic-only；两边都失败返回受控 503，不会用 HTTP 200 空数组伪装系统故障；
+- 两边都正常但都没有候选时返回正常空数组；显式 `mode=semantic` 继续保持原来的受控失败，不自动降级；
+- 最终仍返回原有 `InboxItem[]`，最多 `limit` 条。RRF 不等于 Rerank，本任务没有调用 Chat LLM 或 Reranker。
 
 ### JSON Capture
 

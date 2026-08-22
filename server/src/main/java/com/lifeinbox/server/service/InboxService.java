@@ -23,6 +23,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -48,9 +49,10 @@ public class InboxService {
     private static final int MAX_SEARCH_CATEGORY_LENGTH = 32;
     private static final String SEARCH_MODE_KEYWORD = "keyword";
     private static final String SEARCH_MODE_SEMANTIC = "semantic";
-    private static final int DEFAULT_SEMANTIC_RESULT_LIMIT = 20;
-    private static final int MAX_SEMANTIC_RESULT_LIMIT = 50;
-    private static final int MAX_SEMANTIC_CANDIDATE_LIMIT = 100;
+    private static final String SEARCH_MODE_HYBRID = "hybrid";
+    private static final int DEFAULT_ADVANCED_RESULT_LIMIT = 20;
+    private static final int MAX_ADVANCED_RESULT_LIMIT = 50;
+    private static final int MAX_RETRIEVAL_CANDIDATE_LIMIT = 100;
     private static final Set<String> SEARCHABLE_TYPES = Set.of(
             TYPE_TEXT,
             TYPE_URL,
@@ -100,7 +102,7 @@ public class InboxService {
         return enrichItems(inboxItemMapper.selectList(query));
     }
 
-    /** 默认 Keyword 只查 MySQL；显式 Semantic 才请求派生候选，两个模式都不触发 AI Analyze。 */
+    /** 默认 Keyword 只查 MySQL；Semantic/Hybrid 才请求派生候选，所有模式都不触发 AI Analyze。 */
     public List<InboxItem> search(String query) {
         return search(query, null, null, null, null, null);
     }
@@ -159,20 +161,31 @@ public class InboxService {
 
         if (SEARCH_MODE_KEYWORD.equals(normalizedMode)) {
             // 默认路径保持 Task 21～23 行为，不调用 FastAPI 或依赖 Qdrant。
-            return enrichItems(inboxItemMapper.searchActiveByKeyword(
+            return enrichItems(keywordRetrieve(
                     normalizedQuery,
-                    escapeLikeLiteral(normalizedQuery),
                     normalizedType,
                     normalizedCategory,
-                    favoriteValue
+                    favoriteValue,
+                    null
             ));
         }
-        if (!SEARCH_MODE_SEMANTIC.equals(normalizedMode)) {
+        if (!SEARCH_MODE_SEMANTIC.equals(normalizedMode)
+                && !SEARCH_MODE_HYBRID.equals(normalizedMode)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的搜索模式");
         }
 
-        int resultLimit = normalizeSemanticLimit(limit);
-        return semanticSearch(
+        int resultLimit = normalizeAdvancedLimit(limit);
+        if (SEARCH_MODE_SEMANTIC.equals(normalizedMode)) {
+            int candidateLimit = retrievalCandidateLimit(resultLimit);
+            return enrichItems(limitItems(semanticRetrieve(
+                    normalizedQuery,
+                    normalizedType,
+                    normalizedCategory,
+                    favoriteValue,
+                    candidateLimit
+            ), resultLimit));
+        }
+        return hybridSearch(
                 normalizedQuery,
                 normalizedType,
                 normalizedCategory,
@@ -181,14 +194,30 @@ public class InboxService {
         );
     }
 
-    private List<InboxItem> semanticSearch(
+    private List<InboxItem> keywordRetrieve(
             String query,
             String type,
             String category,
             Integer favorite,
-            int resultLimit
+            Integer candidateLimit
     ) {
-        int candidateLimit = Math.min(MAX_SEMANTIC_CANDIDATE_LIMIT, resultLimit * 2);
+        return inboxItemMapper.searchActiveByKeyword(
+                query,
+                escapeLikeLiteral(query),
+                type,
+                category,
+                favorite,
+                candidateLimit
+        );
+    }
+
+    private List<InboxItem> semanticRetrieve(
+            String query,
+            String type,
+            String category,
+            Integer favorite,
+            int candidateLimit
+    ) {
         AiSemanticSearchResponse semanticResponse = aiServiceClient.searchVectors(
                 query,
                 candidateLimit
@@ -198,6 +227,9 @@ public class InboxService {
         Map<Long, Double> candidateScores = new LinkedHashMap<>();
         for (AiSemanticSearchCandidate candidate : semanticResponse.results()) {
             candidateScores.putIfAbsent(candidate.inboxItemId(), candidate.score());
+            if (candidateScores.size() == candidateLimit) {
+                break;
+            }
         }
         if (candidateScores.isEmpty()) {
             return List.of();
@@ -222,7 +254,7 @@ public class InboxService {
             InboxItem item = itemsById.get(candidateId);
             if (item != null) {
                 orderedItems.add(item);
-                if (orderedItems.size() == resultLimit) {
+                if (orderedItems.size() == candidateLimit) {
                     break;
                 }
             }
@@ -232,20 +264,132 @@ public class InboxService {
                 candidateScores.size(),
                 orderedItems.size()
         );
-        return enrichItems(orderedItems);
+        return orderedItems;
     }
 
-    private int normalizeSemanticLimit(Integer limit) {
-        if (limit == null) {
-            return DEFAULT_SEMANTIC_RESULT_LIMIT;
+    private List<InboxItem> hybridSearch(
+            String query,
+            String type,
+            String category,
+            Integer favorite,
+            int resultLimit
+    ) {
+        int candidateLimit = retrievalCandidateLimit(resultLimit);
+        List<InboxItem> keywordCandidates = null;
+        List<InboxItem> semanticCandidates = null;
+
+        try {
+            keywordCandidates = keywordRetrieve(
+                    query,
+                    type,
+                    category,
+                    favorite,
+                    candidateLimit
+            );
+        } catch (RuntimeException exception) {
+            // Hybrid 的另一条分支仍可能提供有效结果；日志不记录完整 Query 或底层 Score。
+            LOGGER.warn(
+                    "Hybrid Search Keyword 分支不可用，尝试 Semantic-only 降级，Failure={}",
+                    exception.getClass().getSimpleName()
+            );
         }
-        if (limit < 1 || limit > MAX_SEMANTIC_RESULT_LIMIT) {
+
+        try {
+            semanticCandidates = semanticRetrieve(
+                    query,
+                    type,
+                    category,
+                    favorite,
+                    candidateLimit
+            );
+        } catch (RuntimeException exception) {
+            // Vector Store 关闭、Embedding 或 Qdrant 故障时保留基础 Keyword 能力。
+            LOGGER.warn(
+                    "Hybrid Search Semantic 分支不可用，尝试 Keyword-only 降级，Failure={}",
+                    exception.getClass().getSimpleName()
+            );
+        }
+
+        if (keywordCandidates == null && semanticCandidates == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "搜索服务暂不可用"
+            );
+        }
+
+        List<InboxItem> hybridItems;
+        if (keywordCandidates == null) {
+            hybridItems = limitItems(semanticCandidates, resultLimit);
+        } else if (semanticCandidates == null) {
+            hybridItems = limitItems(keywordCandidates, resultLimit);
+        } else {
+            hybridItems = HybridSearchFusion.fuse(
+                    keywordCandidates,
+                    semanticCandidates,
+                    resultLimit
+            );
+        }
+        int mergedCandidateCount = mergedCandidateCount(
+                keywordCandidates,
+                semanticCandidates
+        );
+
+        LOGGER.debug(
+                "Hybrid Search 完成，Keyword Candidate={}，Semantic Candidate={}，"
+                        + "Merged Candidate={}，Final Result={}，Keyword Degraded={}，"
+                        + "Semantic Degraded={}",
+                keywordCandidates == null ? 0 : keywordCandidates.size(),
+                semanticCandidates == null ? 0 : semanticCandidates.size(),
+                mergedCandidateCount,
+                hybridItems.size(),
+                keywordCandidates == null,
+                semanticCandidates == null
+        );
+        return enrichItems(hybridItems);
+    }
+
+    private int mergedCandidateCount(
+            List<InboxItem> keywordCandidates,
+            List<InboxItem> semanticCandidates
+    ) {
+        Set<Long> ids = new HashSet<>();
+        if (keywordCandidates != null) {
+            keywordCandidates.stream()
+                    .map(InboxItem::getId)
+                    .filter(id -> id != null)
+                    .forEach(ids::add);
+        }
+        if (semanticCandidates != null) {
+            semanticCandidates.stream()
+                    .map(InboxItem::getId)
+                    .filter(id -> id != null)
+                    .forEach(ids::add);
+        }
+        return ids.size();
+    }
+
+    private int normalizeAdvancedLimit(Integer limit) {
+        if (limit == null) {
+            return DEFAULT_ADVANCED_RESULT_LIMIT;
+        }
+        if (limit < 1 || limit > MAX_ADVANCED_RESULT_LIMIT) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "语义搜索 limit 必须在 1 到 " + MAX_SEMANTIC_RESULT_LIMIT + " 之间"
+                    "语义或混合搜索 limit 必须在 1 到 " + MAX_ADVANCED_RESULT_LIMIT + " 之间"
             );
         }
         return limit;
+    }
+
+    private int retrievalCandidateLimit(int resultLimit) {
+        return Math.min(MAX_RETRIEVAL_CANDIDATE_LIMIT, resultLimit * 2);
+    }
+
+    private List<InboxItem> limitItems(List<InboxItem> items, int limit) {
+        if (items.size() <= limit) {
+            return items;
+        }
+        return new ArrayList<>(items.subList(0, limit));
     }
 
     private String normalizeOptionalFilter(String value) {

@@ -8,6 +8,7 @@ import com.lifeinbox.server.dto.CreateInboxItemRequest;
 import com.lifeinbox.server.entity.InboxEntity;
 import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.mapper.InboxEntityMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import com.lifeinbox.server.mapper.InboxKeywordMapper;
@@ -101,6 +102,7 @@ class InboxServiceTests {
                 "50!%!_!!\\path",
                 null,
                 null,
+                null,
                 null
         )).thenReturn(List.of(item));
         when(inboxTagMapper.selectTagNamesByInboxItemId(1L)).thenReturn(List.of("性能"));
@@ -117,6 +119,7 @@ class InboxServiceTests {
                 "50!%!_!!\\path",
                 null,
                 null,
+                null,
                 null
         );
         verify(analysisStatusService).isProcessingStale(item);
@@ -125,7 +128,9 @@ class InboxServiceTests {
 
     @Test
     void searchReturnsEmptyListWhenKeywordHasNoMatch() {
-        when(inboxItemMapper.searchActiveByKeyword("missing", "missing", null, null, null))
+        when(inboxItemMapper.searchActiveByKeyword(
+                "missing", "missing", null, null, null, null
+        ))
                 .thenReturn(List.of());
 
         assertEquals(List.of(), inboxService.search("missing"));
@@ -134,7 +139,9 @@ class InboxServiceTests {
     @Test
     void searchReturnsExistingFieldMatchWhenAiMetadataIsMissing() {
         InboxItem item = savedItem(2L, "TEXT", "未分析标题", "仍可搜索的正文", null);
-        when(inboxItemMapper.searchActiveByKeyword("仍可搜索", "仍可搜索", null, null, null))
+        when(inboxItemMapper.searchActiveByKeyword(
+                "仍可搜索", "仍可搜索", null, null, null, null
+        ))
                 .thenReturn(List.of(item));
         when(inboxTagMapper.selectTagNamesByInboxItemId(2L)).thenReturn(List.of());
         when(inboxKeywordMapper.selectKeywordsByInboxItemId(2L)).thenReturn(List.of());
@@ -150,22 +157,30 @@ class InboxServiceTests {
 
     @Test
     void searchNormalizesAndCombinesAllOptionalFilters() {
-        when(inboxItemMapper.searchActiveByKeyword("Redis", "Redis", "URL", "技术", 1))
+        when(inboxItemMapper.searchActiveByKeyword(
+                "Redis", "Redis", "URL", "技术", 1, null
+        ))
                 .thenReturn(List.of());
 
         assertEquals(List.of(), inboxService.search(" Redis ", " url ", " 技术 ", true));
 
-        verify(inboxItemMapper).searchActiveByKeyword("Redis", "Redis", "URL", "技术", 1);
+        verify(inboxItemMapper).searchActiveByKeyword(
+                "Redis", "Redis", "URL", "技术", 1, null
+        );
     }
 
     @Test
     void searchPassesFavoriteFalseAsZero() {
-        when(inboxItemMapper.searchActiveByKeyword("Redis", "Redis", null, null, 0))
+        when(inboxItemMapper.searchActiveByKeyword(
+                "Redis", "Redis", null, null, 0, null
+        ))
                 .thenReturn(List.of());
 
         assertEquals(List.of(), inboxService.search("Redis", " ", " ", false));
 
-        verify(inboxItemMapper).searchActiveByKeyword("Redis", "Redis", null, null, 0);
+        verify(inboxItemMapper).searchActiveByKeyword(
+                "Redis", "Redis", null, null, 0, null
+        );
     }
 
     @Test
@@ -176,7 +191,9 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(
+                any(), any(), any(), any(), any(), any()
+        );
     }
 
     @Test
@@ -187,7 +204,9 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(
+                any(), any(), any(), any(), any(), any()
+        );
     }
 
     @ParameterizedTest
@@ -199,7 +218,9 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(
+                any(), any(), any(), any(), any(), any()
+        );
     }
 
     @Test
@@ -210,7 +231,9 @@ class InboxServiceTests {
         );
 
         assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
-        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(
+                any(), any(), any(), any(), any(), any()
+        );
     }
 
     @Test
@@ -250,7 +273,9 @@ class InboxServiceTests {
                 1
         );
         verify(inboxItemMapper, never()).selectById(any());
-        verify(inboxItemMapper, never()).searchActiveByKeyword(any(), any(), any(), any(), any());
+        verify(inboxItemMapper, never()).searchActiveByKeyword(
+                any(), any(), any(), any(), any(), any()
+        );
     }
 
     @Test
@@ -290,19 +315,175 @@ class InboxServiceTests {
     }
 
     @Test
-    void searchRejectsInvalidModeAndSemanticLimit() {
+    void searchRejectsInvalidModeAndAdvancedLimits() {
         ResponseStatusException invalidMode = assertThrows(
                 ResponseStatusException.class,
-                () -> inboxService.search("Redis", null, null, null, "hybrid", null)
+                () -> inboxService.search("Redis", null, null, null, "unsupported", null)
         );
-        ResponseStatusException invalidLimit = assertThrows(
+        ResponseStatusException semanticLimit = assertThrows(
                 ResponseStatusException.class,
                 () -> inboxService.search("Redis", null, null, null, "semantic", 51)
         );
+        ResponseStatusException zeroHybridLimit = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("Redis", null, null, null, "hybrid", 0)
+        );
+        ResponseStatusException negativeHybridLimit = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("Redis", null, null, null, "hybrid", -1)
+        );
 
         assertEquals(HttpStatus.BAD_REQUEST, invalidMode.getStatusCode());
-        assertEquals(HttpStatus.BAD_REQUEST, invalidLimit.getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, semanticLimit.getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, zeroHybridLimit.getStatusCode());
+        assertEquals(HttpStatus.BAD_REQUEST, negativeHybridLimit.getStatusCode());
         verifyNoInteractions(aiServiceClient);
+    }
+
+    @Test
+    void hybridSearchUsesBoundedFilteredBranchesAndRrfOrdering() {
+        InboxItem a = activeItem(101L, "URL", "Redis 防重复请求");
+        InboxItem b = activeItem(102L, "URL", "Keyword only");
+        InboxItem c = activeItem(103L, "URL", "Keyword tail");
+        InboxItem d = activeItem(104L, "URL", "Semantic only");
+        InboxItem e = activeItem(105L, "URL", "Semantic tail");
+
+        when(inboxItemMapper.searchActiveByKeyword(
+                "重复请求 Redis", "重复请求 Redis", "URL", "技术学习", 1, 6
+        )).thenReturn(List.of(a, b, c));
+        when(aiServiceClient.searchVectors("重复请求 Redis", 6)).thenReturn(
+                new AiSemanticSearchResponse(List.of(
+                        new AiSemanticSearchCandidate(101L, 0.95),
+                        new AiSemanticSearchCandidate(104L, 0.91),
+                        new AiSemanticSearchCandidate(105L, 0.87)
+                ))
+        );
+        // MySQL IN 返回顺序与 Qdrant 无关，Service 先恢复 Semantic rank 再做 RRF。
+        when(inboxItemMapper.selectActiveByIdsAndFilters(
+                List.of(101L, 104L, 105L), "URL", "技术学习", 1
+        )).thenReturn(List.of(e, d, a));
+
+        List<InboxItem> result = inboxService.search(
+                " 重复请求 Redis ",
+                " url ",
+                " 技术学习 ",
+                true,
+                "hybrid",
+                3
+        );
+
+        assertEquals(List.of(a, b, d), result);
+        verify(inboxItemMapper).searchActiveByKeyword(
+                "重复请求 Redis", "重复请求 Redis", "URL", "技术学习", 1, 6
+        );
+        verify(inboxItemMapper).selectActiveByIdsAndFilters(
+                List.of(101L, 104L, 105L), "URL", "技术学习", 1
+        );
+    }
+
+    @Test
+    void hybridSearchDegradesToKeywordWhenSemanticOrVectorStoreIsUnavailable() {
+        InboxItem a = activeItem(201L, "TEXT", "Keyword A");
+        InboxItem b = activeItem(202L, "TEXT", "Keyword B");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "Redis", "Redis", null, null, null, 40
+        )).thenReturn(List.of(a, b));
+        when(aiServiceClient.searchVectors("Redis", 40)).thenThrow(
+                new AiServiceUnavailableException("Vector Store 未启用")
+        );
+
+        List<InboxItem> result = inboxService.search(
+                "Redis", null, null, null, "hybrid", null
+        );
+
+        assertEquals(List.of(a, b), result);
+        verify(inboxItemMapper, never()).selectActiveByIdsAndFilters(
+                any(), any(), any(), any()
+        );
+    }
+
+    @Test
+    void hybridSearchDegradesToSemanticWhenKeywordBranchFails() {
+        InboxItem c = activeItem(301L, "TEXT", "Semantic C");
+        InboxItem d = activeItem(302L, "TEXT", "Semantic D");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "幂等", "幂等", null, null, null, 40
+        )).thenThrow(new IllegalStateException("keyword unavailable"));
+        when(aiServiceClient.searchVectors("幂等", 40)).thenReturn(
+                new AiSemanticSearchResponse(List.of(
+                        new AiSemanticSearchCandidate(301L, 0.9),
+                        new AiSemanticSearchCandidate(302L, 0.8)
+                ))
+        );
+        when(inboxItemMapper.selectActiveByIdsAndFilters(
+                List.of(301L, 302L), null, null, null
+        )).thenReturn(List.of(d, c));
+
+        List<InboxItem> result = inboxService.search(
+                "幂等", null, null, null, "hybrid", null
+        );
+
+        assertEquals(List.of(c, d), result);
+    }
+
+    @Test
+    void hybridSearchReturnsControlledErrorWhenBothBranchesFail() {
+        when(inboxItemMapper.searchActiveByKeyword(
+                "Redis", "Redis", null, null, null, 40
+        )).thenThrow(new IllegalStateException("keyword unavailable"));
+        when(aiServiceClient.searchVectors("Redis", 40)).thenThrow(
+                new AiServiceUnavailableException("semantic unavailable")
+        );
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> inboxService.search("Redis", null, null, null, "hybrid", null)
+        );
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, exception.getStatusCode());
+    }
+
+    @Test
+    void hybridSearchReturnsNormalEmptyWhenBothSuccessfulBranchesHaveNoCandidates() {
+        when(inboxItemMapper.searchActiveByKeyword(
+                "missing", "missing", null, null, null, 40
+        )).thenReturn(List.of());
+        when(aiServiceClient.searchVectors("missing", 40)).thenReturn(
+                new AiSemanticSearchResponse(List.of())
+        );
+
+        assertEquals(
+                List.of(),
+                inboxService.search("missing", null, null, null, "hybrid", null)
+        );
+        verify(inboxItemMapper, never()).selectActiveByIdsAndFilters(
+                any(), any(), any(), any()
+        );
+    }
+
+    @Test
+    void hybridSearchIgnoresArchivedAndDeletedSemanticCandidates() {
+        InboxItem keyword = activeItem(401L, "TEXT", "当前资料");
+        InboxItem archived = activeItem(402L, "TEXT", "旧资料");
+        archived.setStatus("ARCHIVED");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "资料", "资料", null, null, null, 40
+        )).thenReturn(List.of(keyword));
+        when(aiServiceClient.searchVectors("资料", 40)).thenReturn(
+                new AiSemanticSearchResponse(List.of(
+                        new AiSemanticSearchCandidate(402L, 0.95),
+                        new AiSemanticSearchCandidate(999L, 0.9)
+                ))
+        );
+        when(inboxItemMapper.selectActiveByIdsAndFilters(
+                List.of(402L, 999L), null, null, null
+        )).thenReturn(List.of(archived));
+
+        List<InboxItem> result = inboxService.search(
+                "资料", null, null, null, "hybrid", null
+        );
+
+        assertEquals(List.of(keyword), result);
     }
 
     @Test
@@ -661,6 +842,12 @@ class InboxServiceTests {
         inboxItem.setContent(content);
         inboxItem.setSourceUrl(sourceUrl);
         return inboxItem;
+    }
+
+    private InboxItem activeItem(Long id, String type, String title) {
+        InboxItem item = savedItem(id, type, title, null, null);
+        item.setStatus("ACTIVE");
+        return item;
     }
 
     private void prepareInsert(InboxItem savedItem) {

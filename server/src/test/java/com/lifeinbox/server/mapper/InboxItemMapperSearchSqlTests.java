@@ -65,7 +65,7 @@ class InboxItemMapperSearchSqlTests {
         assertEquals(16, occurrences(searchSql, "#{escapedQuery}"));
         assertEquals(16, occurrences(searchSql, "ESCAPE '!'"));
         assertEquals(1, occurrences(searchSql, "#{query}"));
-        assertTrue(searchSql.endsWith("END DESC, i.created_time DESC, i.id DESC"));
+        assertTrue(searchSql.contains("END DESC, i.created_time DESC, i.id DESC"));
     }
 
     @Test
@@ -93,8 +93,17 @@ class InboxItemMapperSearchSqlTests {
                 () -> assertTrue(summary < searchableContent),
                 () -> assertTrue(searchableContent < content),
                 () -> assertTrue(content < category),
-                () -> assertTrue(searchSql.endsWith("END DESC, i.created_time DESC, i.id DESC"))
+                () -> assertTrue(searchSql.contains(
+                        "END DESC, i.created_time DESC, i.id DESC"
+                ))
         );
+    }
+
+    @Test
+    void keywordCandidatesAreDatabaseBoundedOnlyWhenHybridProvidesLimit() {
+        assertTrue(searchSql.contains(
+                "<if test=\"candidateLimit != null\"> LIMIT #{candidateLimit} </if>"
+        ));
     }
 
     @Test
@@ -131,10 +140,15 @@ class InboxItemMapperSearchSqlTests {
                     String.class,
                     String.class,
                     String.class,
+                    Integer.class,
                     Integer.class
             );
             Select select = method.getAnnotation(Select.class);
-            return String.join(" ", select.value()).replaceAll("\\s+", " ").trim();
+            return String.join(" ", select.value())
+                    .replaceAll("\\s+", " ")
+                    .replaceFirst("^<script> ", "")
+                    .replaceFirst(" </script>$", "")
+                    .trim();
         } catch (NoSuchMethodException exception) {
             throw new AssertionError("Search Mapper 方法不存在", exception);
         }

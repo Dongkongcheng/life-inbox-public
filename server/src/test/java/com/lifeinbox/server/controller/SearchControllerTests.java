@@ -79,6 +79,26 @@ class SearchControllerTests {
     }
 
     @Test
+    void searchForwardsHybridModeAndLimit() throws Exception {
+        InboxService inboxService = mock(InboxService.class);
+        when(inboxService.search("重复请求", "TEXT", null, false, "hybrid", 20))
+                .thenReturn(List.of());
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(new SearchController(inboxService))
+                .build();
+
+        mockMvc.perform(get("/api/search")
+                        .param("q", "重复请求")
+                        .param("mode", "hybrid")
+                        .param("limit", "20")
+                        .param("type", "TEXT")
+                        .param("favorite", "false"))
+                .andExpect(status().isOk());
+
+        verify(inboxService).search("重复请求", "TEXT", null, false, "hybrid", 20);
+    }
+
+    @Test
     void blankQueryReturnsControlledBadRequest() throws Exception {
         InboxService inboxService = mock(InboxService.class);
         when(inboxService.search(" ", null, null, null, null, null)).thenThrow(
@@ -108,7 +128,7 @@ class SearchControllerTests {
     @Test
     void invalidSearchModeReturnsControlledBadRequest() throws Exception {
         InboxService inboxService = mock(InboxService.class);
-        when(inboxService.search("Redis", null, null, null, "hybrid", null)).thenThrow(
+        when(inboxService.search("Redis", null, null, null, "unsupported", null)).thenThrow(
                 new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的搜索模式")
         );
         MockMvc mockMvc = MockMvcBuilders
@@ -117,7 +137,7 @@ class SearchControllerTests {
 
         mockMvc.perform(get("/api/search")
                         .param("q", "Redis")
-                        .param("mode", "hybrid"))
+                        .param("mode", "unsupported"))
                 .andExpect(status().isBadRequest());
     }
 }

@@ -41,3 +41,12 @@ test('highlight component renders escaped Vue text nodes and never uses v-html',
   assert.doesNotMatch(component, /v-html/)
   assert.match(component, /\{\{ segment\.text \}\}/)
 })
+
+test('search UI exposes hybrid mode and refreshes from the active mode', async () => {
+  const app = await readFile(new URL('./App.vue', import.meta.url), 'utf8')
+
+  assert.match(app, /<option value="hybrid">混合<\/option>/)
+  assert.match(app, /params\.set\('mode', activeSearchMode\.value\)/)
+  assert.match(app, /activeSearchMode\.value = searchMode\.value/)
+  assert.doesNotMatch(app, /v-html/)
+})

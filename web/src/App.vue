@@ -56,6 +56,26 @@ const aiStatusLabels = {
   FAILED: '分析失败'
 }
 
+const searchModeLabels = {
+  keyword: '关键词',
+  hybrid: '混合',
+  semantic: '语义'
+}
+
+const searchModeLabel = (mode) => searchModeLabels[mode] || searchModeLabels.keyword
+const searchPlaceholder = (mode) => {
+  if (mode === 'semantic') return '用自然语言描述你记得的内容'
+  if (mode === 'hybrid') return '同时使用关键词和语义查找内容'
+  return '搜索标题、内容或 AI 整理信息'
+}
+const searchButtonLabel = (mode) => mode === 'keyword' ? '搜索' : `${searchModeLabel(mode)}搜索`
+const searchFailureMessage = (mode) => mode === 'keyword'
+  ? '搜索失败，请稍后重试。'
+  : `${searchModeLabel(mode)}搜索失败，请稍后重试。`
+const searchEmptyMessage = (mode) => mode === 'keyword'
+  ? '没有找到匹配内容。'
+  : '没有找到相关内容。'
+
 const clearSelectedUpload = () => {
   // createObjectURL 占用浏览器内存，切换类型和离开页面时都需要主动释放。
   if (imagePreviewUrl.value) {
@@ -138,9 +158,7 @@ const refreshCurrentView = async ({ background = false } = {}) => {
     const response = await fetch(endpoint)
     if (!response.ok) {
       let message = searching
-        ? activeSearchMode.value === 'semantic'
-          ? '语义搜索失败，请稍后重试。'
-          : '搜索失败，请稍后重试。'
+        ? searchFailureMessage(activeSearchMode.value)
         : '加载 Inbox 失败，请稍后重试。'
       try {
         const problem = await response.json()
@@ -580,12 +598,10 @@ onBeforeUnmount(() => {
             v-model="searchQuery"
             type="search"
             maxlength="200"
-            :placeholder="searchMode === 'semantic'
-              ? '用自然语言描述你记得的内容'
-              : '搜索标题、内容或 AI 整理信息'"
+            :placeholder="searchPlaceholder(searchMode)"
           />
           <button type="submit" :disabled="loading">
-            {{ searchMode === 'semantic' ? '语义搜索' : '搜索' }}
+            {{ searchButtonLabel(searchMode) }}
           </button>
           <button
             v-if="activeSearchQuery"
@@ -602,6 +618,7 @@ onBeforeUnmount(() => {
             模式
             <select v-model="searchMode">
               <option value="keyword">关键词</option>
+              <option value="hybrid">混合</option>
               <option value="semantic">语义</option>
             </select>
           </label>
@@ -642,7 +659,7 @@ onBeforeUnmount(() => {
         <span>{{ inboxItems.length }} 条</span>
       </div>
       <p v-if="activeSearchQuery" class="search-context">
-        模式：{{ activeSearchMode === 'semantic' ? '语义' : '关键词' }}
+        模式：{{ searchModeLabel(activeSearchMode) }}
         · 查询：{{ activeSearchQuery }}
         <span v-if="activeSearchType"> · 类型：{{ activeSearchType }}</span>
         <span v-if="activeSearchCategory"> · 分类：{{ activeSearchCategory }}</span>
@@ -656,9 +673,7 @@ onBeforeUnmount(() => {
       </p>
       <p v-else-if="inboxItems.length === 0 && !searchErrorMessage" class="empty-state">
         {{ activeSearchQuery
-          ? activeSearchMode === 'semantic'
-            ? '没有找到相关内容。'
-            : '没有找到匹配内容。'
+          ? searchEmptyMessage(activeSearchMode)
           : 'Inbox 还是空的，先保存一条信息吧。' }}
       </p>
       <div v-else-if="inboxItems.length > 0" class="item-list">
