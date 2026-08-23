@@ -72,7 +72,7 @@ OCR
 网页正文提取
 未来 Embedding
 未来 Vector Search
-未来 Reranker
+Reranker
 ```
 
 也不能让基础 Inbox 完全不可使用。
@@ -267,14 +267,13 @@ Entities
 Structured Analyze
 Embedding Generation
 Semantic Retrieval
+Rerank
 ```
 
 未来可以逐渐加入：
 
 ```text
 Vision
-Semantic Retrieval
-Rerank
 Relation Discovery
 Action Extraction
 Deadline Extraction
@@ -725,7 +724,7 @@ Hybrid Search
 Rerank
 ```
 
-已实现前八步：
+已实现前九步：
 
 ```text
 Basic Keyword Search
@@ -743,6 +742,8 @@ Vector Storage / Indexing Lifecycle
 Semantic Search
         ↓
 Hybrid Search
+        ↓
+Rerank
 ```
 
 只是 V0.3 的起点，
@@ -829,7 +830,7 @@ Embedding Model 的 SHA-256 与真实维度；切换模型或维度进入不同 
 
 ---
 
-# 16. 当前 Semantic / Hybrid Search
+# 16. 当前 Semantic / Hybrid / Rerank Search
 
 Task 27 在 Keyword Search 之外增加独立的 Semantic Mode：
 
@@ -871,9 +872,11 @@ Keyword 仍是默认且完全独立的 MySQL 路径。Task 28 由 Java 在 Servi
                  Reciprocal Rank Fusion
                     RRF_K = 60
                            ↓
-                    Hybrid Results
+              Bounded Hybrid Candidates
                            ↓
-                    Future Reranker
+               Optional Batch Reranker
+                           ↓
+                    Final Results
 ```
 
 两条分支分别最多获取 `min(limit × 2, 100)` 个候选。Fusion 只使用候选在各自列表中的一基排名，按
@@ -884,7 +887,13 @@ Keyword 分支已经由 MySQL 应用 ACTIVE 与业务 Filter；Semantic 分支�
 顺序，因此 Fusion 输入都来自当前业务事实。Semantic/Vector 失败时 Hybrid 返回 Keyword-only，Keyword 失败但
 Semantic 成功时返回 Semantic-only；两个分支都失败才返回受控错误。显式 `mode=semantic` 仍不自动回退。
 
-RRF 只负责 Retrieval Fusion，不判断候选内容本身，不能替代后续 Task 29 的 Rerank。
+Task 29 在 Java 显式启用时，让 RRF 先保留 `min(limit × 2, 100)` 条 Item-level Candidate，再把 title、summary 与
+Task 24 Retrieval 正文组成每条最多 2,000 字符的文本，一次批量交给 FastAPI Reranker。Python 只返回已有 ID 与
+瞬时相关性 Score；Java 按 Score 排序、同分保持 RRF 顺序，并在最后裁到产品 `limit`。Rerank 不访问 MySQL、
+Qdrant 或重新执行 Retrieval，也不持久化 Score。
+
+RRF 只负责 Retrieval Fusion，Reranker 只负责有限 Candidate 的最终相关性精排。Rerank 默认关闭；未配置、超时、
+Provider 故障、未知/重复 ID 或非法 Score 都会完整回退原 RRF 顺序，因此 Reranker Down 不等于 Hybrid Search Down。
 
 例如：
 
@@ -1472,12 +1481,13 @@ Embedding Pipeline
 Vector Storage / Indexing Lifecycle
 Semantic Search
 Hybrid Search
+Rerank
 ```
 
 后续目标：
 
 ```text
-Rerank
+V0.3 Final Acceptance
 ```
 
 ---

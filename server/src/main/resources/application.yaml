@@ -27,6 +27,10 @@ life-inbox:
     read-timeout: 5s
     # Analyze 内部还要等待 LLM，Java 上限应略大于 Python 的默认 20 秒超时。
     analysis-read-timeout: 30s
+    # Rerank 位于同步搜索路径，Java 上限略大于 Python 默认的 8 秒 Provider 超时。
+    rerank-read-timeout: 10s
+    # 默认保持 Task 28 的纯 RRF 行为，显式启用后 Hybrid 才调用可选 Reranker。
+    rerank-enabled: ${LIFEINBOX_RERANK_ENABLED:false}
     # 超过该时间的 PROCESSING 可由用户手动接管；应明显大于一次正常 Analyze 的预期耗时。
     processing-stale-after: 5m
     # 自动 Analyze 默认关闭，避免升级后未经用户确认就调用真实 LLM 并产生费用。

@@ -8,6 +8,10 @@ import com.lifeinbox.server.dto.AiEmbeddingRequest;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiFileErrorResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
+import com.lifeinbox.server.dto.AiRerankCandidate;
+import com.lifeinbox.server.dto.AiRerankDocument;
+import com.lifeinbox.server.dto.AiRerankRequest;
+import com.lifeinbox.server.dto.AiRerankResponse;
 import com.lifeinbox.server.dto.AiSemanticSearchCandidate;
 import com.lifeinbox.server.dto.AiSemanticSearchRequest;
 import com.lifeinbox.server.dto.AiSemanticSearchResponse;
@@ -34,6 +38,9 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -49,16 +56,19 @@ public class AiServiceClient {
 
     private final RestClient healthRestClient;
     private final RestClient analysisRestClient;
+    private final RestClient rerankRestClient;
 
     public AiServiceClient(
             @Value("${life-inbox.ai.base-url:http://localhost:8000}") String baseUrl,
             @Value("${life-inbox.ai.connect-timeout:2s}") Duration connectTimeout,
             @Value("${life-inbox.ai.read-timeout:5s}") Duration readTimeout,
             @Value("${life-inbox.ai.analysis-read-timeout:${life-inbox.ai.summary-read-timeout:30s}}")
-            Duration analysisReadTimeout
+            Duration analysisReadTimeout,
+            @Value("${life-inbox.ai.rerank-read-timeout:10s}") Duration rerankReadTimeout
     ) {
         this.healthRestClient = createRestClient(baseUrl, connectTimeout, readTimeout);
         this.analysisRestClient = createRestClient(baseUrl, connectTimeout, analysisReadTimeout);
+        this.rerankRestClient = createRestClient(baseUrl, connectTimeout, rerankReadTimeout);
     }
 
     private RestClient createRestClient(String baseUrl, Duration connectTimeout, Duration readTimeout) {
@@ -195,6 +205,32 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // 不透传 Query、Vector、Provider 或 Qdrant 响应；Keyword Search 不经过此调用。
             throw new AiServiceUnavailableException("AI Semantic Search 服务暂不可用", exception);
+        }
+    }
+
+    /** Rerank 只发送 RRF 已召回的有限候选；任何非法响应都由 Hybrid 层整体回退。 */
+    public AiRerankResponse rerank(
+            String query,
+            List<AiRerankDocument> documents,
+            int topK
+    ) {
+        try {
+            AiRerankResponse response = rerankRestClient.post()
+                    .uri("/rerank")
+                    .body(new AiRerankRequest(query, documents, topK))
+                    .retrieve()
+                    .body(AiRerankResponse.class);
+            if (!isValidRerankResponse(documents, response)) {
+                throw new AiServiceUnavailableException(
+                        "AI 服务返回了无效的 Rerank 结果"
+                );
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // 不透传 Query、Candidate 文本、Provider 响应或凭据；上层保留原 RRF 顺序。
+            throw new AiServiceUnavailableException("AI Rerank 服务暂不可用", exception);
         }
     }
 
@@ -432,6 +468,40 @@ public class AiServiceClient {
             if (candidate == null
                     || candidate.inboxItemId() == null
                     || candidate.inboxItemId() <= 0
+                    || candidate.score() == null
+                    || !Double.isFinite(candidate.score())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isValidRerankResponse(
+            List<AiRerankDocument> documents,
+            AiRerankResponse response
+    ) {
+        if (documents == null || response == null || response.results() == null) {
+            return false;
+        }
+
+        Set<Long> expectedIds = new HashSet<>();
+        for (AiRerankDocument document : documents) {
+            if (document == null
+                    || document.id() == null
+                    || document.id() <= 0
+                    || document.text() == null
+                    || document.text().isBlank()
+                    || !expectedIds.add(document.id())) {
+                return false;
+            }
+        }
+
+        Set<Long> returnedIds = new HashSet<>();
+        for (AiRerankCandidate candidate : response.results()) {
+            if (candidate == null
+                    || candidate.id() == null
+                    || !expectedIds.contains(candidate.id())
+                    || !returnedIds.add(candidate.id())
                     || candidate.score() == null
                     || !Double.isFinite(candidate.score())) {
                 return false;

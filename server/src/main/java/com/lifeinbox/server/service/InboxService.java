@@ -3,6 +3,9 @@ package com.lifeinbox.server.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.dto.AiRerankCandidate;
+import com.lifeinbox.server.dto.AiRerankDocument;
+import com.lifeinbox.server.dto.AiRerankResponse;
 import com.lifeinbox.server.dto.AiSemanticSearchCandidate;
 import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
@@ -14,6 +17,7 @@ import com.lifeinbox.server.mapper.InboxKeywordMapper;
 import com.lifeinbox.server.mapper.InboxTagMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -70,6 +75,8 @@ public class InboxService {
     private final InboxCapturePersistenceService capturePersistenceService;
     private final InboxVectorIndexScheduler vectorIndexScheduler;
     private final AiServiceClient aiServiceClient;
+    private final RerankDocumentBuilder rerankDocumentBuilder;
+    private final boolean rerankEnabled;
 
     public InboxService(
             InboxItemMapper inboxItemMapper,
@@ -81,7 +88,9 @@ public class InboxService {
             InboxAnalysisStatusService analysisStatusService,
             InboxCapturePersistenceService capturePersistenceService,
             InboxVectorIndexScheduler vectorIndexScheduler,
-            AiServiceClient aiServiceClient
+            AiServiceClient aiServiceClient,
+            RerankDocumentBuilder rerankDocumentBuilder,
+            @Value("${life-inbox.ai.rerank-enabled:false}") boolean rerankEnabled
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.inboxTagMapper = inboxTagMapper;
@@ -93,6 +102,8 @@ public class InboxService {
         this.capturePersistenceService = capturePersistenceService;
         this.vectorIndexScheduler = vectorIndexScheduler;
         this.aiServiceClient = aiServiceClient;
+        this.rerankDocumentBuilder = rerankDocumentBuilder;
+        this.rerankEnabled = rerankEnabled;
     }
 
     public List<InboxItem> list() {
@@ -317,18 +328,23 @@ public class InboxService {
             );
         }
 
-        List<InboxItem> hybridItems;
+        List<InboxItem> hybridCandidates;
         if (keywordCandidates == null) {
-            hybridItems = limitItems(semanticCandidates, resultLimit);
+            hybridCandidates = limitItems(semanticCandidates, candidateLimit);
         } else if (semanticCandidates == null) {
-            hybridItems = limitItems(keywordCandidates, resultLimit);
+            hybridCandidates = limitItems(keywordCandidates, candidateLimit);
         } else {
-            hybridItems = HybridSearchFusion.fuse(
+            // RRF 先保留有界候选池，Reranker 才有机会把候选池尾部的高相关条目提升。
+            hybridCandidates = HybridSearchFusion.fuse(
                     keywordCandidates,
                     semanticCandidates,
-                    resultLimit
+                    candidateLimit
             );
         }
+        List<InboxItem> rankedCandidates = rerankEnabled
+                ? rerankCandidates(query, hybridCandidates)
+                : hybridCandidates;
+        List<InboxItem> hybridItems = limitItems(rankedCandidates, resultLimit);
         int mergedCandidateCount = mergedCandidateCount(
                 keywordCandidates,
                 semanticCandidates
@@ -337,15 +353,126 @@ public class InboxService {
         LOGGER.debug(
                 "Hybrid Search 完成，Keyword Candidate={}，Semantic Candidate={}，"
                         + "Merged Candidate={}，Final Result={}，Keyword Degraded={}，"
-                        + "Semantic Degraded={}",
+                        + "Semantic Degraded={}，Rerank Enabled={}",
                 keywordCandidates == null ? 0 : keywordCandidates.size(),
                 semanticCandidates == null ? 0 : semanticCandidates.size(),
                 mergedCandidateCount,
                 hybridItems.size(),
                 keywordCandidates == null,
-                semanticCandidates == null
+                semanticCandidates == null,
+                rerankEnabled
         );
         return enrichItems(hybridItems);
+    }
+
+    private List<InboxItem> rerankCandidates(
+            String query,
+            List<InboxItem> hybridCandidates
+    ) {
+        if (hybridCandidates.isEmpty()) {
+            return hybridCandidates;
+        }
+
+        try {
+            List<AiRerankDocument> documents = rerankDocumentBuilder.build(hybridCandidates);
+            if (documents.isEmpty()) {
+                // 无文本候选仍按 RRF 返回，Rerank 不是产品搜索可用性的前置条件。
+                LOGGER.debug(
+                        "Hybrid Rerank 未执行，rerankApplied=false，fallback=hybrid_rrf，"
+                                + "Reason=NoDocuments"
+                );
+                return hybridCandidates;
+            }
+
+            AiRerankResponse response = aiServiceClient.rerank(
+                    query,
+                    documents,
+                    documents.size()
+            );
+            List<InboxItem> rerankedItems = applyRerankOrder(hybridCandidates, response);
+            LOGGER.info(
+                    "Hybrid Rerank 已应用，rerankApplied=true，Candidate={}，Document={}，Returned={}",
+                    hybridCandidates.size(),
+                    documents.size(),
+                    response.results().size()
+            );
+            return rerankedItems;
+        } catch (RuntimeException exception) {
+            // Rerank 是最终排序增强；任何配置、超时或非法响应都完整保留原 RRF 顺序。
+            LOGGER.warn(
+                    "Hybrid Rerank 不可用，rerankApplied=false，fallback=hybrid_rrf，"
+                            + "Candidate={}，Reason={}",
+                    hybridCandidates.size(),
+                    exception.getClass().getSimpleName()
+            );
+            return hybridCandidates;
+        }
+    }
+
+    private List<InboxItem> applyRerankOrder(
+            List<InboxItem> hybridCandidates,
+            AiRerankResponse response
+    ) {
+        if (response == null || response.results() == null) {
+            throw new IllegalArgumentException("Rerank response 不能为空");
+        }
+
+        Map<Long, RankedOriginalItem> originalItems = new LinkedHashMap<>();
+        for (int index = 0; index < hybridCandidates.size(); index++) {
+            InboxItem item = hybridCandidates.get(index);
+            if (item == null || item.getId() == null || item.getId() <= 0) {
+                throw new IllegalArgumentException("Hybrid Candidate ID 不合法");
+            }
+            if (originalItems.putIfAbsent(
+                    item.getId(),
+                    new RankedOriginalItem(item, index)
+            ) != null) {
+                throw new IllegalArgumentException("Hybrid Candidate ID 重复");
+            }
+        }
+
+        Set<Long> rerankedIds = new HashSet<>();
+        List<ScoredRerankItem> scoredItems = new ArrayList<>();
+        for (AiRerankCandidate candidate : response.results()) {
+            if (candidate == null
+                    || candidate.id() == null
+                    || candidate.score() == null
+                    || !Double.isFinite(candidate.score())
+                    || !rerankedIds.add(candidate.id())) {
+                throw new IllegalArgumentException("Rerank Candidate 不合法");
+            }
+
+            RankedOriginalItem original = originalItems.get(candidate.id());
+            if (original == null) {
+                // Reranker 只能缩小或重排现有集合，绝不能通过未知 ID 扩大召回。
+                throw new IllegalArgumentException("Rerank 返回了未知 Candidate ID");
+            }
+            scoredItems.add(new ScoredRerankItem(
+                    original.item(),
+                    candidate.score(),
+                    original.rank()
+            ));
+        }
+
+        scoredItems.sort(Comparator
+                .comparingDouble(ScoredRerankItem::score).reversed()
+                .thenComparingInt(ScoredRerankItem::originalRank));
+
+        List<InboxItem> result = new ArrayList<>(hybridCandidates.size());
+        scoredItems.stream().map(ScoredRerankItem::item).forEach(result::add);
+        // Provider 少返回的候选不被静默丢弃，继续按原 RRF 顺序追加。
+        for (InboxItem candidate : hybridCandidates) {
+            if (!rerankedIds.contains(candidate.getId())) {
+                result.add(candidate);
+            }
+        }
+        return result;
+    }
+
+    private record RankedOriginalItem(InboxItem item, int rank) {
+    }
+
+    private record ScoredRerankItem(InboxItem item, double score, int originalRank) {
     }
 
     private int mergedCandidateCount(
