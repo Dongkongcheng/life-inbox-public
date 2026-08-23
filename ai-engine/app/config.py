@@ -17,6 +17,10 @@ class VectorStoreConfigurationError(RuntimeError):
     """Qdrant 配置不合法；按请求惰性读取，不阻止既有 AI 能力启动。"""
 
 
+class RerankConfigurationError(RuntimeError):
+    """Rerank 配置缺失或不合法；该增强能力不阻止 FastAPI 启动。"""
+
+
 @dataclass(frozen=True)
 class LlmSettings:
     api_key: str
@@ -85,6 +89,49 @@ class EmbeddingSettings:
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 300:
             raise EmbeddingConfigurationError(
                 "LIFEINBOX_LLM_TIMEOUT_SECONDS 必须在 0 到 300 秒之间"
+            )
+
+        return cls(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+        )
+
+
+@dataclass(frozen=True)
+class RerankSettings:
+    api_key: str
+    model: str
+    base_url: str
+    timeout_seconds: float
+
+    @classmethod
+    def from_environment(cls) -> "RerankSettings":
+        """Rerank 使用独立 Provider 地址，并安全复用当前 Workspace 密钥。"""
+
+        api_key = _required_rerank_environment_value("LIFEINBOX_LLM_API_KEY")
+        model = _required_rerank_environment_value("LIFEINBOX_RERANK_MODEL")
+        base_url = _required_rerank_environment_value(
+            "LIFEINBOX_RERANK_BASE_URL"
+        ).rstrip("/")
+
+        parsed_url = urlparse(base_url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise RerankConfigurationError(
+                "LIFEINBOX_RERANK_BASE_URL 必须是合法的 HTTP(S) 地址"
+            )
+
+        timeout_text = os.getenv("LIFEINBOX_RERANK_TIMEOUT_SECONDS", "8").strip()
+        try:
+            timeout_seconds = float(timeout_text)
+        except ValueError as exception:
+            raise RerankConfigurationError(
+                "LIFEINBOX_RERANK_TIMEOUT_SECONDS 必须是数字"
+            ) from exception
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 60:
+            raise RerankConfigurationError(
+                "LIFEINBOX_RERANK_TIMEOUT_SECONDS 必须在 0 到 60 秒之间"
             )
 
         return cls(
@@ -177,4 +224,12 @@ def _required_embedding_environment_value(name: str) -> str:
     if not value:
         # 错误只包含变量名，绝不回显密钥或其他配置值。
         raise EmbeddingConfigurationError(f"缺少 Embedding 环境变量：{name}")
+    return value
+
+
+def _required_rerank_environment_value(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        # Rerank 失败信息只说明缺少哪个配置项，不回显任何凭据值。
+        raise RerankConfigurationError(f"缺少 Rerank 环境变量：{name}")
     return value

@@ -2,6 +2,9 @@ package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiEntityResponse;
+import com.lifeinbox.server.dto.AiRerankCandidate;
+import com.lifeinbox.server.dto.AiRerankDocument;
+import com.lifeinbox.server.dto.AiRerankResponse;
 import com.lifeinbox.server.dto.AiSemanticSearchCandidate;
 import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.CreateInboxItemRequest;
@@ -33,6 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 
 class InboxServiceTests {
 
@@ -52,6 +56,9 @@ class InboxServiceTests {
             InboxVectorIndexScheduler.class
     );
     private final AiServiceClient aiServiceClient = mock(AiServiceClient.class);
+    private final RerankDocumentBuilder rerankDocumentBuilder = new RerankDocumentBuilder(
+            new InboxSearchableContentService(inboxItemMapper)
+    );
     private final InboxService inboxService = new InboxService(
             inboxItemMapper,
             inboxTagMapper,
@@ -62,7 +69,9 @@ class InboxServiceTests {
             analysisStatusService,
             capturePersistenceService,
             vectorIndexScheduler,
-            aiServiceClient
+            aiServiceClient,
+            rerankDocumentBuilder,
+            false
     );
 
     @Test
@@ -379,6 +388,187 @@ class InboxServiceTests {
         verify(inboxItemMapper).selectActiveByIdsAndFilters(
                 List.of(101L, 104L, 105L), "URL", "技术学习", 1
         );
+        verify(aiServiceClient, never()).rerank(any(), any(), anyInt());
+    }
+
+    @Test
+    void enabledRerankReordersWiderRrfCandidatePoolBeforeFinalLimit() {
+        InboxItem a = activeItem(501L, "TEXT", "Hybrid A");
+        InboxItem b = activeItem(502L, "TEXT", "Hybrid B");
+        InboxItem c = activeItem(503L, "TEXT", "Hybrid C");
+        InboxItem d = activeItem(504L, "TEXT", "真正相关的接口幂等");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "防止接口重复提交", "防止接口重复提交", "TEXT", "技术学习", 1, 4
+        )).thenReturn(List.of(a, b, c, d));
+        when(aiServiceClient.searchVectors("防止接口重复提交", 4)).thenReturn(
+                new AiSemanticSearchResponse(List.of())
+        );
+        when(aiServiceClient.rerank(
+                any(),
+                any(),
+                anyInt()
+        )).thenReturn(new AiRerankResponse(List.of(
+                new AiRerankCandidate(504L, 0.98),
+                new AiRerankCandidate(501L, 0.7),
+                new AiRerankCandidate(502L, 0.6),
+                new AiRerankCandidate(503L, 0.5)
+        )));
+
+        List<InboxItem> result = rerankEnabledService().search(
+                "防止接口重复提交",
+                "TEXT",
+                "技术学习",
+                true,
+                "hybrid",
+                2
+        );
+
+        assertEquals(List.of(d, a), result);
+        ArgumentCaptor<List<AiRerankDocument>> documents = rerankDocumentsCaptor();
+        verify(aiServiceClient).rerank(
+                org.mockito.ArgumentMatchers.eq("防止接口重复提交"),
+                documents.capture(),
+                org.mockito.ArgumentMatchers.eq(4)
+        );
+        assertEquals(
+                List.of(501L, 502L, 503L, 504L),
+                documents.getValue().stream().map(AiRerankDocument::id).toList()
+        );
+    }
+
+    @Test
+    void maximumFinalLimitUsesAtMostOneHundredRerankCandidates() {
+        List<InboxItem> candidates = java.util.stream.LongStream.rangeClosed(1, 100)
+                .mapToObj(id -> activeItem(1_000L + id, "TEXT", "Candidate " + id))
+                .toList();
+        when(inboxItemMapper.searchActiveByKeyword(
+                "query", "query", null, null, null, 100
+        )).thenReturn(candidates);
+        when(aiServiceClient.searchVectors("query", 100)).thenReturn(
+                new AiSemanticSearchResponse(List.of())
+        );
+        when(aiServiceClient.rerank(any(), any(), anyInt())).thenReturn(
+                new AiRerankResponse(List.of())
+        );
+
+        List<InboxItem> result = rerankEnabledService().search(
+                "query", null, null, null, "hybrid", 50
+        );
+
+        assertEquals(50, result.size());
+        ArgumentCaptor<List<AiRerankDocument>> documents = rerankDocumentsCaptor();
+        verify(aiServiceClient).rerank(any(), documents.capture(),
+                org.mockito.ArgumentMatchers.eq(100));
+        assertEquals(100, documents.getValue().size());
+        verify(inboxItemMapper).searchActiveByKeyword(
+                "query", "query", null, null, null, 100
+        );
+        verify(aiServiceClient).searchVectors("query", 100);
+    }
+
+    @Test
+    void rerankKeepsOriginalOrderForTiesAndAppendsMissingCandidates() {
+        InboxItem a = activeItem(601L, "TEXT", "A");
+        InboxItem b = activeItem(602L, "TEXT", "B");
+        InboxItem c = activeItem(603L, "TEXT", "C");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "query", "query", null, null, null, 6
+        )).thenReturn(List.of(a, b, c));
+        when(aiServiceClient.searchVectors("query", 6)).thenReturn(
+                new AiSemanticSearchResponse(List.of())
+        );
+        when(aiServiceClient.rerank(any(), any(), anyInt())).thenReturn(
+                new AiRerankResponse(List.of(
+                        new AiRerankCandidate(603L, 0.9),
+                        new AiRerankCandidate(602L, 0.9)
+                ))
+        );
+
+        List<InboxItem> result = rerankEnabledService().search(
+                "query", null, null, null, "hybrid", 3
+        );
+
+        // 同分恢复原 RRF 次序 B、C；Provider 缺失的 A 随后按原顺序追加。
+        assertEquals(List.of(b, c, a), result);
+    }
+
+    @Test
+    void rerankFailureFallsBackToOriginalRrfOrder() {
+        InboxItem a = activeItem(701L, "TEXT", "A");
+        InboxItem b = activeItem(702L, "TEXT", "B");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "query", "query", null, null, null, 4
+        )).thenReturn(List.of(a, b));
+        when(aiServiceClient.searchVectors("query", 4)).thenReturn(
+                new AiSemanticSearchResponse(List.of())
+        );
+        when(aiServiceClient.rerank(any(), any(), anyInt())).thenThrow(
+                new AiServiceUnavailableException("timeout")
+        );
+
+        List<InboxItem> result = rerankEnabledService().search(
+                "query", null, null, null, "hybrid", 2
+        );
+
+        assertEquals(List.of(a, b), result);
+    }
+
+    @Test
+    void invalidUnknownOrDuplicateRerankIdsCannotChangeCandidateSet() {
+        InboxItem a = activeItem(801L, "TEXT", "A");
+        InboxItem b = activeItem(802L, "TEXT", "B");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "query", "query", null, null, null, 4
+        )).thenReturn(List.of(a, b));
+        when(aiServiceClient.searchVectors("query", 4)).thenReturn(
+                new AiSemanticSearchResponse(List.of())
+        );
+        when(aiServiceClient.rerank(any(), any(), anyInt())).thenReturn(
+                new AiRerankResponse(List.of(
+                        new AiRerankCandidate(999L, 1.0),
+                        new AiRerankCandidate(999L, 0.9)
+                ))
+        );
+
+        List<InboxItem> result = rerankEnabledService().search(
+                "query", null, null, null, "hybrid", 2
+        );
+
+        assertEquals(List.of(a, b), result);
+        verify(inboxItemMapper, never()).selectById(999L);
+    }
+
+    @Test
+    void rerankReceivesOnlyMysqlFilteredActiveCandidates() {
+        InboxItem active = activeItem(901L, "URL", "当前资料");
+        InboxItem archived = activeItem(902L, "URL", "归档资料");
+        archived.setStatus("ARCHIVED");
+        when(inboxItemMapper.searchActiveByKeyword(
+                "资料", "资料", "URL", "技术学习", 1, 4
+        )).thenReturn(List.of(active));
+        when(aiServiceClient.searchVectors("资料", 4)).thenReturn(
+                new AiSemanticSearchResponse(List.of(
+                        new AiSemanticSearchCandidate(902L, 0.99),
+                        new AiSemanticSearchCandidate(999L, 0.9)
+                ))
+        );
+        when(inboxItemMapper.selectActiveByIdsAndFilters(
+                List.of(902L, 999L), "URL", "技术学习", 1
+        )).thenReturn(List.of(archived));
+        when(aiServiceClient.rerank(any(), any(), anyInt())).thenReturn(
+                new AiRerankResponse(List.of(new AiRerankCandidate(901L, 0.8)))
+        );
+
+        List<InboxItem> result = rerankEnabledService().search(
+                "资料", "URL", "技术学习", true, "hybrid", 2
+        );
+
+        assertEquals(List.of(active), result);
+        ArgumentCaptor<List<AiRerankDocument>> documents = rerankDocumentsCaptor();
+        verify(aiServiceClient).rerank(any(), documents.capture(), anyInt());
+        assertEquals(List.of(901L), documents.getValue().stream()
+                .map(AiRerankDocument::id)
+                .toList());
     }
 
     @Test
@@ -848,6 +1038,28 @@ class InboxServiceTests {
         InboxItem item = savedItem(id, type, title, null, null);
         item.setStatus("ACTIVE");
         return item;
+    }
+
+    private InboxService rerankEnabledService() {
+        return new InboxService(
+                inboxItemMapper,
+                inboxTagMapper,
+                inboxKeywordMapper,
+                inboxEntityMapper,
+                urlMetadataService,
+                fileStorageService,
+                analysisStatusService,
+                capturePersistenceService,
+                vectorIndexScheduler,
+                aiServiceClient,
+                rerankDocumentBuilder,
+                true
+        );
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private ArgumentCaptor<List<AiRerankDocument>> rerankDocumentsCaptor() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
     }
 
     private void prepareInsert(InboxItem savedItem) {

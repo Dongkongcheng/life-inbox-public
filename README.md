@@ -162,6 +162,7 @@ V0.3 Task 5 — Embedding Pipeline  ✅ Completed
 V0.3 Task 6 — Vector Storage / Indexing Lifecycle  ✅ Completed
 V0.3 Task 7 — Semantic Search  ✅ Completed
 V0.3 Task 8 — Hybrid Search  ✅ Completed
+V0.3 Task 9 — Rerank  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
@@ -180,7 +181,8 @@ bounded Qdrant candidates, then Java batch-resolves ACTIVE InboxItems and busine
 Qdrant score order. An explicit hybrid mode now retrieves bounded Keyword and Semantic candidate lists,
 deduplicates them by InboxItem ID, and applies Reciprocal Rank Fusion with `RRF_K = 60`. Hybrid degrades
 to the surviving branch when one retrieval path fails, while explicit Semantic keeps its existing error
-behavior. Reranking and V0.3 final acceptance remain future work.
+behavior. Hybrid 可在显式配置启用后，把有限 RRF Candidate 交给 FastAPI 的独立批量 Reranker，按相关性精排后
+返回 MySQL 权威对象；未配置、超时或非法响应都会完整回退原 RRF 顺序。V0.3 Final Acceptance 仍是后续工作。
 
 It is not the final definition of V0.3.
 

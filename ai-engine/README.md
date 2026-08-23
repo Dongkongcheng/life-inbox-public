@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供 Embedding Generation、Qdrant Vector Index 与 Semantic Candidate Retrieval。Python 不连接 MySQL；InboxItem、Searchable Content、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
+AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供 Embedding Generation、Qdrant Vector Index、Semantic Candidate Retrieval 与可选 Rerank。Python 不连接 MySQL；InboxItem、Searchable Content、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
 
 ## 安装依赖
 
@@ -14,8 +14,11 @@ uv sync
 $env:LIFEINBOX_LLM_API_KEY="<your-api-key>"
 $env:LIFEINBOX_LLM_MODEL="<your-model>"
 $env:LIFEINBOX_EMBEDDING_MODEL="<your-embedding-model>" # Embedding/Index/Semantic Search 使用
+$env:LIFEINBOX_RERANK_MODEL="<your-rerank-model>" # 可选 qwen3-rerank 兼容模型
 $env:LIFEINBOX_LLM_BASE_URL="https://your-provider.example/v1"
+$env:LIFEINBOX_RERANK_BASE_URL="https://your-rerank-provider.example/v1"
 $env:LIFEINBOX_LLM_TIMEOUT_SECONDS="20"
+$env:LIFEINBOX_RERANK_TIMEOUT_SECONDS="8"
 $env:LIFEINBOX_VECTOR_STORE_ENABLED="false" # 默认关闭
 $env:LIFEINBOX_QDRANT_URL="http://127.0.0.1:6333"
 $env:LIFEINBOX_QDRANT_COLLECTION="lifeinbox_items" # 物理 Collection 前缀
@@ -26,7 +29,21 @@ $env:NO_PROXY="127.0.0.1,localhost" # 本地代理环境必须绕过 Qdrant
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-LLM Client 调用可配置 Base URL 下的 `/chat/completions`，使用 Bearer API Key。不要把真实 Key 写入 `.env.example` 或提交到 Git。项目没有安装 `python-dotenv`，所以 `.env.example` 只是配置清单，不会被应用自动加载。
+LLM Client 调用 `LIFEINBOX_LLM_BASE_URL` 下的 `/chat/completions`，Embedding 继续调用同一地址下的
+`/embeddings`；Rerank 使用独立 `LIFEINBOX_RERANK_BASE_URL` 下的 `/reranks`。三者默认复用
+`LIFEINBOX_LLM_API_KEY`，不要把真实 Key 写入 `.env.example` 或提交到 Git。项目没有安装
+`python-dotenv`，所以 `.env.example` 只是配置清单，不会被应用自动加载。
+
+阿里云百炼华北 2（北京）的典型配置为：
+
+```powershell
+$env:LIFEINBOX_LLM_BASE_URL="https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+$env:LIFEINBOX_RERANK_BASE_URL="https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-api/v1"
+$env:LIFEINBOX_RERANK_MODEL="qwen3-rerank"
+```
+
+`LIFEINBOX_RERANK_BASE_URL` 只填写到 `.../compatible-api/v1`，不要包含 `/reranks`；代码会统一拼接
+Provider Path，并同时兼容 Base URL 末尾有无 `/`。
 
 启动后访问 `http://localhost:8000/health`，应返回：
 
@@ -37,7 +54,7 @@ LLM Client 调用可配置 Base URL 下的 `/chat/completions`，使用 Bearer A
 }
 ```
 
-即使缺少 LLM 或 Embedding 环境变量，健康检查仍然可用。Analyze 与 Embedding 分别在实际调用时惰性读取自己的模型配置；缺少 Embedding Model 不影响 Analyze、网页/文档提取或 OCR。
+即使缺少 LLM、Embedding 或 Rerank 环境变量，健康检查仍然可用。三类模型都在实际调用时惰性读取自己的配置；缺少 Rerank Model 不影响 Analyze、网页/文档提取、OCR、Embedding、Vector Index 或 Semantic Search。
 
 ## 分析 TEXT
 
@@ -287,8 +304,55 @@ Invoke-RestMethod -Method Post `
 - 内部 `limit` 默认 20、最大 100，不设置固定 Score Threshold，不返回 Payload 或完整 Vector；
 - Python 只返回 ID/Score Candidate，Java 再用 MySQL 解析 ACTIVE InboxItem 和业务过滤；
 - 本地若设置了 HTTP(S) 代理，应保留 `NO_PROXY=127.0.0.1,localhost`，否则 Python Client 可能无法访问已启动的 Qdrant；
-- 没有 Startup Backfill、Batch Reindex、Chunk 或 Rerank；Hybrid Fusion 由 Java 协调现有 Keyword 与 Semantic
-  分支，Python 不增加反向调用 Java 的 Hybrid API。
+- 没有 Startup Backfill、Batch Reindex 或 Chunk；Hybrid Fusion 与 Rerank 降级由 Java 协调，Python 不增加
+  反向调用 Java 的 Product Search API。
+
+## Rerank 候选
+
+`POST /rerank` 是 Java → Python 的内部批量精排能力。它只接收 Task 28 已经召回、过滤并按 RRF 排序的有限候选：
+
+```powershell
+$body = @{
+  query = "怎样防止接口重复提交"
+  documents = @(
+    @{ id = 123; text = "标题：接口幂等`n摘要：同一请求只执行一次" }
+    @{ id = 456; text = "标题：Redis 缓存雪崩`n正文：缓存过期策略" }
+  )
+  topK = 2
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/rerank" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+成功响应只包含已有 Candidate ID 与瞬时相关性 Score：
+
+```json
+{
+  "results": [
+    {"id": 123, "score": 0.93},
+    {"id": 456, "score": 0.71}
+  ]
+}
+```
+
+配置和边界：
+
+- `LIFEINBOX_RERANK_MODEL` 独立于 Chat 与 Embedding Model；Rerank Base URL 使用
+  `LIFEINBOX_RERANK_BASE_URL`，API Key 继续复用 `LIFEINBOX_LLM_API_KEY`；
+- `LIFEINBOX_RERANK_TIMEOUT_SECONDS` 默认 8 秒、范围大于 0 且不超过 60 秒；
+- 当前 Provider 协议针对百炼 `qwen3-rerank`：`POST {rerank_base_url}/reranks`，一次发送
+  `model/query/documents/top_n`；百炼返回的 `results` 位于顶层；
+- Query 最多 200 字符；一次最多 100 个 Document，每个文本最多 2,000 字符，ID 必须唯一且为正数；
+- 空 Documents 直接返回空结果，不加载 Provider 配置；不逐条请求、不重新生成 Embedding、不访问 Qdrant；
+- Provider 的 `index + relevance_score` 会映射回输入 ID；越界/重复 index、NaN/Infinity 或畸形响应受控失败；
+- 未配置独立 Rerank Base URL 或 Model 时按调用返回 503，不影响 FastAPI 启动；Provider 状态错误返回 503，
+  超时返回 504，非法响应返回 502；所有错误都不包含 Key、Query、
+  Candidate 文本或 Provider 原始正文；
+- Java 使用 `LIFEINBOX_RERANK_ENABLED=false` 作为 Hybrid 产品开关。Rerank 失败时 Java 使用原 RRF 顺序，Python
+  不负责 MySQL 业务过滤、最终 InboxItem 解析或失败降级。
 
 ## 运行测试
 

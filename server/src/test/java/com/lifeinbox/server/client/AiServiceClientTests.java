@@ -5,6 +5,8 @@ import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
+import com.lifeinbox.server.dto.AiRerankDocument;
+import com.lifeinbox.server.dto.AiRerankResponse;
 import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
 import com.lifeinbox.server.dto.AiVectorIndexResponse;
@@ -50,6 +52,7 @@ class AiServiceClientTests {
                     "http://127.0.0.1:" + server.getAddress().getPort(),
                     Duration.ofSeconds(1),
                     Duration.ofSeconds(1),
+                    Duration.ofSeconds(1),
                     Duration.ofSeconds(1)
             );
 
@@ -71,6 +74,7 @@ class AiServiceClientTests {
 
         AiServiceClient client = new AiServiceClient(
                 "http://127.0.0.1:" + unusedPort,
+                Duration.ofMillis(200),
                 Duration.ofMillis(200),
                 Duration.ofMillis(200),
                 Duration.ofMillis(200)
@@ -107,6 +111,7 @@ class AiServiceClientTests {
         try {
             AiServiceClient client = new AiServiceClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
+                    Duration.ofSeconds(1),
                     Duration.ofSeconds(1),
                     Duration.ofSeconds(1),
                     Duration.ofSeconds(1)
@@ -146,6 +151,7 @@ class AiServiceClientTests {
         try {
             AiServiceClient client = new AiServiceClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
+                    Duration.ofSeconds(1),
                     Duration.ofSeconds(1),
                     Duration.ofSeconds(1),
                     Duration.ofSeconds(1)
@@ -884,9 +890,104 @@ class AiServiceClientTests {
         }
     }
 
+    @Test
+    void rerankPostsBoundedDocumentsAndAcceptsPartialKnownResults() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/rerank", exchange -> {
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = """
+                    {"results":[{"id":456,"score":0.93}]}
+                    """.strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiRerankResponse response = clientFor(server).rerank(
+                    "防止接口重复请求",
+                    List.of(
+                            new AiRerankDocument(123L, "标题：缓存雪崩"),
+                            new AiRerankDocument(456L, "标题：接口幂等")
+                    ),
+                    2
+            );
+
+            assertEquals(List.of(456L), response.results().stream()
+                    .map(candidate -> candidate.id())
+                    .toList());
+            assertEquals(
+                    "{\"query\":\"防止接口重复请求\",\"documents\":["
+                            + "{\"id\":123,\"text\":\"标题：缓存雪崩\"},"
+                            + "{\"id\":456,\"text\":\"标题：接口幂等\"}],\"topK\":2}",
+                    requestBody.get()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void rerankRejectsUnknownDuplicateOrMalformedResultsWithoutLeakingBody()
+            throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/rerank", exchange -> {
+            int index = requestIndex.getAndIncrement();
+            exchange.getRequestBody().readAllBytes();
+            String responseBody = switch (index) {
+                case 0 -> "{\"results\":[{\"id\":999,\"score\":0.9}]}";
+                case 1 -> "{\"results\":[{\"id\":123,\"score\":0.9},"
+                        + "{\"id\":123,\"score\":0.8}]}";
+                default -> "{\"detail\":\"secret provider response\"}";
+            };
+            int status = index < 2 ? 200 : 503;
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            List<AiRerankDocument> documents = List.of(
+                    new AiRerankDocument(123L, "正文")
+            );
+
+            AiServiceUnavailableException unknown = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.rerank("query", documents, 1)
+            );
+            AiServiceUnavailableException duplicate = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.rerank("query", documents, 1)
+            );
+            AiServiceUnavailableException unavailable = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.rerank("query", documents, 1)
+            );
+
+            assertEquals("AI 服务返回了无效的 Rerank 结果", unknown.getMessage());
+            assertEquals("AI 服务返回了无效的 Rerank 结果", duplicate.getMessage());
+            assertEquals("AI Rerank 服务暂不可用", unavailable.getMessage());
+            assertEquals(false, unavailable.getMessage().contains("secret provider response"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private AiServiceClient clientFor(HttpServer server) {
         return new AiServiceClient(
                 "http://127.0.0.1:" + server.getAddress().getPort(),
+                Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1)

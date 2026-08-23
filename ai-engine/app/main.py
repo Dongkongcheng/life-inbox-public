@@ -7,10 +7,12 @@ from starlette.responses import JSONResponse
 from app.config import (
     EmbeddingConfigurationError,
     LlmConfigurationError,
+    RerankConfigurationError,
     VectorStoreConfigurationError,
 )
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
 from app.schemas.embedding import EmbeddingRequest, EmbeddingResult
+from app.schemas.rerank import RerankRequest, RerankResponse
 from app.schemas.semantic_search import SemanticSearchRequest, SemanticSearchResponse
 from app.schemas.summary import SummaryRequest, SummaryResponse
 from app.schemas.url_analyze import UrlAnalyzeRequest
@@ -40,6 +42,13 @@ from app.services.llm_client import (
     LlmServiceError,
     LlmTimeoutError,
 )
+from app.services.rerank_client import (
+    RerankClient,
+    RerankInvalidResponseError,
+    RerankServiceError,
+    RerankTimeoutError,
+)
+from app.services.rerank_service import RerankService
 from app.services.summary_service import SummaryService
 from app.services.semantic_search_service import SemanticSearchService
 from app.services.url_analyze_service import UrlAnalyzeService
@@ -79,6 +88,8 @@ embedding_service = EmbeddingService(embedding_client)
 vector_store_service = VectorStoreService()
 vector_index_service = VectorIndexService(embedding_service, vector_store_service)
 semantic_search_service = SemanticSearchService(embedding_service, vector_store_service)
+rerank_client = RerankClient()
+rerank_service = RerankService(rerank_client)
 
 
 def get_analyze_service() -> AnalyzeService:
@@ -127,6 +138,12 @@ def get_semantic_search_service() -> SemanticSearchService:
     """Query Embedding 与文档索引复用同一模型配置和 Vector Store。"""
 
     return semantic_search_service
+
+
+def get_rerank_service() -> RerankService:
+    """Rerank Provider 配置按请求读取，未配置时不阻止其他 AI 能力启动。"""
+
+    return rerank_service
 
 
 @app.exception_handler(LlmConfigurationError)
@@ -181,6 +198,50 @@ def handle_embedding_service_error(
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "Embedding 服务暂不可用"},
+    )
+
+
+@app.exception_handler(RerankConfigurationError)
+def handle_rerank_configuration_error(
+    request: Request,
+    exception: RerankConfigurationError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Rerank 配置不完整"},
+    )
+
+
+@app.exception_handler(RerankTimeoutError)
+def handle_rerank_timeout(
+    request: Request,
+    exception: RerankTimeoutError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        content={"detail": "Rerank 请求超时"},
+    )
+
+
+@app.exception_handler(RerankInvalidResponseError)
+def handle_invalid_rerank_response(
+    request: Request,
+    exception: RerankInvalidResponseError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": "Rerank 返回结果无效"},
+    )
+
+
+@app.exception_handler(RerankServiceError)
+def handle_rerank_service_error(
+    request: Request,
+    exception: RerankServiceError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Rerank 服务暂不可用"},
     )
 
 
@@ -388,6 +449,16 @@ def search_vector(
     """内部只返回 Qdrant 候选；ACTIVE 与业务过滤必须由 Java/MySQL 最终确认。"""
 
     return service.search(request)
+
+
+@app.post("/rerank", response_model=RerankResponse)
+def rerank(
+    request: RerankRequest,
+    service: RerankService = Depends(get_rerank_service),
+) -> RerankResponse:
+    """内部只重排已有候选；不访问业务库、不扩大召回集合。"""
+
+    return service.rerank(request)
 
 
 @app.post("/analyze/url", response_model=AnalyzeResult)

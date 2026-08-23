@@ -78,7 +78,7 @@ Query → FastAPI Query Embedding → Qdrant Cosine Top K
 
 ```text
 Keyword Rank ──┐
-               ├─ RRF by InboxItem.id ─ MySQL-authoritative InboxItem[]
+               ├─ RRF by InboxItem.id ─ Hybrid Candidates ─ Optional Rerank ─ InboxItem[]
 Semantic Rank ─┘
 ```
 
@@ -92,10 +92,17 @@ Semantic Rank ─┘
 - RRF 同分时先比较最佳分支排名，再优先保持 Keyword 排名，然后比较 Semantic 排名和 ID，保证结果确定；
 - `ACTIVE/type/category/favorite` 复用两个现有分支的 MySQL 条件，不建立第三套 Hybrid Filter；stale Qdrant Point、
   ARCHIVED 和已删除条目仍会被忽略；
+- Java 的 `LIFEINBOX_RERANK_ENABLED` 默认 `false`。关闭时直接裁剪并返回原 RRF 顺序；开启时 RRF 先保留
+  `min(limit × 2, 100)` 条候选，再一次批量调用内部 `/rerank`，最后裁到产品 `limit`；
+- Rerank 文本只组合 title、summary 与 Task 24 检索正文，每条最多 2,000 个 Java 字符；不发送 favorite、status、
+  createdTime、sourceUrl 或 fileUrl，也不重新查询 MySQL、Qdrant 或扩大候选；
+- Rerank Score 只决定本次最终顺序。同分保持原 RRF 次序；Provider 少返回的条目按原 RRF 顺序追加；未知/重复 ID、
+  非有限 Score、未配置、超时或服务故障都会完整回退原 RRF 顺序；
 - Semantic/Embedding/Qdrant 不可用时降级为 Keyword-only；Keyword 分支失败但 Semantic 成功时降级为
   Semantic-only；两边都失败返回受控 503，不会用 HTTP 200 空数组伪装系统故障；
 - 两边都正常但都没有候选时返回正常空数组；显式 `mode=semantic` 继续保持原来的受控失败，不自动降级；
-- 最终仍返回原有 `InboxItem[]`，最多 `limit` 条。RRF 不等于 Rerank，本任务没有调用 Chat LLM 或 Reranker。
+- 最终仍返回原有 `InboxItem[]`，最多 `limit` 条；产品响应不增加 Score 或匹配原因。RRF 负责召回融合，Reranker
+  只负责有限候选的最终相关性排序，不使用 Chat LLM。
 
 ### JSON Capture
 
@@ -151,6 +158,7 @@ fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，�
 | POST | `/vector/index` | JSON `{inboxItemId, text}` | 生成 Embedding 并按稳定 Point ID Upsert 到 Qdrant |
 | DELETE | `/vector/index/{inboxItemId}` | 路径 ID | 幂等删除该 Collection 前缀下的受管 Point |
 | POST | `/vector/search` | JSON `{query, limit?}` | Query Embedding + Qdrant Top K，返回 `{inboxItemId, score}` 候选 |
+| POST | `/rerank` | JSON `{query, documents, topK}` | 一次批量重排已有 Candidate，返回 `{id, score}` 排名 |
 | POST | `/prepare/url` | JSON `{title?, url}` | `{title?, text}`；只复用安全网页提取，不调用 LLM |
 | POST | `/prepare/file` | multipart `file`, `title?` | `{title?, text}`；只复用文档提取，不调用 LLM |
 | POST | `/prepare/image` | multipart `file`, `title?` | `{title?, text}`；只复用 OCR，不调用 LLM |
@@ -256,6 +264,40 @@ Delete。Point 生命周期故障不会修改业务状态或破坏默认 Keyword
 
 Vector Store 关闭返回 503，Collection 不存在返回 404，模型/维度/距离不兼容返回 409，Qdrant 超时返回 504，
 其他安全封装的服务故障返回 502/503。Java 不向产品调用方透传 Python、Provider 或 Qdrant 的内部响应。
+
+### Rerank 内部协议
+
+`POST /rerank` 只接收 Java 已完成业务过滤与 RRF 融合的有限候选：
+
+```json
+{
+  "query": "怎样防止接口重复提交",
+  "documents": [
+    {"id": 123, "text": "标题：接口幂等\n摘要：同一请求只执行一次"},
+    {"id": 456, "text": "标题：Redis 分布式锁\n正文：锁获取与释放"}
+  ],
+  "topK": 2
+}
+```
+
+成功响应：
+
+```json
+{
+  "results": [
+    {"id": 123, "score": 0.93},
+    {"id": 456, "score": 0.71}
+  ]
+}
+```
+
+- Query trim 后不能为空且最多 200 字符；最多 100 个 Document，每个 ID 必须唯一且为正数，文本最多 2,000 字符；
+- Python 使用 `LIFEINBOX_RERANK_MODEL`、`LIFEINBOX_RERANK_BASE_URL` 和
+  `LIFEINBOX_RERANK_TIMEOUT_SECONDS`，API Key 复用 `LIFEINBOX_LLM_API_KEY`；当前 Provider 实现调用百炼
+  `qwen3-rerank` 兼容的批量 `/reranks`，不会逐条发送 N 次请求，也不会改变 Chat/Embedding Base URL；
+- 空 Documents 返回空结果且不读取 Provider 配置；少返回的结果允许由 Java 按原 RRF 顺序补齐；
+- 越界/重复 Provider index、NaN/Infinity 或畸形响应返回 502；未配置和 Provider 状态错误返回 503；超时返回 504；
+- Java 对 ID、重复项与 Score 再做一次校验。任何 Rerank 失败只影响精排，Hybrid 继续以原 RRF 顺序成功返回。
 
 ## 主要限制
 
