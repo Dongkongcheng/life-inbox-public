@@ -39,10 +39,10 @@ All major product decisions should remain aligned with this flow.
 
 # Current Development Stage
 
-Current stage:
+Latest completed stage:
 
 ```text
-V0.3 — Smart Search / Retrieve
+V0.3 — Smart Search / Retrieve  ✅ Completed
 ```
 
 Current roadmap:
@@ -50,7 +50,7 @@ Current roadmap:
 ```text
 V0.1 — Universal Inbox        ✅ Completed
 V0.2 — AI Organizer           ✅ Completed
-V0.3 — Smart Search           🚧 Current
+V0.3 — Smart Search           ✅ Completed
 V0.4 — Action Extractor       📋 Planned
 V0.5 — Relations              📋 Planned
 V1.0 — Personal AI            📋 Planned
@@ -163,6 +163,7 @@ V0.3 Task 6 — Vector Storage / Indexing Lifecycle  ✅ Completed
 V0.3 Task 7 — Semantic Search  ✅ Completed
 V0.3 Task 8 — Hybrid Search  ✅ Completed
 V0.3 Task 9 — Rerank  ✅ Completed
+V0.3 Task 10 — Final Acceptance  ✅ Completed
 ```
 
 The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
@@ -182,11 +183,10 @@ Qdrant score order. An explicit hybrid mode now retrieves bounded Keyword and Se
 deduplicates them by InboxItem ID, and applies Reciprocal Rank Fusion with `RRF_K = 60`. Hybrid degrades
 to the surviving branch when one retrieval path fails, while explicit Semantic keeps its existing error
 behavior. Hybrid 可在显式配置启用后，把有限 RRF Candidate 交给 FastAPI 的独立批量 Reranker，按相关性精排后
-返回 MySQL 权威对象；未配置、超时或非法响应都会完整回退原 RRF 顺序。V0.3 Final Acceptance 仍是后续工作。
+返回 MySQL 权威对象；未配置、超时或非法响应都会完整回退原 RRF 顺序。V0.3 的自动化测试、真实 Provider、
+失败降级、Capture 回归与 Search UI 最终验收均已完成。
 
-It is not the final definition of V0.3.
-
-V0.3 should gradually move toward meaningful semantic retrieval so that queries do not depend entirely on exact words.
+V0.3 完成的是 Retrieve：不包含 RAG、Agent、Action Extractor、Todo、Deadline 或 Relations。
 
 Example:
 

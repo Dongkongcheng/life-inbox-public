@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { segmentHighlightText } from './searchHighlight.js'
+import { createLatestRequestGuard } from './searchRequestGuard.js'
 
 test('highlights Chinese text while preserving surrounding content', () => {
   assert.deepEqual(segmentHighlightText('学习 Redis 分布式锁', '分布式'), [
@@ -49,4 +50,23 @@ test('search UI exposes hybrid mode and refreshes from the active mode', async (
   assert.match(app, /params\.set\('mode', activeSearchMode\.value\)/)
   assert.match(app, /activeSearchMode\.value = searchMode\.value/)
   assert.doesNotMatch(app, /v-html/)
+})
+
+test('only the latest search request may apply results', async () => {
+  const guard = createLatestRequestGuard()
+  const appliedResults = []
+  const firstRequest = guard.begin()
+
+  const slowOldResponse = new Promise((resolve) => {
+    setTimeout(() => {
+      if (guard.isLatest(firstRequest)) appliedResults.push('old')
+      resolve()
+    }, 10)
+  })
+
+  const latestRequest = guard.begin()
+  if (guard.isLatest(latestRequest)) appliedResults.push('latest')
+  await slowOldResponse
+
+  assert.deepEqual(appliedResults, ['latest'])
 })

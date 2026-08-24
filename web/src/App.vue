@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import HighlightedText from './components/HighlightedText.vue'
+import { createLatestRequestGuard } from './searchRequestGuard.js'
 
 // Capture 表单状态由四种类型共用，切换类型时只展示该类型需要的字段。
 const title = ref('')
@@ -37,6 +38,7 @@ const CAPTURE_STATUS_DISCOVERY_REFRESHES = 3
 let inboxPollTimer = null
 let captureStatusDiscoveryRemaining = 0
 let pageUnmounted = false
+const inboxRequestGuard = createLatestRequestGuard()
 
 // Entity Type 由 Analyze 契约限制为有限集合，前端只负责转换成便于阅读的中文标签。
 const entityTypeLabels = {
@@ -138,6 +140,7 @@ const scheduleInboxPollIfNeeded = () => {
 const refreshCurrentView = async ({ background = false } = {}) => {
   // 写操作和 AI 轮询都刷新当前视图，避免搜索结果被普通 Inbox 列表意外覆盖。
   clearInboxPoll()
+  const requestId = inboxRequestGuard.begin()
   const searching = activeSearchQuery.value !== ''
   if (!background) {
     loading.value = true
@@ -168,9 +171,13 @@ const refreshCurrentView = async ({ background = false } = {}) => {
       }
       throw new Error(message)
     }
-    inboxItems.value = await response.json()
+    const nextItems = await response.json()
+    // 搜索、清除和轮询可能并发返回；旧请求不得覆盖用户最后选择的视图。
+    if (!inboxRequestGuard.isLatest(requestId) || pageUnmounted) return
+    inboxItems.value = nextItems
     scheduleInboxPollIfNeeded()
   } catch (error) {
+    if (!inboxRequestGuard.isLatest(requestId) || pageUnmounted) return
     console.error(error)
     if (searching) {
       if (!background) inboxItems.value = []
@@ -179,7 +186,8 @@ const refreshCurrentView = async ({ background = false } = {}) => {
       errorMessage.value = error.message || '加载 Inbox 失败，请确认后端服务已启动。'
     }
   } finally {
-    if (!background) loading.value = false
+    // 最新请求无论是否为后台刷新，都负责结束可能由前一个前台请求开启的 Loading。
+    if (inboxRequestGuard.isLatest(requestId)) loading.value = false
   }
 }
 
@@ -458,6 +466,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   pageUnmounted = true
+  inboxRequestGuard.invalidate()
   clearSelectedUpload()
   clearInboxPoll()
 })

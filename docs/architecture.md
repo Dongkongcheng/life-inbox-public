@@ -1464,13 +1464,13 @@ Persistent MQ
 
 ## Search
 
-当前正在进入：
+当前已完成版本：
 
 ```text
 V0.3 Smart Search
 ```
 
-当前已完成：
+已验收能力：
 
 ```text
 Basic Keyword Search
@@ -1482,12 +1482,13 @@ Vector Storage / Indexing Lifecycle
 Semantic Search
 Hybrid Search
 Rerank
+Final Acceptance
 ```
 
-后续目标：
+V0.3 的边界保持为：
 
 ```text
-V0.3 Final Acceptance
+Retrieve，不包含 RAG、Agent 或 V0.4 Action Extractor
 ```
 
 ---
