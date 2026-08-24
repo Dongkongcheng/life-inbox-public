@@ -39,7 +39,8 @@ V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、�
 ## V0.4 — Action Extractor（In Progress）
 
 - ✅ Task 1 / Overall Task 31 — FastAPI Action Extraction Foundation（准备文本 → 有界、已验证的 Action 建议；不持久化）
-- Action Candidate 持久化、用户确认/忽略与 Todo 业务状态尚未实现
+- ✅ Task 2 / Overall Task 32 — Action Candidate Persistence & Java Integration（手动提取、Java 校验、MySQL PENDING Candidate 原子替换与查询）
+- 用户确认/忽略与 Todo 业务状态尚未实现
 - Reminder / Action Item 后续能力仍为 Planned
 
 ## V0.5 — Relations（Planned）

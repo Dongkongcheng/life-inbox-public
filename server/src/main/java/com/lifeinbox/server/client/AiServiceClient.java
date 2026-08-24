@@ -2,6 +2,8 @@ package com.lifeinbox.server.client;
 
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiImageErrorResponse;
+import com.lifeinbox.server.dto.AiActionExtractionRequest;
+import com.lifeinbox.server.dto.AiActionExtractionResponse;
 import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEmbeddingRequest;
@@ -123,6 +125,26 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // Python/LLM 失败只终止本次 Analyze，不会进入 Java 的持久化事务。
             throw new AiServiceUnavailableException("AI 分析服务暂不可用", exception);
+        }
+    }
+
+    /** 调用 Task 31 Action Extraction；业务校验与 Candidate 持久化仍由 Java 负责。 */
+    public AiActionExtractionResponse extractActions(String text) {
+        try {
+            AiActionExtractionResponse response = analysisRestClient.post()
+                    .uri("/action/extract")
+                    .body(new AiActionExtractionRequest(text))
+                    .retrieve()
+                    .body(AiActionExtractionResponse.class);
+            if (response == null) {
+                throw new AiServiceUnavailableException("AI 服务没有返回 Action 提取结果");
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // 这里只终止本次手动提取；旧 Candidate 和 InboxItem 都不会被修改。
+            throw new AiServiceUnavailableException("AI Action 提取服务暂不可用", exception);
         }
     }
 
