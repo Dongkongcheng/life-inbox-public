@@ -4,7 +4,12 @@ from typing import Any
 import httpx
 
 from app.config import LlmSettings
-from app.prompts import ANALYZE_SYSTEM_PROMPT, build_analyze_user_prompt
+from app.prompts import (
+    ACTION_EXTRACTION_SYSTEM_PROMPT,
+    ANALYZE_SYSTEM_PROMPT,
+    build_action_extraction_user_prompt,
+    build_analyze_user_prompt,
+)
 
 
 class LlmServiceError(RuntimeError):
@@ -16,7 +21,7 @@ class LlmTimeoutError(LlmServiceError):
 
 
 class LlmInvalidResponseError(LlmServiceError):
-    """LLM 返回的外层响应或 Analyze JSON 不合法。"""
+    """LLM 返回的外层响应或结构化 JSON 不合法。"""
 
 
 class LlmClient:
@@ -31,14 +36,28 @@ class LlmClient:
         self._transport = transport
 
     def generate_analysis(self, title: str | None, text: str) -> str:
+        return self._generate_json(
+            ANALYZE_SYSTEM_PROMPT,
+            build_analyze_user_prompt(title, text),
+        )
+
+    def generate_action_extraction(self, text: str) -> str:
+        """Action 与 Analyze 复用同一 Provider、配置和安全错误边界。"""
+
+        return self._generate_json(
+            ACTION_EXTRACTION_SYSTEM_PROMPT,
+            build_action_extraction_user_prompt(text),
+        )
+
+    def _generate_json(self, system_prompt: str, user_prompt: str) -> str:
         settings = self._settings_loader()
         request_body: dict[str, Any] = {
             "model": settings.model,
-            # Analyze 只做结构化抽取；关闭千问默认思考可显著减少等待和 Token 消耗。
+            # 当前两类能力都只做结构化抽取；关闭思考可减少等待和 Token 消耗。
             "enable_thinking": False,
             "messages": [
-                {"role": "system", "content": ANALYZE_SYSTEM_PROMPT},
-                {"role": "user", "content": build_analyze_user_prompt(title, text)},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
             ],
             # 千问等 OpenAI-compatible 服务用 JSON Mode 保证输出可直接解析。
             "response_format": {"type": "json_object"},
@@ -70,5 +89,5 @@ class LlmClient:
         except (ValueError, KeyError, IndexError, TypeError) as exception:
             raise LlmInvalidResponseError("LLM 返回结构不合法") from exception
         if not isinstance(content, str) or not content.strip():
-            raise LlmInvalidResponseError("LLM 返回了空分析结果")
+            raise LlmInvalidResponseError("LLM 返回了空结构化结果")
         return content.strip()

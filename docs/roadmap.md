@@ -36,11 +36,11 @@ Roadmap 只描述方向；未标记完成的内容不是当前产品能力。
 
 V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、安全高亮、统一可搜正文、Embedding、条目级 Vector Index 生命周期、独立 Semantic Search、RRF Hybrid Search、可选 Rerank 与最终验收。RAG、Agent 和 Action Extractor 不属于本版本完成范围。
 
-## V0.4 — Action Extractor（Planned）
+## V0.4 — Action Extractor（In Progress）
 
-- Todo
-- Deadline
-- Reminder / Action Item
+- ✅ Task 1 / Overall Task 31 — FastAPI Action Extraction Foundation（准备文本 → 有界、已验证的 Action 建议；不持久化）
+- Action Candidate 持久化、用户确认/忽略与 Todo 业务状态尚未实现
+- Reminder / Action Item 后续能力仍为 Planned
 
 ## V0.5 — Relations（Planned）
 
