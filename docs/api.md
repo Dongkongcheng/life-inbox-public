@@ -1,4 +1,4 @@
-# LifeInbox V0.3 API
+# LifeInbox API
 
 默认开发地址：Java `http://localhost:8080`，Python `http://localhost:8000`。浏览器只应调用 Java 产品 API；Python 路由是 Java 与 AI Engine 之间的内部协议。
 
@@ -154,6 +154,7 @@ fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，�
 | --- | --- | --- | --- |
 | GET | `/health` | 无 | `{status, service}` |
 | POST | `/analyze` | JSON `{title?, text}` | AnalyzeResult |
+| POST | `/action/extract` | JSON `{text}` | `{hasAction, actions[]}`；只返回 Action 建议 |
 | POST | `/embedding` | JSON `{text}` | `{model, dimension, embedding}`；只生成并校验瞬时向量 |
 | POST | `/vector/index` | JSON `{inboxItemId, text}` | 生成 Embedding 并按稳定 Point ID Upsert 到 Qdrant |
 | DELETE | `/vector/index/{inboxItemId}` | 路径 ID | 幂等删除该 Collection 前缀下的受管 Point |
@@ -185,6 +186,40 @@ URL、FILE、IMAGE 提取失败使用有限的 `code/detail` 协议。Java 只�
 
 Java 的当前 Analyze 流程对 URL/FILE/IMAGE 先调用对应 `/prepare/*`，以 Attempt Guard 保存可重建正文，再把正文交给 `/analyze`。
 因此 LLM 失败时已成功提取的 Searchable Content 仍可保留；`/prepare/*` 是内部协议，不是浏览器产品 API。
+
+### Action Extraction 内部协议
+
+`POST /action/extract` 是 V0.4 Task 31 的独立 AI 能力。它接收准备好的纯文本，不接收 InboxItem、favorite、archive、权限或其他业务字段：
+
+```json
+{"text": "2026年8月25日前提交软件工程课程设计报告。"}
+```
+
+成功响应：
+
+```json
+{
+  "hasAction": true,
+  "actions": [
+    {
+      "actionType": "DEADLINE",
+      "title": "提交软件工程课程设计报告",
+      "deadlineText": "2026年8月25日前",
+      "deadline": "2026-08-25",
+      "evidence": "2026年8月25日前提交软件工程课程设计报告"
+    }
+  ]
+}
+```
+
+- `text` trim 后不能为空，最多 20,000 字符；请求缺失、空白、超长或非法 JSON 返回 422；
+- `actions` 允许为空，最多 10 项；`hasAction` 由 Python 根据校验后的数组计算，不信任 Provider 布尔值；
+- `actionType` 仅允许 `TODO` 与 `DEADLINE`。TODO 的 `deadlineText/deadline` 都为 `null`；DEADLINE 必须保留来自原文的截止表达；
+- 标题最长 200 字符，`deadlineText` 最长 100 字符，纯文本 `evidence` 最长 500 字符并且必须可追溯到输入；
+- 完整的 ISO 日期或 `YYYY年M月D日` 可以规范化为 `YYYY-MM-DD`。缺少年份或相对日期只保留 `deadlineText`，`deadline` 为 `null`；不会使用服务器日期、机器时区或 Provider 时区补全；
+- 日期必须与行动语义关联，出版/发布日期等描述性日期不自动产生 Action；零 Action 是正常成功结果；
+- 该能力复用现有 `LIFEINBOX_LLM_*` 配置、Chat Completions JSON Mode 与错误模型。配置/服务错误为 503，超时为 504，无效 Provider/结构化结果为 502；
+- 当前无 Java 调用方，不进入 Capture、Analyze、Search 或 Attempt Guard，不写 MySQL/Qdrant，也不创建或修改 Todo。
 
 ### Embedding 内部协议
 

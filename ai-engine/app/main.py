@@ -11,6 +11,7 @@ from app.config import (
     VectorStoreConfigurationError,
 )
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
+from app.schemas.action import ActionExtractionRequest, ActionExtractionResult
 from app.schemas.embedding import EmbeddingRequest, EmbeddingResult
 from app.schemas.rerank import RerankRequest, RerankResponse
 from app.schemas.semantic_search import SemanticSearchRequest, SemanticSearchResponse
@@ -22,6 +23,7 @@ from app.schemas.vector_index import (
     VectorIndexResult,
 )
 from app.services.analyze_service import AnalyzeService
+from app.services.action_extractor_service import ActionExtractorService
 from app.services.document_text_extractor import (
     DocumentExtractionError,
     DocumentTextExtractor,
@@ -76,6 +78,7 @@ class HealthResponse(BaseModel):
 app = FastAPI(title="LifeInbox AI Engine")
 llm_client = LlmClient()
 analyze_service = AnalyzeService(llm_client)
+action_extractor_service = ActionExtractorService(llm_client)
 summary_service = SummaryService(analyze_service)
 url_content_extractor = UrlContentExtractor()
 url_analyze_service = UrlAnalyzeService(url_content_extractor, analyze_service)
@@ -96,6 +99,12 @@ def get_analyze_service() -> AnalyzeService:
     """提供统一 Analyze Service，测试可以替换 LLM 而不访问真实供应商。"""
 
     return analyze_service
+
+
+def get_action_extractor_service() -> ActionExtractorService:
+    """Action Extraction 复用通用 LLM，但保持独立能力与测试替换点。"""
+
+    return action_extractor_service
 
 
 def get_summary_service() -> SummaryService:
@@ -409,6 +418,16 @@ def analyze(
     """一次分析 TEXT 并返回 Summary、Category、Tags、Keywords 和 Entities。"""
 
     return service.analyze(request)
+
+
+@app.post("/action/extract", response_model=ActionExtractionResult)
+def extract_actions(
+    request: ActionExtractionRequest,
+    service: ActionExtractorService = Depends(get_action_extractor_service),
+) -> ActionExtractionResult:
+    """内部只返回 Action 建议，不持久化、确认或修改 Todo 业务状态。"""
+
+    return service.extract(request)
 
 
 @app.post("/embedding", response_model=EmbeddingResult)

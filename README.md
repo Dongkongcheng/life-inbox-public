@@ -1,425 +1,190 @@
-# LifeInbox Repository Instructions
+# LifeInbox
 
-## Project
+> **Capture first. Organize later. Retrieve when needed. Turn information into action.**
 
-LifeInbox is an AI-driven personal information inbox.
+LifeInbox is an AI-driven personal information inbox for capturing, understanding, organizing, retrieving, and eventually acting on useful information.
 
-Its purpose is to help the user:
-
-* Capture useful information quickly.
-* Understand captured information automatically.
-* Organize information with minimal manual work.
-* Retrieve information later even when exact wording is forgotten.
-* Turn useful information into future actions.
-
-The long-term product flow is:
+它解决的是一个很实际的问题：
 
 ```text
-Capture → Understand → Organize → Retrieve → Action
+看到有用的信息
+      ↓
+没时间整理
+      ↓
+先保存
+      ↓
+AI 自动理解
+      ↓
+以后还能真正找回来
+      ↓
+需要时转化成行动
 ```
 
-The core principle is:
+LifeInbox 的长期产品主线是：
 
 ```text
-Capture First, Organize Later.
+Capture
+   ↓
+Understand
+   ↓
+Organize
+   ↓
+Retrieve
+   ↓
+Action
 ```
 
-LifeInbox is not primarily a traditional knowledge-base product.
+LifeInbox 并不首先把自己定位成传统“知识库”。
 
-It is designed around several practical problems:
+它更关注从：
 
-* Useful information is often not saved because organizing it takes effort.
-* Saved information is often never found again.
-* More captured information makes relationships harder to see.
-* Tasks and deadlines hidden inside information are easy to forget.
+```text
+“I saw something useful.”
+```
 
-All major product decisions should remain aligned with this flow.
+到：
+
+```text
+“I can find and use it again.”
+```
+
+之间的整个过程。
 
 ---
 
-# Current Development Stage
+# Current Status
 
-Latest completed stage:
-
-```text
-V0.3 — Smart Search / Retrieve  ✅ Completed
-```
-
-Current roadmap:
+LifeInbox is currently under active development.
 
 ```text
 V0.1 — Universal Inbox        ✅ Completed
 V0.2 — AI Organizer           ✅ Completed
 V0.3 — Smart Search           ✅ Completed
-V0.4 — Action Extractor       📋 Planned
+V0.4 — Action Extractor       🚧 In Progress
 V0.5 — Relations              📋 Planned
 V1.0 — Personal AI            📋 Planned
 ```
 
-The current six-version roadmap is authoritative.
+Current development focus:
 
-Older planning notes may contain broader or overlapping version definitions.
+```text
+V0.4 — Action Extractor
+```
 
-Do not reintroduce old version boundaries if they conflict with the current roadmap.
+V0.4 的目标是：
+
+> 从已经保存的信息中识别真正具有行动意义的内容，并将其转化成可由用户确认的 Action Candidate。
+
+例如：
+
+```text
+Todo
+Deadline
+Future Reminder Candidate
+```
+
+但 AI 产生的建议不会直接成为最终业务事实。
+
+用户仍然决定：
+
+```text
+Accept
+or
+Dismiss
+```
 
 ---
 
-# Version Goals
+# Why LifeInbox?
 
-## V0.1 — Universal Inbox
+Useful information appears everywhere:
 
-Goal:
+* Web pages
+* Articles
+* Screenshots
+* PDFs
+* Documents
+* Notes
+* Ideas
+* Technical references
+* Deadlines
+* Recruitment information
+
+真正的问题通常不是第一次看到信息。
+
+而是之后：
 
 ```text
-Anything useful can be captured quickly.
+看到好东西
+↓
+懒得整理
+
+收藏了
+↓
+以后找不到
+
+保存越来越多
+↓
+不知道哪些内容有关联
+
+信息里有任务 / 截止日期
+↓
+容易忘记
 ```
 
-Core capabilities include:
-
-* TEXT
-* URL
-* FILE
-* IMAGE
-* Inbox listing
-* Favorite
-* Archive
-* Delete
-* Basic file/image handling
-
-Capture must work without AI.
+LifeInbox 按照这些真实问题逐步发展，而不是为了堆 AI 技术而增加功能。
 
 ---
 
-## V0.2 — AI Organizer
+# Core Principle
 
-Goal:
+## Capture First, Organize Later
+
+Capture 应该尽可能简单。
 
 ```text
-The user saves information.
-AI helps understand and organize it.
+See something useful
+        ↓
+Save it
+        ↓
+Organize later
 ```
 
-Existing capabilities may include:
+AI 是增强能力。
 
-* Java ↔ FastAPI integration
-* URL content extraction
-* Document text extraction
-* OCR
-* Summary
-* Category
-* Tags
-* Keywords
-* Entities
-* Structured AnalyzeResult
-* AI processing state
-* Manual Analyze
-* Retry
-* stale PROCESSING Recovery
-* Attempt Guard
-* Automatic Analyze after Capture
+它不能成为 Capture 的前置依赖。
 
-Preserve these capabilities while developing later versions.
+即使：
+
+```text
+FastAPI unavailable
+LLM unavailable
+OCR failure
+URL extraction failure
+Embedding failure
+Qdrant unavailable
+Semantic Search unavailable
+Reranker unavailable
+Action Extractor unavailable
+```
+
+原始信息仍然应该尽可能被保存。
+
+核心原则：
+
+```text
+AI Failure
+≠
+Capture Failure
+```
 
 ---
 
-## V0.3 — Smart Search
+# What LifeInbox Can Do Today
 
-Goal:
+## Universal Capture
 
-```text
-Previously captured information can actually be found again.
-```
-
-The long-term V0.3 search direction is:
-
-```text
-User Query
-    │
-    ├──────────────┐
-    ▼              ▼
-Keyword         Semantic
-Search           Search
-    │              │
-    └──────┬───────┘
-           ▼
-      Hybrid Result
-           ▼
-         Rerank
-           ▼
-         Result
-```
-
-Keyword Search is the first implementation step.
-
-Current implementation status:
-
-```text
-V0.3 Task 1 — Basic Keyword Search  ✅ Completed
-V0.3 Task 2 — AI-derived Field Search  ✅ Completed
-V0.3 Task 3 — Search Filter + Ranking + Highlight  ✅ Completed
-V0.3 Task 4 — Searchable Content Preparation  ✅ Completed
-V0.3 Task 5 — Embedding Pipeline  ✅ Completed
-V0.3 Task 6 — Vector Storage / Indexing Lifecycle  ✅ Completed
-V0.3 Task 7 — Semantic Search  ✅ Completed
-V0.3 Task 8 — Hybrid Search  ✅ Completed
-V0.3 Task 9 — Rerank  ✅ Completed
-V0.3 Task 10 — Final Acceptance  ✅ Completed
-```
-
-The Vue UI calls `GET /api/search?q=<keyword>` through Spring Boot, with optional `type`,
-`category`, and `favorite` filters. MySQL matches ACTIVE InboxItems on persisted `title`, `content`,
-`summary`, `category`, `tags`, `keywords`, `entities`, or prepared Searchable Content. TEXT reuses
-its original `content`; URL, FILE, and IMAGE store normalized, rebuildable extracted text in
-`inbox_item.searchable_content`. Relation-table matches use `EXISTS`, so
-one item remains one result even when several AI-derived values match. Results use deterministic
-field-based ranking, and Vue safely highlights matching plain text without backend highlight HTML.
-FastAPI exposes the internal Embedding capability and now stores item-level vectors in Qdrant through
-internal index/delete routes. Spring Boot triggers best-effort indexing only after committed Capture or
-Attempt-guarded content preparation, and removes points after Archive/Delete. MySQL remains the business
-source of truth; Qdrant is a disabled-by-default, rebuildable derived index. `/api/search` remains keyword
-by default and supports an explicit semantic mode: FastAPI reuses the same Embedding model to retrieve
-bounded Qdrant candidates, then Java batch-resolves ACTIVE InboxItems and business filters from MySQL in
-Qdrant score order. An explicit hybrid mode now retrieves bounded Keyword and Semantic candidate lists,
-deduplicates them by InboxItem ID, and applies Reciprocal Rank Fusion with `RRF_K = 60`. Hybrid degrades
-to the surviving branch when one retrieval path fails, while explicit Semantic keeps its existing error
-behavior. Hybrid 可在显式配置启用后，把有限 RRF Candidate 交给 FastAPI 的独立批量 Reranker，按相关性精排后
-返回 MySQL 权威对象；未配置、超时或非法响应都会完整回退原 RRF 顺序。V0.3 的自动化测试、真实 Provider、
-失败降级、Capture 回归与 Search UI 最终验收均已完成。
-
-V0.3 完成的是 Retrieve：不包含 RAG、Agent、Action Extractor、Todo、Deadline 或 Relations。
-
-Example:
-
-```text
-Query:
-那个讲 Redis 防止重复请求的文章
-
-Possible related concepts:
-幂等
-分布式锁
-Redis Lua
-Redisson
-```
-
-The system should eventually be able to retrieve conceptually related information even when exact query words are absent from the title.
-
-Implement this incrementally.
-
-Do not build the whole Search stack in one task.
-
----
-
-## V0.4 — Action Extractor
-
-Goal:
-
-```text
-Information can become actionable.
-```
-
-Potential future capabilities include:
-
-* Todo extraction
-* Deadline extraction
-* Reminder candidates
-* Action confirmation
-* Structured action schema
-
-Example:
-
-```text
-Captured content:
-软件工程课程设计
-8月25日前交报告
-
-Potential Action:
-提交软件工程课程设计报告
-Deadline: 2026-08-25
-```
-
-Do not implement Action features during V0.3 unless explicitly requested.
-
----
-
-## V0.5 — Relations
-
-Goal:
-
-```text
-Discover useful relationships between captured information.
-```
-
-Possible future model:
-
-```text
-content_relation
-source_id
-target_id
-relation_type
-score
-```
-
-Prefer simple relational storage first.
-
-Do not introduce Neo4j merely because relations exist.
-
----
-
-## V1.0 — Personal AI
-
-Goal:
-
-```text
-AI can work with the user's accumulated personal information.
-```
-
-Possible future capabilities include:
-
-* Personal information analysis
-* Personal RAG
-* Conversational retrieval
-* Long-term topic summaries
-* Project discovery
-* Personal Agent capabilities
-
-Agent functionality should come after useful personal data and retrieval capabilities exist.
-
-Do not build Agent infrastructure prematurely.
-
----
-
-# Architecture
-
-Frontend:
-
-* Vue 3
-* Vite
-
-Backend:
-
-* Java 21
-* Spring Boot 4.1
-* MyBatis-Plus
-* MySQL
-
-AI Engine:
-
-* Python
-* FastAPI
-
-Current architecture:
-
-```text
-Vue
- ↓
-Spring Boot
- ↓
-├── MySQL
-├── Local File Storage
-└── FastAPI
-      ├── Parser / OCR / AI
-      └── Qdrant (derived vector index, when enabled)
-```
-
-Future infrastructure may include:
-
-```text
-Redis
-MQ
-```
-
-but only when a current problem requires it.
-
-Do not introduce infrastructure merely because it appears in the long-term architecture.
-
----
-
-# Java and Python Responsibilities
-
-This boundary is one of the most important architectural rules in LifeInbox.
-
-## Java / Spring Boot
-
-Java owns:
-
-```text
-The Product
-```
-
-Typical responsibilities:
-
-* InboxItem
-* Business data
-* MySQL persistence
-* File metadata
-* Favorite
-* Archive
-* Delete
-* Product APIs
-* Search APIs
-* Business validation
-* AI processing state
-* AI Attempt ownership
-* AI Result persistence
-* Future Todo / Deadline business state
-* Future permissions and authentication
-* Business-level error handling
-
-Java is the:
-
-```text
-Business Source of Truth
-```
-
-Do not move core business ownership into Python.
-
----
-
-## Python / FastAPI
-
-Python owns:
-
-```text
-Understanding the Information
-```
-
-Typical responsibilities:
-
-* Web content extraction
-* Document parsing
-* OCR
-* Future image understanding
-* Summarization
-* Classification
-* Tagging
-* Keyword extraction
-* Entity extraction
-* Embedding
-* Semantic retrieval support
-* Reranking
-* Future relation discovery
-* Future Action extraction
-* Future Deadline extraction
-
-Python should return structured results to Java.
-
-Python must not become an independent owner of InboxItem business data.
-
-Do not duplicate InboxItem CRUD in Python.
-
----
-
-# Core Data Model
-
-The most important business model is:
-
-```text
-InboxItem
-```
-
-All captured information should first enter the unified Inbox.
-
-Examples:
+LifeInbox 当前支持统一 Inbox：
 
 ```text
 TEXT
@@ -428,9 +193,13 @@ FILE
 IMAGE
 ```
 
-Future types may exist when there is a real requirement.
+所有 Capture 内容首先进入统一核心模型：
 
-Do not create independent core models such as:
+```text
+InboxItem
+```
+
+而不是建立：
 
 ```text
 TextItem
@@ -439,758 +208,1849 @@ FileItem
 ImageItem
 ```
 
-without a proven need.
+四套独立业务模型。
 
-Different content types may use different parsing or processing strategies,
+当前 Inbox 能力包括：
 
-but they should still belong to the unified Inbox model.
+* Capture text
+* Capture URL
+* Upload file
+* Upload image
+* Inbox listing
+* Favorite
+* Archive
+* Delete
+* AI analysis
+* Smart Search
+
+不同内容类型可以拥有不同的解析方式，但业务状态仍统一围绕 `InboxItem` 管理。
 
 ---
 
-# Existing Repository Is the Current Source of Truth
+# AI Organizer
 
-The original roadmap contains conceptual field names such as:
+LifeInbox 可以在 Capture 之后自动理解内容。
+
+不同内容类型首先进行 Content Preparation：
 
 ```text
-raw_content
-file_id
-created_at
+URL
+ ↓
+Web Content Extraction
+
+FILE
+ ↓
+Document Text Extraction
+
+IMAGE
+ ↓
+OCR
+
+TEXT
+ ↓
+Original Content
 ```
 
-The implemented repository may use different names.
-
-Do not rename working database fields, APIs, entities, or services merely to match old planning documents.
-
-When implementation and old planning terminology differ:
-
-1. Understand the existing code.
-2. Preserve working behavior.
-3. Follow current repository conventions.
-4. Change the model only when a current requirement justifies it.
-
-Architecture principles matter more than matching old placeholder names exactly.
-
----
-
-# Capture Principle
-
-Capture is the foundation of LifeInbox.
-
-The system should prioritize:
+然后统一进入：
 
 ```text
-See something useful
-        ↓
-Capture it quickly
-        ↓
-Organize later
+Prepared Content
+      ↓
+AI Analyze
+      ↓
+Structured Result
 ```
 
-AI must never become a prerequisite for Capture.
-
-If:
-
-* FastAPI is down
-* LLM is unavailable
-* OCR fails
-* URL parsing fails
-* Semantic Search is unavailable
-
-the user should still be able to preserve original information whenever possible.
-
----
-
-# AI Failure Principle
-
-AI is an enhancement.
-
-It is not the source of truth.
-
-If AI processing fails:
-
-* Original InboxItem must remain.
-* Existing successful AI results should not be destroyed unnecessarily.
-* Capture should remain available.
-* Favorite should remain available.
-* Archive should remain available.
-* Delete should remain available.
-* Basic Inbox browsing should remain available.
-
-Prefer graceful degradation.
-
----
-
-# AI Processing Principle
-
-AI processing should not create long database transactions around:
-
-* HTTP requests
-* OCR
-* Document extraction
-* LLM calls
-
-Continue using short business transactions and explicit AI processing ownership.
-
-Preserve existing mechanisms such as:
+当前结构化 AI 信息包括：
 
 ```text
-AI Status
-Attempt ID
-stale Recovery
-Late Result Protection
+Summary
+Category
+Tags
+Keywords
+Entities
 ```
 
-when they already exist.
+用户主要负责：
 
-Do not rewrite these systems as part of unrelated Search work.
+```text
+Save
+```
+
+AI 帮助完成：
+
+```text
+Understand
++
+Organize
+```
 
 ---
 
-# Search Architecture
+# Reliable AI Processing
 
-Search is one of the core product capabilities of V0.3.
+AI processing 被设计为一种增强能力，而不是核心业务依赖。
 
-The target direction is:
+当前已经包含：
+
+* AI processing status
+* Manual Analyze
+* Automatic Analyze after Capture
+* Retry
+* stale PROCESSING recovery
+* Attempt Guard
+* Late-result protection
+* Background processing
+* Failure degradation
+
+基本流程：
+
+```text
+Capture
+   ↓
+Database Commit
+   ↓
+Background AI Processing
+```
+
+外部 AI 调用不会长时间占用核心业务事务。
+
+如果新的 Analyze 失败：
+
+```text
+Existing InboxItem
++
+Previous Successful Result
+```
+
+不会因为一次失败而被无意义删除。
+
+---
+
+# AI Attempt Guard
+
+每次 Analyze 都有自己的处理所有权。
+
+概念：
+
+```text
+Attempt A
+   ↓
+timeout
+
+Attempt B
+   ↓
+takes ownership
+```
+
+如果旧 Attempt A 后来才返回：
+
+```text
+A != Current Attempt
+```
+
+它不能覆盖：
+
+```text
+New AI Result
+New Searchable Content
+New Processing State
+```
+
+这样可以避免：
+
+```text
+old slow result
+↓
+overwrite newer result
+```
+
+---
+
+# Smart Search
+
+V0.3 完成了 LifeInbox 的 Retrieve 阶段。
+
+LifeInbox 不再只依赖类似：
+
+```sql
+WHERE title LIKE '%keyword%'
+```
+
+的基础查询。
+
+当前 Search Pipeline：
+
+```text
+                         User Query
+                             │
+                ┌────────────┴────────────┐
+                ▼                         ▼
+        Keyword Retrieval         Semantic Retrieval
+                │                         │
+              MySQL                Query Embedding
+                                          │
+                                          ▼
+                                       Qdrant
+                │                         │
+                └────────────┬────────────┘
+                             ▼
+                            RRF
+                             │
+                             ▼
+                     Hybrid Candidates
+                             │
+                             ▼
+                         Reranker
+                             │
+                             ▼
+                       Final Results
+```
+
+V0.3 已完成：
 
 ```text
 Keyword Search
-      +
-Semantic / Vector Search
-      ↓
-Hybrid Retrieval
-      ↓
-Rerank
-      ↓
-Final Results
-```
-
-Implement this gradually.
-
-A likely progression is:
-
-```text
-Basic Keyword Search
-        ↓
 AI-derived Field Search
-        ↓
-Filtering / Ranking
-        ↓
+Filters
+Basic Ranking
+Safe Highlight
 Searchable Content
-        ↓
 Embedding
-        ↓
-Vector Search
-        ↓
+Qdrant Vector Index
 Semantic Search
-        ↓
 Hybrid Search
-        ↓
+RRF
 Rerank
+Failure Degradation
 ```
-
-Each task should implement only its own step.
 
 ---
 
-# Search Responsibilities
+# Keyword Search
 
-## Java
+Keyword Search 由 Spring Boot + MySQL 完成。
 
-Java should normally own:
-
-* Product-facing Search API
-* Query validation
-* Business filters
-* Pagination
-* Keyword Search coordination
-* Result composition
-* Resolving search candidates back to InboxItem
-* Search degradation behavior
-
-Frontend should normally use:
+当前可以根据实际持久化信息检索：
 
 ```text
-Vue
- ↓
-Spring Boot Search API
+Title
+Content
+Summary
+Category
+Tags
+Keywords
+Entities
+Searchable Content
 ```
 
-not:
+并支持业务过滤，例如：
 
 ```text
-Vue
- ↓
-FastAPI
+Type
+Category
+Favorite
+```
+
+Keyword Search 使用确定性的字段级排序。
+
+因此当用户记得明确关键词时：
+
+```text
+Exact / Strong Text Match
+```
+
+仍然拥有很高价值。
+
+---
+
+# Searchable Content
+
+不同 Capture 类型被统一准备成可供检索和后续 AI 使用的文本。
+
+概念：
+
+```text
+TEXT
+→ Original Content
+
+URL
+→ Extracted Web Content
+
+FILE
+→ Extracted Document Text
+
+IMAGE
+→ OCR Text
+```
+
+其中 URL / FILE / IMAGE 可以形成：
+
+```text
+searchable_content
+```
+
+Searchable Content 是：
+
+```text
+Derived / Rebuildable Data
+```
+
+而不是：
+
+```text
+Original Business Source of Truth
+```
+
+它目前可以服务于：
+
+```text
+Keyword Search
+Embedding
+Semantic Retrieval
+Future Action Extraction
 ```
 
 ---
 
-## Python
+# Semantic Search
 
-Python may support:
+Semantic Search 解决的是：
 
-* Embedding generation
-* Query embedding
-* Semantic retrieval
-* Reranking
-* Future query understanding
+> 用户记得“意思”，但是已经忘了原文使用了什么关键词。
 
-Python should return retrieval information to Java.
+例如用户搜索：
 
-Java should remain responsible for final product-level results.
+```text
+那个讲 Redis 防止重复请求的文章
+```
+
+保存的内容可能实际写的是：
+
+```text
+接口幂等
+Redisson
+Redis Lua
+分布式锁
+```
+
+即使不存在完全一致的文本，
+
+Semantic Search 仍可能找到相关内容。
+
+当前流程：
+
+```text
+Query
+   ↓
+Embedding
+   ↓
+Qdrant
+   ↓
+Candidate InboxItem IDs
+   ↓
+Spring Boot
+   ↓
+MySQL
+   ↓
+Authoritative Results
+```
+
+Qdrant 只负责 Retrieval Candidate。
+
+最终业务结果仍然由 MySQL 决定。
 
 ---
 
-# Search Data Ownership
+# Hybrid Search
 
-MySQL remains:
+Keyword Search 与 Semantic Search 各有所长。
+
+```text
+Keyword Search
+→ 用户记得具体词
+
+Semantic Search
+→ 用户记得大概意思
+```
+
+LifeInbox 将两个 Retrieval Branch 结合：
+
+```text
+Keyword Results
+       +
+Semantic Results
+       ↓
+Reciprocal Rank Fusion
+       ↓
+Hybrid Candidates
+```
+
+当前使用：
+
+```text
+RRF
+=
+Reciprocal Rank Fusion
+```
+
+融合不同检索结果。
+
+同一个 InboxItem 即使：
+
+```text
+Keyword hit
++
+Semantic hit
+```
+
+最终也只出现一次。
+
+---
+
+# Reranking
+
+Hybrid Retrieval 得到有限 Candidate 后，
+
+可以进一步进行：
+
+```text
+Hybrid Candidates
+       ↓
+Reranker
+       ↓
+Final Ranking
+```
+
+Reranker：
+
+```text
+不搜索整个数据库
+不扩大 Candidate Set
+不成为业务 Source of Truth
+```
+
+它只负责：
+
+```text
+Query
+↔
+Candidate
+```
+
+之间更精细的相关性判断。
+
+Rerank Score 只属于当前查询，
+
+不会写入 MySQL 或 Qdrant 作为永久业务字段。
+
+---
+
+# Search Failure Degradation
+
+Search 采用 Graceful Degradation。
+
+```text
+Reranker unavailable
+        ↓
+Hybrid / RRF Results
+```
+
+如果 Semantic Retrieval 不可用：
+
+```text
+Embedding / Qdrant unavailable
+        ↓
+Keyword Search
+```
+
+如果整个 AI Engine 不可用：
+
+```text
+Capture
+Inbox
+Favorite
+Archive
+Delete
+Keyword Search
+```
+
+仍应该尽可能正常工作。
+
+---
+
+# Qdrant
+
+LifeInbox 当前使用 Qdrant 完成向量检索。
+
+最重要的数据边界：
+
+```text
+MySQL
+=
+Business Source of Truth
+
+Qdrant
+=
+Derived / Rebuildable Retrieval Index
+```
+
+Qdrant 可以保存用于检索的数据，例如：
+
+```text
+InboxItem ID
+Embedding Vector
+Embedding Model
+Content Hash
+Minimal Retrieval Metadata
+```
+
+但是它不是以下内容的业务 Owner：
+
+```text
+InboxItem
+Favorite
+Archive
+Original Content
+AI Status
+Future Action Candidate
+Future Todo
+```
+
+理论上：
+
+```text
+MySQL
+↓
+Searchable Content
+↓
+Embedding
+↓
+Rebuild Qdrant
+```
+
+应该能够重新构建 Vector Index。
+
+---
+
+# V0.4 — Action Extractor
+
+当前正在开发：
+
+```text
+V0.4 — Action Extractor
+```
+
+V0.4 解决的新问题是：
+
+```text
+“我保存的信息里面，
+有没有什么是以后真的需要去做的？”
+```
+
+例如保存：
+
+```text
+软件工程课程设计
+8月25日前交报告
+```
+
+已有 OCR / Content Preparation 可以先得到文本：
+
+```text
+软件工程课程设计
+8月25日前交报告
+```
+
+Action Extractor 可以进一步识别出类似：
+
+```json
+{
+  "hasAction": true,
+  "actionType": "DEADLINE",
+  "title": "提交软件工程课程设计报告",
+  "deadline": "2026-08-25"
+}
+```
+
+注意：
+
+这只是概念示例。
+
+最终 Schema 由实际 V0.4 Task 和当前仓库实现决定。
+
+---
+
+# Action Candidate
+
+V0.4 一个非常重要的产品边界是：
+
+```text
+AI Suggestion
+≠
+Confirmed Business Action
+```
+
+因此推荐的产品流程是：
+
+```text
+InboxItem
+    ↓
+Action Extraction
+    ↓
+Structured Action Candidate
+    ↓
+User Decision
+   ↙      ↘
+Accept   Dismiss
+   ↓
+ Todo
+```
+
+AI 发现：
+
+```text
+“这里可能存在一个 Action。”
+```
+
+不意味着系统可以直接：
+
+```text
+INSERT Todo
+```
+
+重要业务状态仍然需要明确确认。
+
+---
+
+# Todo and Deadline Direction
+
+V0.4 第一阶段推荐：
+
+```text
+Todo
+ ├── title
+ ├── status
+ └── optional due_time
+```
+
+而不是一开始创建：
+
+```text
+Todo
++
+Deadline
+```
+
+两个生命周期高度重叠的独立模型。
+
+例如：
+
+```text
+8月25日前交报告
+```
+
+更自然地表示为：
+
+```text
+Todo:
+  title = 提交报告
+  due_time = 2026-08-25
+```
+
+只有未来真正出现独立 Deadline 生命周期需求时，
+
+再评估是否需要：
+
+```text
+deadline
+```
+
+独立业务实体。
+
+---
+
+# Action Source Traceability
+
+未来 Action Candidate / Todo 应尽可能保留其来源：
+
+```text
+InboxItem
+    ↓
+Action Candidate
+    ↓
+Todo
+```
+
+这样 LifeInbox 可以回答：
+
+```text
+这个 Todo 为什么出现？
+
+这个 Deadline 来自哪里？
+```
+
+原始信息仍然由 InboxItem 保存。
+
+Action 数据不需要复制整份：
+
+```text
+Web Body
+PDF Text
+OCR Text
+Searchable Content
+```
+
+---
+
+# User Decision Is Authoritative
+
+V0.4 开始需要更加明确数据优先级：
+
+```text
+User-confirmed Business State
+            >
+Current Business Data
+            >
+AI-generated Candidate
+```
+
+例如：
+
+```text
+AI:
+Deadline = 8月25日
+
+User:
+改成 8月28日
+```
+
+未来再次运行 AI 时，
+
+不能：
+
+```text
+8月28日
+↓
+silent overwrite
+↓
+8月25日
+```
+
+用户确认和修改后的业务数据拥有更高优先级。
+
+---
+
+# Deadline Normalization
+
+日期抽取需要区分：
+
+```text
+Original Expression
+```
+
+和：
+
+```text
+Normalized Deadline
+```
+
+例如：
+
+```text
+Original:
+下周五之前
+
+Normalized:
+2026-08-28
+```
+
+如果信息不足以确定：
+
+```text
+year
+week
+timezone
+exact time
+```
+
+系统不应该无依据生成一个看似精确的时间。
+
+优先：
+
+```text
+Keep uncertainty
++
+Ask / require confirmation
+```
+
+而不是：
+
+```text
+Fabricate precision
+```
+
+---
+
+# Java / Python Responsibility Boundary
+
+LifeInbox 始终保持明确的 Java / Python 边界。
+
+## Spring Boot — The Product
+
+Java 负责：
+
+```text
+InboxItem
+Business Data
+MySQL Persistence
+
+Capture
+Favorite
+Archive
+Delete
+
+AI Processing State
+AI Attempt Ownership
+AI Result Persistence
+
+Search Product API
+Keyword Retrieval
+Hybrid Orchestration
+Final Business Results
+
+Future Action Candidate State
+Future Todo
+Future Deadline Business State
+```
+
+Java 是：
 
 ```text
 Business Source of Truth
 ```
 
-A Vector Store is:
+---
+
+## FastAPI — Understanding Information
+
+Python 负责：
 
 ```text
-Derived Retrieval Index
+Web Content Extraction
+Document Parsing
+OCR
+
+Summary
+Category
+Tags
+Keywords
+Entities
+
+Embedding
+Semantic Retrieval Support
+Reranking
+
+Action Extraction
+Deadline Extraction
+
+Future Relation Discovery
 ```
 
-A vector store may contain:
+核心关系：
 
-* InboxItem ID
-* Embedding vector
-* Minimal retrieval metadata
+```text
+Java:
+“There is an InboxItem.
+This is the current business state.”
 
-It should not become the authoritative owner of:
+Python:
+“I can understand the information
+and return structured suggestions.”
+```
 
-* InboxItem
-* Favorite
-* Archive
-* Business status
-* Original content ownership
-* AI processing state
+Python 不拥有最终：
 
-Conceptually:
+```text
+InboxItem
+Todo
+Deadline
+Favorite
+Archive
+```
+
+业务状态。
+
+---
+
+# Architecture
+
+Current high-level architecture:
+
+```text
+                           LifeInbox
+                               │
+                               ▼
+                          Vue 3 / Vite
+                               │
+                          Product API
+                               │
+                               ▼
+                       Spring Boot / Java
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+            MySQL         Local Files        FastAPI
+      Business Source     FILE / IMAGE       AI Engine
+         of Truth                                │
+                         ┌───────────────────────┼───────────────────────┐
+                         ▼                       ▼                       ▼
+                  Content Processing         Embedding                Rerank
+                         │                       │
+             ┌───────────┼───────────┐           ▼
+             ▼           ▼           ▼         Qdrant
+          URL           Doc         OCR     Derived Vector Index
+       Extraction    Extraction
+```
+
+V0.4 在此基础上增加：
+
+```text
+InboxItem
+    │
+    ▼
+Usable / Prepared Content
+    │
+    ▼
+FastAPI Action Extraction
+    │
+    ▼
+Structured Action Candidate
+    │
+    ▼
+Spring Boot
+    │
+    ▼
+User Confirmation
+    │
+    ▼
+Todo
+└── optional due_time
+```
+
+---
+
+# Technology Stack
+
+## Frontend
+
+```text
+Vue 3
+Vite
+```
+
+## Backend
+
+```text
+Java 21
+Spring Boot
+MyBatis-Plus
+MySQL
+```
+
+## AI Engine
+
+```text
+Python
+FastAPI
+```
+
+## Retrieval
+
+```text
+Qdrant
+```
+
+Qdrant 是增强型 Derived Retrieval Infrastructure。
+
+核心 Capture / Inbox 不依赖 Qdrant 才能运行。
+
+---
+
+# Repository Structure
+
+LifeInbox uses a monorepo structure.
+
+```text
+life-inbox/
+│
+├── web/
+│   └── Vue 3 frontend
+│
+├── server/
+│   └── Spring Boot product backend
+│
+├── ai-engine/
+│   └── FastAPI AI engine
+│
+├── docs/
+│   ├── architecture.md
+│   ├── database.md
+│   ├── api.md
+│   ├── roadmap.md
+│   └── history/
+│
+├── extension/
+│   └── Future browser Capture integration
+│
+├── deploy/
+│   └── Deployment-related configuration
+│
+├── AGENTS.md
+├── README.md
+└── .gitignore
+```
+
+目录应随着真实需求增长。
+
+不要因为未来 Roadmap 中存在：
+
+```text
+todo
+relation
+agent
+rag
+memory
+```
+
+就提前创建大量空模块。
+
+---
+
+# Running LifeInbox Locally
+
+LifeInbox 当前主要由以下组件组成：
 
 ```text
 MySQL
-=
-Authoritative Business Data
-
-Vector Store
-=
-Rebuildable Search Index
+Spring Boot
+FastAPI
+Vue
 ```
 
-If the vector index is lost,
-
-the original LifeInbox data must remain intact.
-
----
-
-# Search Quality Principle
-
-Do not consider Search complete merely because:
+Semantic Search 额外需要：
 
 ```text
-WHERE title LIKE '%keyword%'
+Embedding Provider
+Qdrant
 ```
 
-works.
-
-Basic Keyword Search is useful and should be built first,
-
-but V0.3 ultimately aims to solve:
+Reranking 额外需要：
 
 ```text
-I remember what the information meant,
-but I do not remember its exact title or words.
+Rerank Provider
 ```
 
-When semantic retrieval is introduced:
+---
 
-evaluate whether conceptually related content can actually be found.
+## 1. Start MySQL
 
-Do not use an LLM to scan the entire Inbox for every Search request.
+创建：
 
-Use appropriate retrieval techniques.
+```text
+life_inbox
+```
+
+数据库。
+
+具体 Schema 和迁移说明见：
+
+```text
+docs/database.md
+docs/sql/
+```
+
+始终以当前仓库 SQL 为准。
 
 ---
 
-# Search Failure Principle
+## 2. Start Spring Boot
 
-Semantic Search is an enhancement to retrieval.
+进入：
 
-If future:
+```text
+server/
+```
 
-* Embedding service
-* Vector Store
-* Semantic retrieval
-* Reranker
+Windows：
 
-fails,
-
-Keyword Search should continue working when possible.
-
-Search failures must not break:
-
-* Capture
-* Inbox
-* Favorite
-* Archive
-* Delete
-* Existing AI results
+```powershell
+.\mvnw.cmd spring-boot:run
+```
 
 ---
 
-# Search Is Not Automatically RAG
+## 3. Start FastAPI
 
-V0.3 focuses on:
+进入：
+
+```text
+ai-engine/
+```
+
+同步依赖后运行：
+
+```powershell
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+AI Engine 的 Provider 配置见：
+
+```text
+ai-engine/README.md
+.env.example
+```
+
+不要把真实 API Key 提交到仓库。
+
+---
+
+## 4. Start Qdrant
+
+Semantic Search / Hybrid Search 的 Semantic Branch 需要 Qdrant。
+
+常见本地地址：
+
+```text
+http://127.0.0.1:6333
+```
+
+具体配置以：
+
+```text
+ai-engine/README.md
+```
+
+为准。
+
+Qdrant 不可用时，
+
+Keyword Search 仍应尽可能正常工作。
+
+---
+
+## 5. Start Frontend
+
+进入：
+
+```text
+web/
+```
+
+运行：
+
+```bash
+npm install
+npm run dev
+```
+
+使用 Vite 输出的开发地址访问 LifeInbox。
+
+---
+
+# AI Configuration
+
+外部 AI Provider 通过环境变量配置。
+
+当前主要配置组包括：
+
+```text
+LLM
+Embedding
+Qdrant / Vector Store
+Rerank
+```
+
+真实变量名称以：
+
+```text
+.env.example
+ai-engine/README.md
+```
+
+为准。
+
+禁止提交：
+
+```text
+API Key
+Token
+Private Credential
+Secret
+```
+
+---
+
+# Alibaba Cloud Model Studio Compatibility
+
+当前如果使用阿里云百炼，
+
+Chat / Embedding 与 Rerank 可能使用不同的 Compatible API Base。
+
+概念：
+
+```text
+Chat
+↓
+compatible-mode/v1/chat/completions
+
+Embedding
+↓
+compatible-mode/v1/embeddings
+```
+
+当前接入的 Rerank 能力可能使用：
+
+```text
+Rerank
+↓
+compatible-api/v1/reranks
+```
+
+具体配置不要硬编码在业务代码中。
+
+以：
+
+```text
+.env.example
+ai-engine/README.md
+```
+
+为准。
+
+---
+
+# Testing
+
+## Java
+
+进入：
+
+```text
+server/
+```
+
+执行：
+
+```powershell
+.\mvnw.cmd clean test
+```
+
+---
+
+## Python
+
+进入：
+
+```text
+ai-engine/
+```
+
+执行：
+
+```powershell
+uv run pytest -p no:cacheprovider
+```
+
+自动测试应尽量 Mock：
+
+```text
+LLM Provider
+Embedding Provider
+Rerank Provider
+External AI Service
+```
+
+避免测试意外消耗付费额度。
+
+---
+
+## Frontend
+
+进入：
+
+```text
+web/
+```
+
+执行：
+
+```bash
+npm run build
+```
+
+不要把：
+
+```text
+没有真正执行过
+```
+
+的测试报告成：
+
+```text
+PASS
+```
+
+---
+
+# Roadmap
+
+## V0.1 — Universal Inbox ✅
+
+Goal:
+
+```text
+Anything useful can be captured quickly.
+```
+
+主要能力：
+
+```text
+TEXT
+URL
+FILE
+IMAGE
+Unified Inbox
+Favorite
+Archive
+Delete
+```
+
+重点：
+
+```text
+Capture
+```
+
+---
+
+## V0.2 — AI Organizer ✅
+
+Goal:
+
+```text
+Save first.
+AI organizes later.
+```
+
+主要能力：
+
+```text
+Content Extraction
+OCR
+
+Summary
+Category
+Tags
+Keywords
+Entities
+
+Reliable AI Processing
+Retry
+Attempt Guard
+Automatic Analyze
+```
+
+重点：
+
+```text
+Understand
++
+Organize
+```
+
+---
+
+## V0.3 — Smart Search ✅
+
+Goal:
+
+```text
+Previously captured information
+can actually be found again.
+```
+
+主要能力：
+
+```text
+Keyword Search
+AI-derived Search
+Filters
+Ranking
+Safe Highlight
+
+Searchable Content
+
+Embedding
+Qdrant
+
+Semantic Search
+Hybrid Search
+RRF
+Rerank
+
+Failure Degradation
+```
+
+重点：
 
 ```text
 Retrieve
 ```
 
-Search asks:
+---
+
+## V0.4 — Action Extractor 🚧
+
+Goal:
 
 ```text
-Which saved items are relevant?
+Information can become actionable.
 ```
 
-RAG asks:
+当前计划逐步实现：
 
 ```text
-What answer should an LLM generate using retrieved items?
+Structured Action Candidate
+
+Todo Extraction
+Deadline Extraction
+
+User Confirmation
+Dismiss / Ignore
+
+Source Traceability
+Safe Reprocessing
 ```
 
-These are different capabilities.
+当前推荐业务流：
 
-Do not automatically add:
+```text
+InboxItem
+    ↓
+Action Extraction
+    ↓
+Action Candidate
+    ↓
+User Confirm / Dismiss
+    ↓
+Todo
+    └── optional due time
+```
 
-* RAG
-* Chat with your data
-* Agent
-* Memory
-* MCP
+V0.4 不自动意味着：
 
-because Embedding or Vector Search is introduced.
+```text
+Google Calendar
+Push Notification
+Autonomous Todo Creation
+Workflow Engine
+Agent Execution
+```
 
-Those capabilities belong to later product stages unless a task explicitly requires them.
+这些能力必须等到出现真实需求后再决定。
 
 ---
 
-# Infrastructure Principle
+## V0.5 — Relations 📋
 
-Do not build the project around middleware.
-
-Start with the simplest infrastructure that solves the current problem.
-
-Current core infrastructure:
+Goal:
 
 ```text
-MySQL
-+
-Spring Boot
-+
-FastAPI
-+
-Qdrant (optional derived index)
+Discover useful relationships
+between captured information.
 ```
 
-Future infrastructure may include:
+未来可能形成：
 
 ```text
-Redis
-MQ
+InboxItem A
+     ↓
+ RELATED_TO
+     ↓
+InboxItem B
 ```
 
-but only when justified.
+第一阶段优先考虑简单关系模型。
 
-Do not automatically add:
-
-* Redis
-* Kafka
-* RabbitMQ
-* RocketMQ
-* Elasticsearch
-* Milvus
-* Neo4j
-
-just because they appear in the long-term roadmap.
-
-Prefer:
+不要因为：
 
 ```text
-Requirement first
-Infrastructure second
+Relations
 ```
 
-not:
+就直接引入：
 
 ```text
-Technology first
-Problem later
+Neo4j
 ```
 
 ---
 
-# Authentication and Multi-user Features
+## V1.0 — Personal AI 📋
 
-The long-term architecture may include:
+Goal:
 
-* User
-* Authentication
-* Permissions
+```text
+AI can work with accumulated
+personal information.
+```
 
-However, LifeInbox is currently primarily developed as a personal product.
+未来可能包括：
 
-Do not introduce a large authentication or RBAC system unless the current task requires it.
+```text
+Personal Information Analysis
+Personal RAG
+Conversational Retrieval
+Long-term Topic Summaries
+Project Discovery
+Personal Agent
+```
 
-Existing `userId` or related fields may be preserved for future expansion.
+Agent 应该建立在：
 
-Do not allow future multi-user requirements to unnecessarily complicate current personal workflows.
+```text
+Reliable Capture
++
+Reliable Understanding
++
+Reliable Retrieval
++
+Reliable Action Boundary
++
+Useful Personal Data
+```
+
+之上。
 
 ---
 
 # Browser Extension
 
-A browser extension remains a useful future Capture enhancement.
+Browser Extension 仍然是未来重要的 Capture Enhancement。
 
-Its purpose would be:
+目标体验：
 
 ```text
-See webpage
- ↓
+See useful webpage
+       ↓
 Click Save
- ↓
+       ↓
 LifeInbox
 ```
 
-However, it is not required for current V0.3 Search development.
-
-Do not create Chrome extension functionality during Search tasks unless explicitly requested.
-
----
-
-# Development Principles
-
-* Read existing code before making changes.
-* Understand existing behavior before redesigning it.
-* Work in small increments.
-* Prefer the simplest implementation that solves the current task.
-* Do not refactor unrelated code.
-* Preserve existing working behavior.
-* Reuse existing services and patterns where appropriate.
-* Avoid speculative abstractions.
-* Keep dependencies minimal.
-* Do not introduce infrastructure without a real requirement.
-* Run relevant tests or builds.
-* Never claim verification that was not actually performed.
-* Do not hardcode secrets.
-* Do not commit passwords, API keys, tokens, or private credentials.
-* When the task is complete, stop.
-
----
-
-# Codex Working Model
-
-Codex should behave like a developer implementing one GitHub Issue at a time.
-
-Preferred workflow:
+它被延后是：
 
 ```text
-Read Repository
-      ↓
-Understand Current Task
-      ↓
-Report Short Plan
+Priority Adjustment
+```
+
+不是：
+
+```text
+Abandoned Direction
+```
+
+目前优先完成：
+
+```text
+Capture
+↓
+Understand
+↓
+Organize
+↓
+Retrieve
+↓
+Action
+```
+
+核心闭环。
+
+---
+
+# Inspiration
+
+LifeInbox is inspired by ideas from several personal information, knowledge-management, retrieval, and action-oriented projects.
+
+Different projects are useful references for different stages of LifeInbox.
+
+## Capture / Organize
+
+* **DropMind** — frictionless universal capture and Inbox-first product thinking.
+* **NoteGen** — the `Capture First, Organize Later` philosophy and AI-assisted organization.
+* **My-Brain-System** — AI-assisted organization of accumulated personal knowledge.
+* **Eclaire** — unified personal-data concepts across notes, files, bookmarks, and tasks.
+
+## Content / Retrieval
+
+* **Karakeep** — practical bookmark capture, content preservation, search, OCR, and AI-assisted organization.
+* **4DPocket** — content enrichment and retrieval-pipeline ideas.
+* **Khoj** — semantic retrieval over personal information.
+
+## V0.4 — Action
+
+The current Action Extractor stage especially references ideas from:
+
+* **Personal OS + Personal Wiki (`lawyer112/personal-os-wiki`)** — moving messy captured information toward explicit, reviewable work while keeping source knowledge and action state conceptually separate.
+* **PersonalOS (`amanaiproduct/personal-os`)** — turning unstructured backlog information into structured tasks with simple task context and optional deadline information.
+* **work-os (`guo-yichen/work-os`)** — useful inspiration for distinguishing actions from other extracted information such as decisions and ideas.
+
+These projects are:
+
+```text
+Inspiration
+```
+
+not:
+
+```text
+LifeInbox Architecture Source of Truth
+```
+
+LifeInbox does **not** copy any single project's:
+
+```text
+Technology Stack
+Database Model
+Agent Framework
+Task Worker
+Knowledge Graph
+MCP Integration
+Reminder System
+Workflow Engine
+```
+
+The authority order remains:
+
+```text
+Current User Task
+        ↓
+Root AGENTS.md
+        ↓
+Current Repository Implementation
+        ↓
+Current LifeInbox Documentation
+        ↓
+Reference Projects
+```
+
+For V0.4, LifeInbox keeps its own product boundary:
+
+```text
+InboxItem
+    ↓
+Action Extraction
+    ↓
+Structured Action Candidate
+    ↓
+User Confirm / Dismiss
+    ↓
+Todo
+    └── optional due time
+```
+
+Java / MySQL remain the:
+
+```text
+Business Source of Truth
+```
+
+Python only provides structured AI understanding and Action suggestions.
+
+---
+
+# What LifeInbox Is Not Yet
+
+LifeInbox intentionally does not try to implement every AI concept at once.
+
+Current development does not require:
+
+```text
+GraphRAG
+Multi-Agent
+Workflow Engine
+Neo4j
+Kafka
+Complex Distributed Infrastructure
+```
+
+And although V0.3 already contains:
+
+```text
+Embedding
+Vector Retrieval
+Hybrid Search
+Rerank
+```
+
+this does not automatically mean LifeInbox currently needs:
+
+```text
+RAG
+Chat with your data
+Agent
+MCP
+```
+
+Those belong to later stages.
+
+---
+
+# Design Principles
+
+### Capture must survive AI failure
+
+```text
+AI Down
+≠
+Capture Down
+```
+
+### Java owns business state
+
+```text
+Spring Boot / MySQL
+=
+Business Source of Truth
+```
+
+### Python understands information
+
+```text
+FastAPI
+=
+AI Processing Capability
+```
+
+### Vector data is derived
+
+```text
+Qdrant
+=
+Rebuildable Retrieval Index
+```
+
+### AI suggestions are not user decisions
+
+```text
+AI Candidate
+≠
+Confirmed Todo
+```
+
+### User decisions have higher authority
+
+```text
+User-confirmed State
+>
+AI-generated Suggestion
+```
+
+### Infrastructure follows requirements
+
+```text
+Requirement First
+Technology Second
+```
+
+### Development stays incremental
+
+```text
+One Clear Task
       ↓
 Implement
       ↓
-Test / Build
-      ↓
-Report Result
+Verify
       ↓
 Stop
 ```
 
-Codex should not automatically continue to the next roadmap feature.
-
 ---
 
-# Responsibility Split
+# Known Limitations
 
-The user owns:
+Current known scope limitations include:
 
-* Product direction
-* Architecture
-* Core data model
-* Java / Python boundaries
-* Search Pipeline
-* AI task state design
-* Action Extractor schema
-* Permission strategy
-* Failure strategy
-* Major infrastructure decisions
-* Final review
+* Some older InboxItems may need reprocessing before a vector index exists.
+* Retrieval is currently primarily item-level rather than document-chunk-level.
+* Semantic Search requires an Embedding Provider and Qdrant.
+* Reranking requires an explicitly configured Rerank Provider.
+* Action Extractor is currently under development.
+* Action Candidate / Todo functionality is not yet fully implemented.
+* Relations are not implemented yet.
+* Personal RAG is not implemented yet.
+* Personal Agent functionality is not implemented yet.
+* Browser Extension Capture is postponed.
+* Reminder / Calendar integration is not currently implemented.
 
-Codex may implement:
-
-* Controller
-* Service
-* Mapper
-* DTO
-* SQL
-* Tests
-* Vue UI
-* FastAPI endpoints
-* Bug fixes
-* Small refactors
-
-Codex should accelerate implementation.
-
-It should not independently redefine LifeInbox.
-
----
-
-# Code Comments
-
-Important code should contain concise Chinese comments.
-
-Use comments especially for:
-
-* Important class responsibilities
-* Important Controller / Service methods
-* Non-obvious business logic
-* AI processing state changes
-* Attempt Guard
-* Failure degradation
-* Security checks
-* Search ranking logic
-* Search fallback logic
-* Java / Python integration
-* Vue state and request logic
-
-Prefer comments that explain:
-
-```text
-Why
-```
-
-rather than simply translating:
-
-```text
-What the code says
-```
-
-Do not comment every line.
-
-Do not add meaningless comments to:
-
-* imports
-* getters/setters
-* trivial assignments
-* obvious CRUD code
-
-Keep comments synchronized with implementation.
-
----
-
-# Testing and Verification
-
-After changes:
-
-## Java
-
-Run relevant Maven tests or compilation.
-
-## Python
-
-Run relevant Python tests or import/startup validation when Python is modified.
-
-Avoid real paid LLM requests in automated tests when mocking is practical.
-
-## Frontend
-
-Run the frontend build after relevant changes.
-
-For Search features,
-
-verify behavior such as:
-
-* Normal query
-* Empty query
-* No results
-* Multiple results
-* Pagination
-* Relevant ordering when ranking is introduced
-* Failure behavior
-
-Never report a test as passed unless it was actually executed.
-
----
-
-# Security
-
-Pay attention to:
-
-* SQL injection
-* Unsafe dynamic SQL
-* XSS
-* Search highlight rendering
-* SSRF
-* URL redirects
-* File upload validation
-* Path traversal
-* Unsafe file access
-* Hardcoded secrets
-* Untrusted AI output
-
-Use parameterized database queries.
-
-Do not concatenate raw user Search input directly into SQL.
-
-Security should be proportional to a personal project,
-
-but obvious vulnerabilities must not be ignored.
+These are intentional scope boundaries.
 
 ---
 
 # Documentation
 
-Keep documentation aligned with actual implementation.
-
-Important files include:
+More detailed technical documentation is available under:
 
 ```text
-README.md
+docs/
+```
+
+Important files:
+
+```text
 docs/architecture.md
 docs/database.md
 docs/api.md
 docs/roadmap.md
 ```
 
-Documentation should clearly distinguish:
+AI Engine configuration and internal capability documentation:
 
 ```text
-Completed
-In Progress
-Planned
+ai-engine/README.md
 ```
 
-Do not describe planned functionality as completed.
-
-Historical prompts under:
+Historical development prompts may exist under:
 
 ```text
 docs/history/
 ```
 
-are historical records.
+Historical files explain how LifeInbox evolved.
 
-They must not override:
-
-1. Current user task
-2. Current root AGENTS.md
-3. Current repository implementation
-
----
-
-# Repository Structure
-
-Keep the monorepo structure conceptually similar to:
+They do not override:
 
 ```text
-life-inbox/
-├── web/
-├── server/
-├── ai-engine/
-├── extension/
-├── docs/
-├── deploy/
-├── AGENTS.md
-├── README.md
-└── .gitignore
-```
-
-Do not create future modules or empty directories merely because they appear in the roadmap.
-
-Create them when a real task requires them.
-
----
-
-# Scope Control
-
-Only implement functionality explicitly requested by the current task.
-
-Examples:
-
-A Keyword Search task does not automatically authorize:
-
-* Embedding
-* Vector Store
-* Semantic Search
-* Rerank
-* RAG
-
-An Embedding task does not automatically authorize:
-
-* Qdrant
-* Hybrid Search
-* RAG
-* Agent
-
-A Semantic Search task does not automatically authorize:
-
-* Personal Chat
-* Todo
-* Deadline
-* Relations
-* Knowledge Graph
-* Agent
-
-An Action Extractor task does not automatically authorize:
-
-* Calendar integration
-* Reminder system
-* Agent workflow
-
-Follow:
-
-```text
-One Task
-One Clear Goal
-Small Increment
-Verify
-Stop
+Current Task
+AGENTS.md
+Current Repository
+Current Documentation
 ```
 
 ---
 
-# Long-Term Principle
+# Development Philosophy
 
-LifeInbox should grow from real user problems,
+LifeInbox should grow from real problems,
 
-not from a list of AI technologies.
-
-The project should continue following:
-
-```text
-Capture
- ↓
-Understand
- ↓
-Organize
- ↓
-Retrieve
- ↓
-Action
-```
+not from a checklist of AI technologies.
 
 Prefer:
 
 ```text
-A smaller product that works well
+A smaller product
+that works well
 ```
 
 over:
@@ -1202,28 +2062,50 @@ MCP
 GraphRAG
 Multi-Agent
 Knowledge Graph
+Workflow Engine
 ```
 
 all implemented only partially.
 
-The role of Codex is to accelerate engineering implementation.
+The goal is not to make LifeInbox look technically complicated.
 
-The architecture, product direction, data ownership, and roadmap should remain intentional decisions made by the project owner.
+The goal is to make it genuinely useful.
 
-# Inspiration
+---
 
-LifeInbox is inspired by ideas from projects such as:
+# Current Focus
 
-- DropMind — frictionless universal capture
-- NoteGen — Capture First, Organize Later
-- Karakeep — bookmark capture and retrieval
-- 4DPocket — AI enrichment and search
-- My-Brain-System — AI-assisted organization
-- Eclaire — unified personal data
-- Khoj — semantic personal retrieval
-- Personal OS + Personal Wiki — knowledge to action
+```text
+V0.4 — Action Extractor
+```
 
-LifeInbox does not copy any single project's architecture.
-It combines these ideas around its own:
+The main question is no longer:
 
-Capture → Understand → Organize → Retrieve → Action
+```text
+“Can I find what I saved?”
+```
+
+V0.3 already addressed that.
+
+The next question is:
+
+```text
+“Can LifeInbox recognize
+when saved information requires action?”
+```
+
+That is the focus of V0.4.
+
+The immediate product direction is:
+
+```text
+Saved Information
+       ↓
+Action Understanding
+       ↓
+Structured Candidate
+       ↓
+Human Decision
+       ↓
+Useful Action
+```

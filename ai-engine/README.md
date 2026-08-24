@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，并为 V0.3 提供 Embedding Generation、Qdrant Vector Index、Semantic Candidate Retrieval 与可选 Rerank。Python 不连接 MySQL；InboxItem、Searchable Content、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
+AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，为 V0.3 提供 Embedding Generation、Qdrant Vector Index、Semantic Candidate Retrieval 与可选 Rerank，并在 V0.4 Task 31 提供独立的 Action Extraction 能力。Python 不连接 MySQL；InboxItem、Searchable Content、Action/Todo 业务状态、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
 
 ## 安装依赖
 
@@ -91,6 +91,51 @@ Keywords 允许 0～8 个，每项最长 64 个字符。Python 会执行 NFKC �
 `text` 去除首尾空白后不能为空，最大 20,000 个字符；摘要最大 2,000 个字符。Prompt 集中在 `app/prompts.py`。LLM 请求使用 OpenAI-compatible JSON Mode；针对千问的结构化抽取场景，请求会关闭思考模式以减少等待和 Token 消耗。Python 还会使用 Pydantic 严格验证所有字段，异常结果不会交给 Java。
 
 旧 `POST /summarize` 暂时保留相同请求和 `{ "summary": "..." }` 响应，用于兼容已有调用方；它内部复用包含全部五个字段的 Analyze Service，不会维护第二套 Prompt 或再次调用 LLM。
+
+## 提取 Action 建议
+
+`POST /action/extract` 是 V0.4 Task 31 的独立内部能力，只接收已经准备好的纯文本：
+
+```powershell
+$body = @{
+  text = "软件工程课程设计报告需要在2026年8月25日前提交。"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/action/extract" `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+成功响应示例：
+
+```json
+{
+  "hasAction": true,
+  "actions": [
+    {
+      "actionType": "DEADLINE",
+      "title": "提交软件工程课程设计报告",
+      "deadlineText": "2026年8月25日前",
+      "deadline": "2026-08-25",
+      "evidence": "软件工程课程设计报告需要在2026年8月25日前提交"
+    }
+  ]
+}
+```
+
+契约与边界：
+
+- `text` trim 后不能为空，最多 20,000 个字符；缺失、空白、超长或非法 JSON 返回 422；
+- 允许 0～10 个候选。没有明确行动是正常成功结果：`{"hasAction": false, "actions": []}`；
+- `actionType` 第一版只支持 `TODO` 与 `DEADLINE`。标题最长 200 字符，`deadlineText` 最长 100 字符，`evidence` 最长 500 字符；
+- `TODO` 不携带截止信息；`DEADLINE` 必须保留来自原文、且同时出现在 evidence 中的 `deadlineText`；evidence 必须是输入正文中的纯文本片段；
+- 只有完整 ISO 日期或 `YYYY年M月D日` 才会生成 `YYYY-MM-DD`。缺少年份和“明天”“下周五”等相对表达会保留 `deadlineText`，但 `deadline` 为 `null`，不会依赖机器日期或隐藏时区推算；
+- 日期本身不等于行动。Prompt 明确排除出版/发布日期等描述性日期，也允许模型返回零个行动；
+- `hasAction` 不接受 LLM 输入，而是由应用根据校验后的 `actions` 计算；未知类型、非法日期、字段越界、伪造 evidence、额外字段和畸形 JSON 都按无效结构化输出处理；
+- Action Extraction 复用现有 `LIFEINBOX_LLM_*` 配置、OpenAI-compatible `/chat/completions`、JSON Mode、Timeout 与安全错误映射，不新增 Action 专属 Key、Model 或 Base URL；
+- LLM 配置缺失/服务错误返回 503，超时返回 504，非法 Provider 或结构化响应返回 502；响应不包含 API Key、Provider 正文或内部堆栈；
+- 当前端点只返回 AI 建议，不连接 MySQL、不保存 Action Candidate、不创建 Todo、不触发现有 Analyze/Attempt Guard，也不自动接入 Capture 或 Search。
 
 ## 分析 URL
 

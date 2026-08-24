@@ -1,10 +1,10 @@
 # LifeInbox 架构
 
-## 1. 产品主线
+## 1. 产品定位
 
 LifeInbox 是一个 AI 驱动的个人信息收件箱。
 
-它解决的核心问题不是单纯建立一个“知识库”，而是：
+它的核心目标不是构建一个传统意义上的“知识库”，而是解决信息从出现到真正产生价值之间的断层：
 
 ```text
 看到有价值的信息
@@ -46,7 +46,18 @@ V1.0  Personal AI       → Personal AI / Agent
 当前阶段：
 
 ```text
-V0.3 — Smart Search / Retrieve
+V0.1 — Universal Inbox       ✅ Completed
+V0.2 — AI Organizer          ✅ Completed
+V0.3 — Smart Search          ✅ Completed
+V0.4 — Action Extractor      🚧 Current
+V0.5 — Relations             📋 Planned
+V1.0 — Personal AI           📋 Planned
+```
+
+当前开发重点：
+
+```text
+V0.4 — Action Extractor
 ```
 
 ---
@@ -61,68 +72,40 @@ Capture First, Organize Later.
 
 也就是：
 
-> Capture 必须首先可靠完成，AI 和其他高级能力都是后续增强。
+> Capture 必须首先可靠完成，AI、搜索、向量检索、Action Extraction 等高级能力都属于后续增强。
 
-即使以下服务不可用：
+即使以下能力不可用：
 
 ```text
 FastAPI
 LLM
 OCR
 网页正文提取
-未来 Embedding
-未来 Vector Search
+Embedding
+Qdrant
+Semantic Search
 Reranker
+Action Extractor
 ```
 
-也不能让基础 Inbox 完全不可使用。
+基础 Inbox 仍然应该尽可能可用。
+
+核心原则：
+
+```text
+AI Failure
+≠
+Capture Failure
+```
 
 ---
 
-# 3. 当前实际架构
+# 3. 当前总体架构
 
-当前项目实际架构：
-
-```text
-                         LifeInbox
-                              │
-                              ▼
-                        Vue 3 / Vite
-                              │
-                         Product API
-                              │
-                              ▼
-                    Spring Boot / Java 21
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-              ▼               ▼               ▼
-            MySQL       Local Uploads       FastAPI
-       Source of Truth    FILE / IMAGE       AI Engine
-                                              │
-                                ┌─────────────┼─────────────┐
-                                │             │             │
-                                ▼             ▼             ▼
-                           URL Extractor  Doc Extractor      OCR
-                                │             │             │
-                                └─────────────┼─────────────┘
-                                              ▼
-                                        AnalyzeService
-                                              │
-                                   Structured LLM Request
-                                              │
-                                              ▼
-                                         AnalyzeResult
-                                              │
-                            ┌─────────────────┼─────────────────┐
-                            ▼                 ▼                 ▼
-                         Summary       Category / Tags    Keywords / Entities
-```
-
-当前核心基础设施：
+当前 LifeInbox 采用：
 
 ```text
-Vue
+Vue 3
 +
 Spring Boot
 +
@@ -130,113 +113,157 @@ MySQL
 +
 FastAPI
 +
-Local File Storage
+Qdrant
 +
-Qdrant Derived Vector Index
+Local File Storage
 ```
 
-目前没有为了长期 Roadmap 提前加入：
+总体结构：
+
+```text
+                            LifeInbox
+                                │
+                                ▼
+                           Vue 3 / Vite
+                                │
+                           Product API
+                                │
+                                ▼
+                       Spring Boot / Java
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+            ▼                   ▼                   ▼
+          MySQL            Local Files          FastAPI
+    Business Source        FILE / IMAGE         AI Engine
+       of Truth                                    │
+                                                   │
+                      ┌────────────────────────────┼────────────────────────────┐
+                      │                            │                            │
+                      ▼                            ▼                            ▼
+               Content Processing             Embedding                    Rerank
+                      │                            │
+          ┌───────────┼───────────┐                ▼
+          ▼           ▼           ▼              Qdrant
+     URL Extractor  Document      OCR        Derived Vector Index
+                    Extractor
+```
+
+当前主要业务通信路径：
+
+```text
+Vue
+ ↓
+Spring Boot
+```
+
+前端不直接依赖 FastAPI。
+
+AI 相关调用主要保持：
+
+```text
+Spring Boot
+ ↓
+FastAPI
+```
+
+---
+
+# 4. 当前基础设施
+
+当前实际使用：
+
+```text
+MySQL
+Spring Boot
+FastAPI
+Vue
+Local File Storage
+Qdrant
+```
+
+其中：
+
+```text
+MySQL
+=
+Business Source of Truth
+```
+
+```text
+Qdrant
+=
+Derived / Rebuildable Retrieval Index
+```
+
+目前没有因为长期 Roadmap 而提前加入：
 
 ```text
 Redis
-MQ
-Milvus
+RabbitMQ
+RocketMQ
+Kafka
 Elasticsearch
+Milvus
 Neo4j
 ```
 
----
-
-# 4. 长期目标架构
-
-随着 LifeInbox 逐渐发展，目标架构可能演进为：
+基础设施始终遵循：
 
 ```text
-                              LifeInbox
-                                  │
-                         ┌────────┴────────┐
-                         │     Vue 3       │
-                         │   Web / PWA     │
-                         └────────┬────────┘
-                                  │
-                           REST / Future SSE
-                                  │
-                                  ▼
-                       Spring Boot / Java
-                                  │
-             ┌────────────────────┼────────────────────┐
-             │                    │                    │
-             ▼                    ▼                    ▼
-           MySQL             File Storage       AI Integration
-      Business Source             │                    │
-          of Truth                │                    ▼
-             │                    │                 FastAPI
-             │                    │                AI Engine
-             │                    │                    │
-             │                    │        ┌───────────┼───────────┐
-             │                    │        ▼           ▼           ▼
-             │                    │     Parser      Embedding    Reranker
-             │                    │        │           │           │
-             │                    │        └───────────┼───────────┘
-             │                    │                    │
-             │                    │                    ▼
-             │                    │          Future Vector Store
-             │                    │
-             └────────────────────┴────────────────────┘
+Requirement
+    ↓
+Choose Infrastructure
 ```
 
-未来在出现真实需求后，可能逐步加入：
+而不是：
 
 ```text
-Redis
-→ Cache / Coordination / Task Support
-
-Vector Store
-→ Semantic Retrieval Index
-
-MQ
-→ Persistent Asynchronous AI Tasks
+Choose Technology
+    ↓
+Find a Problem
 ```
-
-这些是：
-
-```text
-Future Infrastructure
-```
-
-不是当前架构的必需组件。
 
 ---
 
-# 5. Java 与 Python 的边界
+# 5. Java 与 Python 的职责边界
 
 这是 LifeInbox 最重要的架构边界之一。
 
-## Java / Spring Boot
+## 5.1 Java / Spring Boot
 
 Java 负责：
 
-> 这个产品本身。
+> 产品与业务状态。
 
 包括：
 
 ```text
 InboxItem
-业务数据
-MySQL
-文件元数据
+Business Data
+MySQL Persistence
+File Metadata
 Capture
 Favorite
 Archive
 Delete
+
 AI Processing State
-AI Attempt
+AI Attempt Ownership
 AI Result Persistence
-Product API
-Search API
+
+Search Product API
+Keyword Retrieval
+Hybrid Search Orchestration
+Business Filters
+Final Result Composition
+
+V0.4 Action Candidate Business State
 Future Todo
 Future Deadline
-Future Auth / Permission
+
+Future Authentication
+Future Permission
 ```
 
 Java 是：
@@ -247,67 +274,77 @@ Business Source of Truth
 
 ---
 
-## Python / FastAPI
+## 5.2 Python / FastAPI
 
 Python 负责：
 
-> 理解这些信息。
+> 理解信息以及提供 AI / Retrieval 能力。
 
 当前包括：
 
 ```text
 URL 正文提取
-文档解析
+Document Parsing
 OCR
+
 Summary
 Category
 Tags
 Keywords
 Entities
-Structured Analyze
-Embedding Generation
-Semantic Retrieval
-Rerank
+
+Embedding
+Semantic Retrieval Support
+Reranking
 ```
 
-未来可以逐渐加入：
+V0.4 开始逐步加入：
+
+```text
+Action Extraction
+Deadline Extraction
+```
+
+未来可能加入：
 
 ```text
 Vision
 Relation Discovery
-Action Extraction
-Deadline Extraction
+Personal AI Support
 ```
 
 Python 不应该：
 
 ```text
 拥有 InboxItem 业务状态
-实现一套独立 InboxItem CRUD
+实现独立 InboxItem CRUD
 成为业务数据库 Source of Truth
+直接成为 Todo / Deadline 的业务所有者
 ```
 
-核心关系始终保持：
+核心关系保持：
 
 ```text
 Java：
-这里有一条信息。
+这里有一条信息，
+这是系统当前的业务事实。
 
 Python：
-我来理解这条信息是什么意思。
+我来理解这条信息是什么意思，
+并返回结构化建议。
 ```
 
 ---
 
 # 6. 统一 Inbox 模型
 
-LifeInbox 最重要的业务模型是：
+LifeInbox 最重要的业务模型始终是：
 
 ```text
 InboxItem
 ```
 
-当前内容类型：
+当前主要内容类型：
 
 ```text
 TEXT
@@ -316,29 +353,29 @@ FILE
 IMAGE
 ```
 
-未来如果出现真实需求，还可以增加其他类型。
-
-但是原则始终是：
+不同内容来源统一遵循：
 
 ```text
-不同来源
-    ↓
-统一进入 Inbox
-    ↓
-再进行后续处理
+Different Sources
+       ↓
+    InboxItem
+       ↓
+Content Processing
+       ↓
+AI / Search / Action
 ```
 
-不要变成：
+不要发展成：
 
 ```text
-网页一套核心模型
-PDF 一套核心模型
-图片一套核心模型
-笔记一套核心模型
-GitHub 一套核心模型
+网页一套核心业务模型
+PDF 一套核心业务模型
+图片一套核心业务模型
+文字一套核心业务模型
+GitHub 一套核心业务模型
 ```
 
-不同内容可以有不同的：
+不同类型可以拥有不同：
 
 ```text
 Parser
@@ -347,7 +384,7 @@ OCR
 Processing Strategy
 ```
 
-但是业务层仍然围绕：
+但业务层仍然围绕：
 
 ```text
 InboxItem
@@ -357,9 +394,45 @@ InboxItem
 
 ---
 
-# 7. Unified Analyze Pipeline
+# 7. Existing Repository Is the Source of Truth
 
-V0.2 已经形成统一 Analyze Pipeline：
+总体规划中的：
+
+```text
+raw_content
+file_id
+created_at
+document_chunk
+```
+
+等名称属于早期概念设计。
+
+当前仓库实际实现可能已经使用不同名称。
+
+原则：
+
+```text
+Current Repository Implementation
+>
+Old Placeholder Naming
+```
+
+因此：
+
+* 不为了匹配旧规划而重命名已经工作的字段。
+* 不为了匹配旧架构图而重写已经稳定的 Service。
+* 不因为旧规划出现某张表，就自动创建该表。
+* 不因为长期规划出现某项技术，就提前引入该技术。
+
+旧规划决定方向。
+
+当前仓库决定事实。
+
+---
+
+# 8. Unified Analyze Pipeline
+
+V0.2 已形成统一 Analyze Pipeline：
 
 ```text
 TEXT ───────────────────────┐
@@ -370,29 +443,24 @@ FILE  → Document Extraction ┤
                             │
 IMAGE → OCR ────────────────┤
                             ▼
+                    Prepared Content
+                            │
+                            ▼
                      AnalyzeService
                             │
                             ▼
-                     AnalyzeResult
+                      AnalyzeResult
 ```
 
-四种类型主要区别发生在：
+四种内容类型的主要差异发生在：
 
 ```text
 Content Preparation
 ```
 
-阶段。
+完成之后统一进入 AI Analyze。
 
-得到可分析文本后，
-
-统一进入：
-
-```text
-AnalyzeService
-```
-
-并生成：
+结构化结果包括：
 
 ```text
 Summary
@@ -402,23 +470,23 @@ Keywords
 Entities
 ```
 
-原则上使用一次结构化 Analyze，
+原则上使用统一结构化 Analyze，
 
 而不是：
 
 ```text
-Summary 调一次 LLM
-Category 调一次 LLM
-Tags 再调一次 LLM
-Keywords 再调一次 LLM
-Entities 再调一次 LLM
+Summary    → 单独一次 LLM
+Category   → 单独一次 LLM
+Tags       → 单独一次 LLM
+Keywords   → 单独一次 LLM
+Entities   → 单独一次 LLM
 ```
 
 ---
 
-# 8. Capture 与 AI 的解耦
+# 9. Capture 与 AI 解耦
 
-Capture 的优先级始终高于 AI Analyze。
+Capture 的优先级始终高于 AI。
 
 正确流程：
 
@@ -433,7 +501,7 @@ MySQL COMMIT
      ↓
 Return Capture Result
      ↓
-Background Analyze
+Background AI Processing
 ```
 
 而不是：
@@ -441,16 +509,18 @@ Background Analyze
 ```text
 User Capture
      ↓
+等待 URL Extract
+     ↓
 等待 OCR
      ↓
-等待网页
-     ↓
 等待 LLM
+     ↓
+等待 Embedding
      ↓
 最后才保存
 ```
 
-这保证了：
+核心保证：
 
 ```text
 AI Failure
@@ -460,7 +530,7 @@ Capture Failure
 
 ---
 
-# 9. Automatic Analyze
+# 10. Automatic Analyze
 
 当前 Automatic Analyze 使用：
 
@@ -468,44 +538,48 @@ Capture Failure
 @TransactionalEventListener(AFTER_COMMIT)
 ```
 
-数据库提交以后才触发后台分析：
+概念流程：
 
 ```text
 Capture Transaction
         ↓
       COMMIT
         ↓
-AFTER_COMMIT Event
+ AFTER_COMMIT Event
         ↓
+ Bounded Executor
+        ↓
+      Analyze
+```
+
+当前使用：
+
+```text
+Spring In-Process
 Bounded Executor
-        ↓
-Analyze
 ```
 
-当前使用 Spring 进程内有界线程池。
-
-当前设计重点是：
+而不是：
 
 ```text
-简单
-可理解
-适合个人项目
+Persistent MQ
 ```
 
-而不是提前引入复杂任务基础设施。
+这是当前阶段有意选择的简单方案。
 
-未来只有当：
+只有未来真正出现：
 
 ```text
-任务不能丢
-AI 任务规模明显增加
+AI Task 不能丢
+任务规模明显增加
 需要跨进程 Worker
-需要可靠重试
+需要持久化重试
+需要多实例协调
 ```
 
-等真实需求出现时，
+等问题时，
 
-才考虑：
+才评估：
 
 ```text
 Redis
@@ -515,9 +589,9 @@ Persistent Task Queue
 
 ---
 
-# 10. AI Processing State
+# 11. AI Processing State
 
-当前 AI Processing 状态：
+当前 AI Processing State：
 
 ```text
 NOT_PROCESSED
@@ -526,7 +600,7 @@ SUCCESS
 FAILED
 ```
 
-基本状态流：
+基本流程：
 
 ```text
 NOT_PROCESSED
@@ -548,26 +622,29 @@ SUCCESS / FAILED
 
 ---
 
-# 11. Transaction 与 Attempt Guard
+# 12. Transaction 与 Attempt Guard
 
-AI 外部调用不能占用数据库长事务。
+外部 AI 调用不能长期占用数据库事务。
 
-当前流程：
+当前架构：
 
 ```text
 短事务：
 领取 Processing Ownership
 写 PROCESSING + attemptId
         ↓
-事务提交
-        ↓
+      COMMIT
+
 事务外：
-URL / FILE / OCR / FastAPI / LLM
+URL / FILE / OCR
+FastAPI
+LLM
         ↓
+
 短事务：
-匹配 attemptId
-保存 AnalyzeResult
-写 SUCCESS / FAILED
+检查 attemptId
+保存新结果
+更新 SUCCESS / FAILED
 ```
 
 每个 Analyze Attempt 对应：
@@ -583,7 +660,7 @@ Attempt A
 id = AAA
 ```
 
-如果 A 超时并成为 stale，
+如果 A 超时，
 
 新的：
 
@@ -592,7 +669,7 @@ Attempt B
 id = BBB
 ```
 
-可以接管。
+接管。
 
 如果旧 A 后来返回：
 
@@ -600,21 +677,20 @@ id = BBB
 AAA != 当前 BBB
 ```
 
-它不能：
+则 A 不允许：
 
 ```text
 覆盖 B 的结果
-把 B 改成 SUCCESS
-把 B 改成 FAILED
+覆盖新的 Searchable Content
+改变 B 的状态
+覆盖由 B 产生的新结果
 ```
 
-因此迟到结果不能覆盖新的 Processing Ownership。
+迟到结果不能覆盖新的 Processing Ownership。
 
 ---
 
-# 12. AI Failure Degradation
-
-AI Failure 不能破坏原始数据。
+# 13. AI Failure Degradation
 
 如果：
 
@@ -623,7 +699,7 @@ FastAPI Down
 LLM Error
 Timeout
 URL Extraction Failure
-PDF Extraction Failure
+Document Extraction Failure
 OCR Failure
 ```
 
@@ -635,9 +711,7 @@ Original InboxItem
 
 仍然必须存在。
 
-Re-analyze 开始时：
-
-也不会先删除已有：
+Re-analyze 开始时也不能先清空已有：
 
 ```text
 Summary
@@ -645,64 +719,68 @@ Category
 Tags
 Keywords
 Entities
+Searchable Content
 ```
 
-只有完整的新 AnalyzeResult 成功后，
-
-才替换旧结果。
-
-因此：
+正确策略：
 
 ```text
-新的 Analyze 失败
+Old Successful Result
+        ↓
+Keep
+        ↓
+New Processing
+        ↓
+New Complete Success
+        ↓
+Replace
 ```
 
-不会自动导致：
+如果新 Analyze 失败：
 
 ```text
-旧的成功结果消失
+Old Successful Data Remains
 ```
 
 ---
 
-# 13. V0.3 Search Architecture
+# 14. V0.3 Smart Search — Completed Architecture
 
-V0.3 的目标是：
-
-> 用户记得内容讲了什么，即使忘记准确标题和关键词，也能重新找到它。
-
-因此 V0.3 最终不能停留在：
-
-```sql
-WHERE title LIKE '%keyword%'
-```
-
-长期目标：
+V0.3 已经完成：
 
 ```text
-User Query
-    │
-    ├─────────────────┐
-    ▼                 ▼
-Keyword            Semantic
-Search              Search
-    │                 │
-    └────────┬────────┘
-             ▼
-       Hybrid Retrieval
-             ↓
-           Rerank
-             ↓
-       Final Results
+Retrieve
 ```
 
----
+最终架构：
 
-# 14. V0.3 渐进式 Search Pipeline
+```text
+                         User Query
+                             │
+                ┌────────────┴────────────┐
+                ▼                         ▼
+        Keyword Retrieval         Semantic Retrieval
+                │                         │
+              MySQL                Query Embedding
+                                          │
+                                          ▼
+                                       Qdrant
+                │                         │
+                └────────────┬────────────┘
+                             ▼
+                            RRF
+                             │
+                             ▼
+                     Hybrid Candidates
+                             │
+                             ▼
+                         Reranker
+                             │
+                             ▼
+                       Final Results
+```
 
-Search 不一次性完成。
-
-推荐演进：
+V0.3 已完成的主要阶段：
 
 ```text
 Basic Keyword Search
@@ -715,46 +793,30 @@ Searchable Content
         ↓
 Embedding Pipeline
         ↓
-Vector Retrieval
+Vector Storage / Indexing
         ↓
 Semantic Search
         ↓
 Hybrid Search
         ↓
-Rerank
-```
-
-已实现前九步：
-
-```text
-Basic Keyword Search
-        ↓
-AI-derived Field Search
-        ↓
-Filter / Ranking / Highlight
-        ↓
-Searchable Content
-        ↓
-Embedding Pipeline
-        ↓
-Vector Storage / Indexing Lifecycle
-        ↓
-Semantic Search
-        ↓
-Hybrid Search
+RRF
         ↓
 Rerank
+        ↓
+Final Acceptance
 ```
 
-只是 V0.3 的起点，
+V0.3 已完成。
 
-不是 V0.3 的最终完成条件。
+V0.4 不应该重新设计该 Search Pipeline，
+
+除非当前 Task 明确要求修复 Search Bug。
 
 ---
 
-# 15. 当前 Keyword Search 架构
+# 15. Keyword Search Architecture
 
-Task 4 当前实现：
+Keyword Search：
 
 ```text
 Vue Search UI
@@ -763,12 +825,12 @@ Spring Boot Search API
       ↓
 MySQL
       ↓
-Keyword Search
+Keyword Retrieval
       ↓
 InboxItem Results
 ```
 
-当前查询已持久化的：
+当前可搜索的持久化信息包括：
 
 ```text
 title
@@ -778,286 +840,578 @@ category
 tags
 keywords
 entities
-searchable_content（URL / FILE / IMAGE）
+searchable_content
 ```
 
-TEXT 直接复用业务源字段 `content`，不复制原文。URL、FILE、IMAGE 复用 V0.2 的安全网页提取、文档文本提取和 OCR，
-把归一化且最长 20,000 字符的派生正文保存到可空的 `inbox_item.searchable_content`。该字段可以重新生成，
-不是原始内容、文件或 AI 结构化结果的业务 Source of Truth，也不通过产品 API 暴露。
+具体字段以当前仓库实现为准。
+
+查询始终由 Spring Boot：
 
 ```text
-URL / FILE / IMAGE
-        ↓
-FastAPI 复用现有提取器（不调用 LLM）
-        ↓
-Spring Boot 以 Attempt Guard 短更新保存 Searchable Content
-        ↓
-FastAPI /analyze 生成结构化 AI 结果
+parameterized SQL
++
+ACTIVE business condition
++
+business filters
 ```
 
-提取成功后即保存，因此后续 LLM 失败不会丢失本次可搜正文；提取失败不会覆盖旧值。重新分析成功提取会替换旧值，
-过期 Attempt 不能覆盖较新的内容。旧数据允许保持 NULL，当前不在启动时扫描或批量回填。
+控制。
 
-查询由 Spring Boot 参数化调用 MySQL，限制为 ACTIVE，并使用确定性的字段优先级排序返回现有 InboxItem 表示。
-tags、keywords、entities 使用相关 EXISTS 子查询，既在数据库内判断候选，也不会因多个匹配关系产生重复主表行。
+Tags、Keywords、Entities 等关联数据的匹配保持数据库侧完成。
 
-当前仍是条目级统一正文，不拆分 document chunk。Task 25 的 EmbeddingService 继续只负责 `Text → Vector`；
-Task 26 由独立 VectorIndexService 编排 Embedding 与 VectorStoreService，并由 Python 独占 Qdrant 访问。
+避免：
 
 ```text
-InboxItem 原始数据 / 受管文件 / URL
-                ↓
-Searchable Content（可重建派生数据）
-                ↓
-Embedding Service（可重建派生数据）
-                ↓
-EmbeddingResult：model + dimension + vector
-                ↓
-VectorIndexService
-                ↓
-Qdrant Item-level Point（可重建派生索引）
+N+1
+重复主表结果
+SELECT 全部以后 Java Filter
 ```
-
-TEXT Capture 提交后、或 URL/FILE/IMAGE 正文以 Attempt Guard 成功更新后，Java 复用现有有界执行器异步调用
-FastAPI `/vector/index`。Worker 调用前重新读取 MySQL，校验 ACTIVE、当前 Attempt 和当前正文；同一 InboxItem
-使用稳定 Point ID，并串行执行 Index/Delete。Re-analyze 对同一点 Upsert，Archive/Delete 则 best-effort 删除。
-Vector 或 Embedding 失败只记录日志，不改变 Analyze SUCCESS/FAILED、不回滚业务事务，也不清除 Searchable Content。
-
-Qdrant 默认关闭，首次真实索引才惰性连接和创建 Cosine Collection。配置的 Collection 名是前缀，物理名称绑定
-Embedding Model 的 SHA-256 与真实维度；切换模型或维度进入不同 Collection，不会静默混用，也不会自动 DROP
-旧索引。Qdrant 只保存 Point ID、`inboxItemId`、`embeddingModel`、`contentHash` 和 `indexedTime`；完整正文和业务状态
-仍只属于 MySQL。当前没有 Startup Backfill、Batch Reindex 或 Chunk Retrieval。
 
 ---
 
-# 16. 当前 Semantic / Hybrid / Rerank Search
+# 16. Searchable Content
 
-Task 27 在 Keyword Search 之外增加独立的 Semantic Mode：
+V0.3 引入 Searchable Content 作为统一检索正文。
+
+当前概念：
+
+```text
+TEXT
+→ Original Content
+
+URL
+→ Extracted Web Body
+
+FILE
+→ Extracted Document Text
+
+IMAGE
+→ OCR Text
+```
+
+TEXT 继续直接使用原业务字段，
+
+不为了 Search 重复保存整份原文。
+
+URL / FILE / IMAGE 可以产生：
+
+```text
+searchable_content
+```
+
+该数据属于：
+
+```text
+Derived / Rebuildable Retrieval Data
+```
+
+不是：
+
+```text
+Original Business Source of Truth
+```
+
+当前实现仍保持：
+
+```text
+Item-level Searchable Content
+```
+
+没有：
+
+```text
+document_chunk
+Chunk Retrieval
+Chunk Embedding
+```
+
+---
+
+# 17. Searchable Content Pipeline
+
+概念流程：
+
+```text
+InboxItem
+    ↓
+Content Preparation
+    ↓
+Searchable Content
+    ↓
+┌───────────────┬────────────────┐
+▼               ▼                ▼
+Keyword       Embedding       Future Action
+Search                         Extraction
+```
+
+这也是 V0.4 的重要基础。
+
+原则：
+
+> Action Extractor 应优先复用已经存在的可用文本准备能力，而不是重新建立第二套 URL / FILE / OCR 提取体系。
+
+---
+
+# 18. Embedding Pipeline
+
+Embedding 架构：
+
+```text
+Text
+ ↓
+EmbeddingService
+ ↓
+Embedding Provider
+ ↓
+EmbeddingResult
+```
+
+EmbeddingResult 包含：
+
+```text
+model
+dimension
+vector
+```
+
+Embedding 属于：
+
+```text
+Derived Retrieval Capability
+```
+
+它不属于业务 Source of Truth。
+
+Embedding Failure：
+
+```text
+≠
+Analyze Failure
+≠
+Capture Failure
+```
+
+---
+
+# 19. Vector Index Architecture
+
+当前：
+
+```text
+Searchable Content
+        ↓
+EmbeddingService
+        ↓
+EmbeddingResult
+        ↓
+VectorIndexService
+        ↓
+VectorStoreService
+        ↓
+Qdrant
+```
+
+Qdrant 使用：
+
+```text
+Item-level Point
+```
+
+同一个 InboxItem 使用稳定 Point Identity。
+
+Re-analyze：
+
+```text
+same InboxItem
+   ↓
+upsert
+```
+
+而不是无限创建新 Point。
+
+Archive / Delete 根据当前真实实现执行：
+
+```text
+best-effort vector cleanup
+```
+
+Vector 操作失败：
+
+```text
+只影响 Vector Enhancement
+```
+
+不能：
+
+```text
+回滚 InboxItem
+改变 AI SUCCESS
+删除 Searchable Content
+```
+
+---
+
+# 20. Qdrant Ownership
+
+Qdrant 是：
+
+```text
+Derived / Rebuildable Vector Index
+```
+
+MySQL 是：
+
+```text
+Authoritative Business Database
+```
+
+Qdrant 可以保存：
+
+```text
+InboxItem ID
+Embedding Vector
+Embedding Model
+Content Hash
+Minimal Retrieval Metadata
+```
+
+不能成为：
+
+```text
+InboxItem Business Database
+Favorite Source of Truth
+Archive Source of Truth
+AI Status Source of Truth
+Todo Source of Truth
+Deadline Source of Truth
+```
+
+理论上：
+
+```text
+MySQL
+ ↓
+Searchable Content
+ ↓
+Embedding
+ ↓
+Rebuild Qdrant
+```
+
+应该能够重新构建索引。
+
+---
+
+# 21. Semantic Search Architecture
+
+Semantic Search：
 
 ```text
 User Query
      ↓
-Spring Boot /api/search?mode=semantic
+Spring Boot
      ↓
-FastAPI /vector/search
+FastAPI Semantic Retrieval
      ↓
-Existing EmbeddingService
+Query Embedding
      ↓
-Qdrant Cosine Top K
+Qdrant
      ↓
 Candidate IDs + Scores
      ↓
-Spring Boot 一次批量查询
+Spring Boot
      ↓
-MySQL ACTIVE + type/category/favorite
+MySQL Batch Resolution
      ↓
-按 Qdrant 顺序重组 Authoritative InboxItems
+ACTIVE + Business Filters
+     ↓
+Authoritative InboxItems
 ```
 
-Query 与 Document 复用相同 EmbeddingService。物理 Collection 由 Provider 返回的模型完整 Hash 和真实维度决定；
-目标 Collection 缺失不会在查询时自动创建，存在其他受管模型/维度 Collection 时也不会静默跨空间搜索。
-Qdrant 默认返回最多 2 倍候选并保持 100 上限，Java 过滤后最多返回请求的产品数量；过滤不足时允许少于目标条数。
+Qdrant 返回：
 
-Keyword 仍是默认且完全独立的 MySQL 路径。Task 28 由 Java 在 Service 层协调两条检索分支：
+```text
+Retrieval Candidate
+```
+
+而不是最终业务对象。
+
+最终结果必须重新回到：
+
+```text
+MySQL
+```
+
+解析当前真实业务状态。
+
+因此：
+
+```text
+Stale Qdrant Point
++
+Deleted / Archived MySQL Item
+=
+Do Not Return
+```
+
+---
+
+# 22. Hybrid Search Architecture
+
+Hybrid Search 由 Java 协调。
 
 ```text
                          Query
                            │
-               ┌───────────┴───────────┐
-               ▼                       ▼
-     MySQL Keyword Retrieval   FastAPI Semantic Retrieval
-               │                       │
-               └───────────┬───────────┘
+              ┌────────────┴────────────┐
+              ▼                         ▼
+     MySQL Keyword Retrieval   Semantic Retrieval
+              │                         │
+              └────────────┬────────────┘
                            ▼
-                 Reciprocal Rank Fusion
-                    RRF_K = 60
+                  Reciprocal Rank Fusion
                            ↓
-              Bounded Hybrid Candidates
-                           ↓
-               Optional Batch Reranker
-                           ↓
-                    Final Results
+                  Hybrid Candidates
 ```
 
-两条分支分别最多获取 `min(limit × 2, 100)` 个候选。Fusion 只使用候选在各自列表中的一基排名，按
-`Σ 1 / (60 + rank)` 累加，不直接混加 Keyword 字段权重与 Qdrant Cosine Score。同一 InboxItem 以 MySQL ID
-去重，双方都命中时获得两份贡献；RRF Score 只存在于当前 Java 请求，不持久化也不返回前端。
-
-Keyword 分支已经由 MySQL 应用 ACTIVE 与业务 Filter；Semantic 分支继续批量回查同一 MySQL 条件并恢复 Qdrant
-顺序，因此 Fusion 输入都来自当前业务事实。Semantic/Vector 失败时 Hybrid 返回 Keyword-only，Keyword 失败但
-Semantic 成功时返回 Semantic-only；两个分支都失败才返回受控错误。显式 `mode=semantic` 仍不自动回退。
-
-Task 29 在 Java 显式启用时，让 RRF 先保留 `min(limit × 2, 100)` 条 Item-level Candidate，再把 title、summary 与
-Task 24 Retrieval 正文组成每条最多 2,000 字符的文本，一次批量交给 FastAPI Reranker。Python 只返回已有 ID 与
-瞬时相关性 Score；Java 按 Score 排序、同分保持 RRF 顺序，并在最后裁到产品 `limit`。Rerank 不访问 MySQL、
-Qdrant 或重新执行 Retrieval，也不持久化 Score。
-
-RRF 只负责 Retrieval Fusion，Reranker 只负责有限 Candidate 的最终相关性精排。Rerank 默认关闭；未配置、超时、
-Provider 故障、未知/重复 ID 或非法 Score 都会完整回退原 RRF 顺序，因此 Reranker Down 不等于 Hybrid Search Down。
-
-例如：
+Hybrid 不直接混加：
 
 ```text
-Query:
-那个讲 Redis 防止重复请求的文章
+Keyword Weight
++
+Cosine Score
 ```
 
-即使原文没有完全相同的关键词，
+因为两类 Score 并不是同一量纲。
 
-Semantic Retrieval 仍应有机会根据：
+当前使用：
 
 ```text
-幂等
-Redis Lua
-分布式锁
-Redisson
+Reciprocal Rank Fusion
 ```
 
-等概念找到相关内容。
-
----
-
-# 17. Search Data Ownership
-
-加入 Vector Store 后：
-
-MySQL 仍然是：
+公式概念：
 
 ```text
-Business Source of Truth
+RRFScore(d)
+=
+Σ 1 / (k + rank_i(d))
 ```
 
-关系：
+当前：
+
+```text
+RRF_K = 60
+```
+
+RRF Score：
+
+```text
+Runtime Only
+```
+
+不保存到：
 
 ```text
 MySQL
-=
-Authoritative Business Data
-
-Vector Store
-=
-Derived / Rebuildable Retrieval Index
-```
-
-Vector Store 可以保存：
-
-```text
-InboxItem ID
-Embedding
-Minimal Retrieval Metadata
-```
-
-但是不能成为：
-
-```text
-InboxItem Business Database
-```
-
-如果 Vector Index 全部丢失：
-
-```text
-LifeInbox Business Data
-```
-
-仍然必须完整存在。
-
-理论上应该能够：
-
-```text
-MySQL
- ↓
-重新生成 Embedding
- ↓
-重建 Vector Index
-```
-
----
-
-# 18. Search Result Ownership
-
-Semantic Search 返回：
-
-```text
-inboxItemId
-score
-```
-
-例如：
-
-```text
-123 → 0.92
-456 → 0.86
-```
-
-这些只是：
-
-```text
-Retrieval Candidates
-```
-
-最终业务结果应该由 Java 根据：
-
-```text
-inboxItemId
-```
-
-重新解析真实：
-
-```text
+Qdrant
 InboxItem
 ```
 
-也就是：
+---
+
+# 23. Hybrid Failure Degradation
+
+Hybrid 的设计目标之一是可靠降级。
+
+概念：
 
 ```text
-Vector Search
+Semantic Success
++
+Keyword Success
+→ RRF
+```
+
+如果 Semantic / Vector 失败：
+
+```text
+Hybrid
+ ↓
+Keyword-only
+```
+
+如果 Keyword 失败但 Semantic 成功：
+
+```text
+Hybrid
+ ↓
+Semantic-only
+```
+
+两个 Retrieval 分支都失败：
+
+```text
+Controlled Search Error
+```
+
+显式 Semantic Mode：
+
+```text
+mode=semantic
+```
+
+保持自己的错误语义，
+
+不应该悄悄伪装成 Keyword Search。
+
+---
+
+# 24. Rerank Architecture
+
+Rerank 只处理：
+
+```text
+Bounded Hybrid Candidates
+```
+
+不会重新搜索整个 Inbox。
+
+流程：
+
+```text
+RRF Candidates
       ↓
-Candidate IDs
+Build Bounded Candidate Text
+      ↓
+FastAPI Batch Reranker
+      ↓
+Candidate IDs + Runtime Score
       ↓
 Spring Boot
       ↓
-MySQL
-      ↓
-Authoritative InboxItem
+Final Ordering
+```
+
+Reranker 不负责：
+
+```text
+访问 MySQL
+访问 Qdrant
+重新执行 Retrieval
+扩大 Candidate Set
+```
+
+它只负责：
+
+```text
+Candidate Relevance Refinement
 ```
 
 ---
 
-# 19. Search Failure Degradation
+# 25. Rerank Failure Degradation
+
+Rerank 是增强能力。
 
 如果：
 
 ```text
-Embedding Service
-Vector Store
-Semantic Search
+Rerank Disabled
+Rerank Provider Down
+Timeout
+429
+5xx
+Invalid Response
+Unknown ID
+Duplicate ID
+Invalid Score
 ```
 
-发生故障，
-
-显式 `mode=semantic` 返回受控错误，不静默伪装成 Keyword 结果；但是默认：
+则：
 
 ```text
-mode=keyword
-依然只依赖 MySQL 并保持可用
+Hybrid
+ ↓
+Original RRF Order
 ```
 
-同时 Search 故障不能破坏：
+继续可用。
+
+因此：
 
 ```text
-Capture
-Inbox
-Favorite
-Archive
-Delete
-Existing AI Results
+Reranker Down
+≠
+Hybrid Search Down
+```
+
+进一步：
+
+```text
+Qdrant / Embedding Down
+→ Keyword Search
+
+FastAPI Down
+→ Capture + Inbox + Keyword Search
 ```
 
 ---
 
-# 20. Search 与 RAG 的边界
+# 26. External AI Provider Boundary
 
-V0.3 当前目标是：
+LifeInbox 不应该把具体 Provider 的 API 细节扩散到业务层。
+
+概念：
+
+```text
+Spring Boot
+    ↓
+FastAPI Internal Capability
+    ↓
+Provider Client
+    ↓
+External AI Provider
+```
+
+Chat / Embedding / Rerank 可以拥有不同 Provider Endpoint 配置。
+
+例如当前百炼兼容接入中：
+
+```text
+Chat / Embedding
+→ compatible-mode/v1
+
+Rerank
+→ compatible-api/v1/reranks
+```
+
+这属于：
+
+```text
+AI Engine Provider Integration Detail
+```
+
+而不是：
+
+```text
+Spring Boot Product Architecture
+```
+
+具体环境变量和 Provider 配置以：
+
+```text
+ai-engine/README.md
+.env.example
+```
+
+为准。
+
+---
+
+# 27. Search 与 RAG 的边界
+
+V0.3 完成的是：
 
 ```text
 Retrieve
@@ -1072,49 +1426,141 @@ Search 回答：
 RAG 回答：
 
 ```text
-根据检索出的信息生成什么答案？
+根据这些信息应该生成什么答案？
 ```
 
-两者不是同一个能力。
+两者不同。
 
-因此加入：
+因此已经拥有：
 
 ```text
 Embedding
-Vector Search
+Qdrant
 Semantic Search
+Hybrid Search
+Rerank
 ```
 
-并不意味着应该自动加入：
+并不意味着项目现在应该自动加入：
 
 ```text
 RAG
-Chat
+Chat With Data
 Agent
-Memory
+Memory Framework
 MCP
 ```
 
-这些能力应该在 Retrieve 足够可靠以后再考虑。
+这些仍属于未来阶段。
 
 ---
 
-# 21. V0.4 Action Architecture
+# 28. V0.4 Action Extractor — Current Architecture Direction
 
-V0.4 将在已有 AI Understanding 基础上增加：
+V0.4 当前目标：
 
 ```text
-Captured Content
-       ↓
-Content Preparation
-       ↓
+Information
+     ↓
+Action Candidate
+     ↓
+User Decision
+     ↓
+Business Action
+```
+
+概念架构：
+
+```text
+InboxItem
+    │
+    ▼
+Usable Content
+    │
+    ▼
 Action Extraction
-       ↓
+    │
+    ▼
 Structured Action Candidate
-       ↓
-Java Business Confirmation
-       ↓
-Todo / Deadline
+    │
+    ▼
+Spring Boot Business Layer
+    │
+    ▼
+User Confirmation / Ignore
+    │
+    ▼
+Future Todo / Deadline
+```
+
+这里最重要的架构边界是：
+
+```text
+AI Candidate
+≠
+Confirmed Business Action
+```
+
+---
+
+# 29. Action Extraction Input
+
+Action Extractor 不应该重新建立第二套：
+
+```text
+URL Fetcher
+PDF Parser
+OCR Pipeline
+```
+
+而应该优先复用已经存在的内容准备结果。
+
+候选输入可能来自：
+
+```text
+TEXT
+→ original content
+
+URL
+→ extracted web body
+
+FILE
+→ extracted document text
+
+IMAGE
+→ OCR text
+```
+
+以及当前已有：
+
+```text
+Searchable Content
+```
+
+具体最终输入策略应由 V0.4 当前 Task 根据仓库真实实现确定。
+
+原则：
+
+```text
+Reuse Existing Prepared Content
+```
+
+而不是：
+
+```text
+Build Another Extraction Stack
+```
+
+---
+
+# 30. Action Extractor 与 Python
+
+Python 负责：
+
+```text
+Action Detection
+Deadline Detection
+Structured Action Suggestion
 ```
 
 例如：
@@ -1124,7 +1570,7 @@ Todo / Deadline
 8月25日前交报告
 ```
 
-Python 可以返回：
+可能得到：
 
 ```json
 {
@@ -1135,39 +1581,302 @@ Python 可以返回：
 }
 ```
 
-Python 负责：
+注意：
 
-```text
-识别 Action
-```
+这只是概念 Schema。
+
+最终字段名由 V0.4 当前实现决定。
+
+不要因为本架构文档示例而强制数据库采用完全相同字段名。
+
+---
+
+# 31. Action Business Ownership
 
 Java 负责：
 
 ```text
-Todo / Deadline 的业务状态和持久化
+Action Candidate Persistence
+User Confirmation
+Ignore / Dismiss
+Todo Business State
+Deadline Business State
+Source Relationship
+```
+
+Python 不应该：
+
+```text
+直接创建最终 Todo
+直接修改用户确认的 Deadline
+直接完成 Todo
+直接删除用户任务
+直接调用 Calendar 创建事件
+```
+
+核心关系：
+
+```text
+Python:
+“我认为这里可能存在一个 Action。”
+
+Java:
+“这是一个候选，我负责产品和业务规则。”
+
+User:
+“是否真正接受，由我决定。”
 ```
 
 ---
 
-# 22. V0.5 Relation Architecture
+# 32. User Decision Priority
 
-V0.5 可以逐渐建立：
+V0.4 必须遵守：
+
+```text
+User-confirmed State
+        >
+Current Business State
+        >
+AI-generated Suggestion
+```
+
+例如：
+
+AI 第一次识别：
+
+```text
+Deadline = 2026-08-25
+```
+
+用户手动修改：
+
+```text
+Deadline = 2026-08-28
+```
+
+后续 Re-analyze 不应该：
+
+```text
+AI Again
+→ 2026-08-25
+→ Silent Overwrite
+```
+
+用户确认后的业务状态拥有更高优先级。
+
+---
+
+# 33. Action Source Traceability
+
+未来 Action / Todo / Deadline 应尽可能能够追溯到原始 InboxItem。
+
+概念：
+
+```text
+Action
+   ↓
+sourceInboxItemId
+   ↓
+InboxItem
+```
+
+用户应该能够理解：
+
+```text
+这个 Todo 为什么出现？
+这个 Deadline 来自哪里？
+```
+
+不要为了追溯而复制整份原始内容。
+
+优先引用：
+
+```text
+Authoritative InboxItem
+```
+
+---
+
+# 34. Deadline Architecture Principle
+
+日期抽取必须区分：
+
+```text
+Original Expression
+```
+
+和：
+
+```text
+Normalized Date / Time
+```
+
+例如：
+
+```text
+“下周五之前”
+```
+
+可能需要根据上下文转换为具体日期。
+
+但是不能无依据猜测：
+
+```text
+year
+timezone
+exact time
+```
+
+如果语义存在不确定性，
+
+应该优先：
+
+```text
+Expose Uncertainty
+or
+Require Confirmation
+```
+
+而不是制造虚假的精确值。
+
+---
+
+# 35. Action Failure Degradation
+
+如果：
+
+```text
+Action Extractor Down
+LLM Error
+Timeout
+Invalid Structured Response
+Deadline Parse Failure
+```
+
+不能导致：
+
+```text
+Capture Failure
+InboxItem Loss
+AI Organizer Result Loss
+Searchable Content Loss
+Vector Index Loss
+Search Failure
+```
+
+Action Extractor 是增强能力。
+
+正确关系：
+
+```text
+Action Extraction Failure
+≠
+Inbox Failure
+```
+
+---
+
+# 36. Action Reprocessing
+
+如果 Action Extraction 被重新运行：
+
+```text
+Re-analyze
+Retry
+Manual Re-extract
+```
+
+必须检查当前业务状态。
+
+原则：
+
+```text
+New AI Suggestion
+```
+
+不能自动覆盖：
+
+```text
+User-confirmed Todo
+User-edited Deadline
+Dismissed Candidate
+Completed Task
+```
+
+如果已有 Attempt Ownership 机制适用于该流程，
+
+应优先复用，
+
+避免：
+
+```text
+Older Action Extraction
+```
+
+覆盖：
+
+```text
+Newer Action Extraction
+```
+
+---
+
+# 37. V0.4 Scope Boundary
+
+V0.4 Action Extractor 并不自动意味着：
+
+```text
+Google Calendar Integration
+Calendar Sync
+Push Notification
+Reminder Scheduler
+Recurring Task
+Autonomous Agent
+Workflow Engine
+External Tool Execution
+Email Sending
+```
+
+第一阶段优先完成：
+
+```text
+Detect
+   ↓
+Structure
+   ↓
+Present
+   ↓
+Confirm
+```
+
+之后再决定：
+
+```text
+Execute
+```
+
+---
+
+# 38. V0.5 Relation Architecture
+
+V0.5 可能逐渐建立：
 
 ```text
 InboxItem
-    │
-    ├── RELATED_TO
-    ├── SAME_TOPIC
-    └── SUPPORTS
+   │
+   ├── RELATED_TO
+   ├── SAME_TOPIC
+   └── SUPPORTS
 ```
 
-初期优先使用：
+初期优先：
 
 ```text
 MySQL
 ```
 
-例如：
+可能的概念模型：
 
 ```text
 content_relation
@@ -1178,21 +1887,27 @@ relation_type
 score
 ```
 
-不要因为出现内容关系就立即引入：
+不要因为出现关系数据就直接加入：
 
 ```text
 Neo4j
 ```
 
-只有真正需要复杂图遍历或图查询时，
+只有真正需要：
 
-再评估 Graph Database。
+```text
+复杂 Graph Traversal
+复杂图查询
+大规模关系分析
+```
+
+时才重新评估 Graph Database。
 
 ---
 
-# 23. V1.0 Personal AI
+# 39. V1.0 Personal AI
 
-Personal AI 应建立在已经稳定的：
+Personal AI 应建立在稳定的：
 
 ```text
 Capture
@@ -1210,12 +1925,12 @@ Relations
 
 之上。
 
-未来：
+未来可能形成：
 
 ```text
 User Question
       ↓
-LifeInbox Search
+LifeInbox Retrieval
       ↓
 Personal Data
       ↓
@@ -1233,7 +1948,7 @@ Personal Answer / Action
 或者：
 
 ```text
-我以前保存过哪些值得做成项目的东西？
+我保存过哪些值得做成项目的东西？
 ```
 
 这时 AI 才真正基于：
@@ -1244,13 +1959,21 @@ Personal LifeInbox Data
 
 工作。
 
-Agent 不应该早于可靠 Search 和可靠个人数据。
+Agent 不应该早于：
+
+```text
+Reliable Data
++
+Reliable Retrieval
++
+Reliable Action Boundary
+```
 
 ---
 
-# 24. Infrastructure Evolution
+# 40. Infrastructure Evolution
 
-基础设施应该跟着真实问题增长。
+基础设施跟随真实需求增长。
 
 当前：
 
@@ -1260,126 +1983,156 @@ MySQL
 Spring Boot
 +
 FastAPI
++
+Qdrant
 ```
 
-未来如果出现明确问题：
+如果未来出现：
 
 ```text
 需要 Cache / Coordination
 → Redis
 
-需要 Semantic Retrieval
-→ Vector Store
-
 需要可靠异步任务
 → MQ / Persistent Queue
+
+需要复杂 Graph Traversal
+→ Evaluate Graph Database
 ```
 
-不要按固定阶段强行安装技术。
+再选择对应技术。
 
-例如：
+因此：
 
 ```text
-进入 V0.3
+进入 V0.4
 ≠
-必须安装 Redis
+必须加入 Redis
 
-做 Semantic Search
+做 Todo
 ≠
-必须同时安装 MQ
+必须加入 MQ
+
+做 Deadline
+≠
+必须立刻接 Calendar
 
 做 Relations
 ≠
-必须安装 Neo4j
-```
+必须加入 Neo4j
 
-始终坚持：
-
-```text
-Requirement
-   ↓
-Choose Infrastructure
-```
-
-而不是：
-
-```text
-Choose Technology
-   ↓
-再寻找使用场景
+使用 Qdrant
+≠
+整个系统必须围绕 Vector Database 设计
 ```
 
 ---
 
-# 25. Repository Architecture
+# 41. Browser Extension
+
+Browser Extension 仍然属于未来重要的 Capture Enhancement。
+
+目标体验：
+
+```text
+看到网页
+ ↓
+Click Save
+ ↓
+LifeInbox
+```
+
+它最初曾出现在较早版本规划中，
+
+现在被延后，
+
+但这属于：
+
+```text
+Priority Adjustment
+```
+
+不是：
+
+```text
+Architecture Drift
+```
+
+目前优先完成核心闭环：
+
+```text
+Capture
+↓
+Understand
+↓
+Organize
+↓
+Retrieve
+↓
+Action
+```
+
+之后再增强 Capture 入口。
+
+---
+
+# 42. Repository Architecture
 
 LifeInbox 保持 Monorepo：
 
 ```text
 life-inbox/
-├── web/                 # Vue frontend
-├── server/              # Spring Boot product backend
-├── ai-engine/           # FastAPI AI engine
-├── docs/                # Architecture / DB / API / Roadmap
-├── extension/           # Future browser extension
-├── deploy/              # Future deployment
+│
+├── web/
+│   └── Vue 3 frontend
+│
+├── server/
+│   └── Spring Boot product backend
+│
+├── ai-engine/
+│   └── FastAPI AI engine
+│
+├── docs/
+│   ├── architecture.md
+│   ├── database.md
+│   ├── api.md
+│   ├── roadmap.md
+│   └── history/
+│
+├── extension/
+│   └── Future browser Capture enhancement
+│
+├── deploy/
+│   └── Deployment-related configuration
+│
 ├── AGENTS.md
 ├── README.md
 └── .gitignore
 ```
 
-未来的模块只有在出现真实实现时才创建。
+未来模块只有在出现真实需求时才创建。
 
-不要因为总体规划中存在：
+不要因为总体架构里存在：
 
 ```text
-search
 todo
-relation
-embedding
-reranker
+deadline
 action
+relation
+agent
+rag
+memory
 ```
 
-就提前创建大量空目录。
+就提前创建大量空模块。
 
 ---
 
-# 26. Browser Extension
-
-最初规划中的 Browser Extension 仍然属于有价值的 Capture Enhancement。
-
-未来目标：
-
-```text
-看到网页
- ↓
-点击 Save
- ↓
-LifeInbox
-```
-
-但是它和当前：
-
-```text
-V0.3 Smart Search
-```
-
-没有直接依赖关系。
-
-因此当前没有实现 Browser Extension，
-
-不代表整体架构发生偏移。
-
-只是优先级被延后。
-
----
-
-# 27. Current Capability Boundary
+# 43. Current Capability Boundary
 
 ## Capture
 
-当前：
+当前已完成：
 
 ```text
 TEXT
@@ -1392,7 +2145,7 @@ IMAGE
 
 ## AI Understanding
 
-当前：
+当前已完成：
 
 ```text
 Summary
@@ -1404,45 +2157,29 @@ Entities
 
 ---
 
-## URL
+## Content Extraction
 
-当前主要支持：
-
-```text
-Static HTML
-```
-
-暂不执行复杂 JavaScript Rendering。
-
----
-
-## FILE
-
-当前主要支持：
+当前根据真实实现主要包含：
 
 ```text
-TXT
-Markdown
-Text-layer PDF
+URL
+→ Web Content Extraction
+
+FILE
+→ Supported Document Text Extraction
+
+IMAGE
+→ OCR
+
+TEXT
+→ Original Content
 ```
 
-扫描 PDF 暂不 OCR。
+复杂 JavaScript Rendering、扫描 PDF OCR、General Vision 等能力是否支持，
 
----
+以当前实现和相关文档为准，
 
-## IMAGE
-
-当前：
-
-```text
-OCR-based Analyze
-```
-
-不是：
-
-```text
-General Vision
-```
+不要把计划能力描述成已完成。
 
 ---
 
@@ -1451,64 +2188,151 @@ General Vision
 当前：
 
 ```text
-Spring In-Process Bounded Executor
+Spring In-Process
+Bounded Executor
 ```
 
 不是：
 
 ```text
-Persistent MQ
+Persistent MQ Worker System
 ```
 
 ---
 
 ## Search
 
-当前已完成版本：
+当前：
 
 ```text
 V0.3 Smart Search
+✅ Completed
 ```
 
-已验收能力：
+已完成主要能力：
 
 ```text
-Basic Keyword Search
+Keyword Search
 AI-derived Field Search
-Search Filter / Ranking / Highlight
-Searchable Content Preparation
+Filter
+Basic Ranking
+Safe Highlight
+Searchable Content
 Embedding Pipeline
-Vector Storage / Indexing Lifecycle
+Qdrant Vector Index
 Semantic Search
 Hybrid Search
+RRF
 Rerank
+Failure Degradation
 Final Acceptance
 ```
 
-V0.3 的边界保持为：
+V0.3 边界：
 
 ```text
-Retrieve，不包含 RAG、Agent 或 V0.4 Action Extractor
+Retrieve
 ```
 
----
-
-## Future
-
-当前尚未进入：
+不包含：
 
 ```text
-Todo / Deadline
+RAG
+Agent
+Action Extractor
 Relations
-Personal RAG
-Personal Agent
-MCP
-Knowledge Graph
 ```
 
 ---
 
-# 28. Long-Term Architecture Principle
+## Action
+
+当前：
+
+```text
+V0.4 Action Extractor
+🚧 In Progress
+```
+
+目前属于：
+
+```text
+Architecture / Feature Development Stage
+```
+
+不能把以下能力提前描述为已完成：
+
+```text
+Todo Extraction
+Deadline Extraction
+Action Confirmation
+Reminder
+Calendar
+```
+
+具体完成状态必须随着 V0.4 Task 实际进度更新。
+
+---
+
+## Relations
+
+当前：
+
+```text
+📋 Planned
+```
+
+---
+
+## Personal AI
+
+当前：
+
+```text
+📋 Planned
+```
+
+---
+
+# 44. Architecture Priority Hierarchy
+
+发生设计冲突时，
+
+优先级应保持：
+
+```text
+User-confirmed Business State
+            ↓
+Current MySQL Business Data
+            ↓
+Current Repository Implementation
+            ↓
+Current Architecture Rules
+            ↓
+AI-generated Suggestions
+            ↓
+Old Planning Documents
+```
+
+其中：
+
+```text
+MySQL
+```
+
+继续拥有业务事实。
+
+AI 输出属于：
+
+```text
+Derived / Suggested Information
+```
+
+除非经过明确业务流程转化为已确认状态。
+
+---
+
+# 45. Long-Term Architecture Principle
 
 LifeInbox 的架构不应该由：
 
@@ -1520,13 +2344,14 @@ GraphRAG
 Multi-Agent
 Neo4j
 Kafka
-Qdrant
 Redis
+Qdrant
+Workflow
 ```
 
-这些技术名称决定。
+这些技术名字决定。
 
-应该由真实产品问题决定：
+应该由真实问题决定：
 
 ```text
 怎么更快 Capture？
@@ -1538,19 +2363,23 @@ Redis
 怎么真正 Retrieve？
         ↓
 怎么把信息变成 Action？
+        ↓
+怎么发现信息之间的 Relations？
+        ↓
+什么时候 Personal AI 才真正有价值？
 ```
 
-整个系统始终围绕：
+整个系统继续围绕：
 
 ```text
 Capture
- ↓
+   ↓
 Understand
- ↓
+   ↓
 Organize
- ↓
+   ↓
 Retrieve
- ↓
+   ↓
 Action
 ```
 
@@ -1559,12 +2388,93 @@ Action
 优先：
 
 ```text
-一个简单、可靠、真正能够每天使用的 LifeInbox
+一个简单、可靠、
+真正能够每天使用的 LifeInbox
 ```
 
 而不是：
 
 ```text
 一个拥有大量 AI 技术名词，
-但每项功能都没有真正完成的系统。
+但每一项功能都只完成 30% 的系统。
+```
+
+---
+
+# 46. 当前架构结论
+
+截至 V0.3 完成后，
+
+LifeInbox 已经形成：
+
+```text
+Universal Capture
+        ↓
+AI Understanding
+        ↓
+Structured Organization
+        ↓
+Searchable Content
+        ↓
+Keyword + Semantic Retrieval
+        ↓
+Hybrid / RRF
+        ↓
+Rerank
+        ↓
+Reliable Retrieve
+```
+
+当前 V0.4 将在此基础上继续：
+
+```text
+Reliable Retrieve
+       ↓
+Understand Action Intent
+       ↓
+Structured Action Candidate
+       ↓
+User Confirmation
+       ↓
+Todo / Deadline
+```
+
+因此当前架构主线仍然没有偏离最初设计。
+
+变化主要来自实际开发过程中的合理演进：
+
+```text
+Qdrant
+从 Future Infrastructure
+变成真实 Derived Retrieval Index
+
+Redis
+因为没有真实需求
+没有被强行加入
+
+Hybrid Search
+从最初简单概念
+发展为 RRF + Failure Degradation
+
+Rerank
+从概念阶段
+发展为独立可选 Provider Capability
+
+Browser Extension
+从早期优先项
+调整为未来 Capture Enhancement
+```
+
+这些变化都符合 LifeInbox 最核心的架构原则：
+
+```text
+Requirement First
+Technology Second
+```
+
+以及：
+
+```text
+Capture First,
+Organize Later.
 ```

@@ -1,72 +1,2245 @@
-# LifeInbox V0.3 数据库
+# LifeInbox 数据库设计
 
-数据库名为 `life_inbox`，Java 是唯一业务数据 Owner。当前 V0.3 仍使用 5 张表；新环境可执行 [`sql/v0.3-schema.sql`](sql/v0.3-schema.sql)，已有环境继续使用 `docs/sql/` 下保留的历史增量 SQL。
+## 1. 数据库定位
 
-## `inbox_item`
+LifeInbox 当前业务数据库使用：
 
-统一保存 TEXT、URL、FILE、IMAGE，不按类型拆分核心业务表。
+```text
+MySQL
+```
 
-| 字段组 | 主要字段 | 作用 |
-| --- | --- | --- |
-| 身份与类型 | `id`, `user_id`, `type` | 统一 InboxItem 身份与 Capture 类型 |
-| 原始内容 | `title`, `content`, `source_url`, `file_url` | TEXT 正文、URL、受管文件地址 |
-| 派生检索正文 | `searchable_content` | URL/FILE/IMAGE 提取后的条目级统一可搜正文 |
-| AI 结果 | `summary`, `category` | 当前最近一次成功的主结果 |
-| AI 状态 | `ai_status`, `ai_attempt_id`, `ai_error_message` | 状态机、并发保护和安全错误 |
-| AI 时间 | `ai_started_time`, `ai_finished_time` | 当前 Attempt 的开始/结束时间 |
-| Inbox 状态 | `status`, `favorite` | ACTIVE/ARCHIVED 与收藏 |
-| 审计时间 | `created_time`, `updated_time` | 创建与更新时间 |
+数据库名：
 
-`ai_status` 只有：
+```text
+life_inbox
+```
 
-- `NOT_PROCESSED`：尚未开始；
-- `PROCESSING`：当前 Attempt 正在处理；
-- `SUCCESS`：最近一次 Attempt 成功；
-- `FAILED`：最近一次 Attempt 失败，可重试。
+核心原则：
 
-stale 不写入数据库。Java 使用 `PROCESSING + ai_started_time + processing-stale-after` 动态计算 `aiProcessingStale`。
+```text
+Spring Boot / Java
+=
+Business Data Owner
 
-## Searchable Content
+MySQL
+=
+Business Source of Truth
+```
 
-`searchable_content` 是可空的 `MEDIUMTEXT` 派生字段，不是业务源数据：
+Java 是 LifeInbox 业务数据的唯一 Owner。
 
-- TEXT 直接使用 `content` 参与检索，不在该字段复制原文；
-- URL 复用安全网页正文提取，FILE 复用 TXT/Markdown/文本层 PDF 提取，IMAGE 复用 OCR；
-- Java 统一做 NFKC、换行和空白归一，最多保存 20,000 个 Java 字符；
-- 提取成功后先通过 `PROCESSING + ai_attempt_id` 条件短更新，再调用 LLM；LLM 失败不会清除已保存正文；
-- 提取失败或空结果不会覆盖旧值，过期 Attempt 也不能覆盖新值；
-- 重新分析成功提取会整体替换旧值，不追加、不分块；
-- 历史行允许为 NULL，当前没有启动扫描或自动回填。
+Python / FastAPI 负责 AI 理解、内容处理、Embedding、Semantic Retrieval、Rerank、未来 Action Extraction 等能力，但不拥有核心业务数据。
 
-选择 `MEDIUMTEXT` 是为了让最多 20,000 个字符在 `utf8mb4` 下仍有明确容量余量；本任务没有增加新表、Chunk、Embedding 或 Vector 字段。
+Qdrant 负责向量检索，但同样不是业务数据库。
 
-## Tags
+整体数据关系：
 
-`tag` 是全局展示字典，`normalized_name` 保存 NFKC/空白归一和小写后的唯一值。`inbox_tag` 使用 `(inbox_item_id, tag_id)` 复合主键建立多对多关系。删除 InboxItem 时关系由外键级联清理；没有引用的全局 tag 当前不会自动删除。
+```text
+                        LifeInbox
 
-## Keywords 与 Entities
+                           MySQL
+                             │
+                     Business Source
+                        of Truth
+                             │
+           ┌─────────────────┼─────────────────┐
+           ▼                 ▼                 ▼
+       InboxItem         AI Result       Future Action
+           │
+           ▼
+    Searchable Content
+           │
+           ▼
+       Embedding
+           │
+           ▼
+        Qdrant
 
-`inbox_keyword` 和 `inbox_entity` 都直接隶属于单条 InboxItem：
+  Derived / Rebuildable Retrieval Index
+```
 
-- Keyword 最长 64 字符，`(inbox_item_id, keyword)` 唯一；
-- Entity 包含 `name` 和有限 `type`，`(inbox_item_id, name, type)` 唯一；
-- 两表删除 InboxItem 时都由外键级联清理。
+即使 Qdrant 中的全部数据丢失：
 
-Entity 类型为 `PERSON`、`ORGANIZATION`、`LOCATION`、`TECHNOLOGY`、`PRODUCT`、`EVENT`、`OTHER`。
+```text
+LifeInbox Business Data
+```
 
-## 分析结果替换
+仍然必须完整保存在 MySQL 中。
 
-重新 Analyze 成功时，Java 在一个短事务中：
+---
 
-1. 用当前 attemptId 更新 `summary`、`category` 并锁定主行；
-2. 完整替换 tags、keywords、entities；
-3. 最后把同一 Attempt 标记为 SUCCESS。
+# 2. 当前数据库阶段
 
-任一步异常会回滚。失败 Attempt 只更新状态和安全错误，不删除上一次成功结果。
+当前版本状态：
 
-## SQL 使用方式
+```text
+V0.1 — Universal Inbox        ✅ Completed
+V0.2 — AI Organizer           ✅ Completed
+V0.3 — Smart Search           ✅ Completed
+V0.4 — Action Extractor       🚧 Current
+```
 
-- 全新安装：执行 `docs/sql/v0.3-schema.sql`；
-- 已有 V0.1/V0.2/V0.3 Task 1～3 数据库：执行 `docs/sql/v0.3-task4-add-searchable-content.sql`；
-- 不要在已有数据的数据库上重复执行 Fresh Schema；
-- 本项目当前没有 Flyway/Liquibase，迁移必须由使用者手工执行并核对。
+截至 V0.3 完成，MySQL 当前仍然使用 5 张业务表：
+
+```text
+inbox_item
+tag
+inbox_tag
+inbox_keyword
+inbox_entity
+```
+
+因此当前必须明确区分：
+
+```text
+Current Schema
+=
+V0.3 Final Schema
+```
+
+和：
+
+```text
+V0.4 Action Schema
+=
+Planned / Not Yet Implemented
+```
+
+进入 V0.4 不意味着立刻创建新的数据库表。
+
+只有对应 V0.4 Task 真正需要持久化：
+
+```text
+Action Candidate
+Todo
+Deadline
+```
+
+时，才增加正式 Migration。
+
+---
+
+# 3. 当前表关系
+
+当前主要关系：
+
+```text
+                        inbox_item
+                            │
+             ┌──────────────┼──────────────┐
+             │              │              │
+             ▼              ▼              ▼
+         inbox_tag     inbox_keyword   inbox_entity
+             │
+             ▼
+            tag
+```
+
+其中：
+
+```text
+inbox_item
+```
+
+始终是整个 LifeInbox 最重要的核心业务实体。
+
+所有 Capture 内容统一从：
+
+```text
+InboxItem
+```
+
+开始。
+
+---
+
+# 4. `inbox_item`
+
+`inbox_item` 统一保存：
+
+```text
+TEXT
+URL
+FILE
+IMAGE
+```
+
+不按照不同 Capture 类型拆分核心业务表。
+
+当前主要字段：
+
+| 字段组      | 主要字段                                             | 作用                               |
+| -------- | ------------------------------------------------ | -------------------------------- |
+| 身份与类型    | `id`, `user_id`, `type`                          | InboxItem 唯一身份与 Capture 类型       |
+| 原始内容     | `title`, `content`, `source_url`, `file_url`     | TEXT 正文、URL、受管文件地址等原始业务信息        |
+| 派生检索正文   | `searchable_content`                             | URL / FILE / IMAGE 提取后的统一条目级检索正文 |
+| AI 主结果   | `summary`, `category`                            | 最近一次成功 Analyze 的主 AI 结果          |
+| AI 状态    | `ai_status`, `ai_attempt_id`, `ai_error_message` | AI 状态机、Attempt Guard 和安全错误信息     |
+| AI 时间    | `ai_started_time`, `ai_finished_time`            | 当前有效 Attempt 的开始和结束时间            |
+| Inbox 状态 | `status`, `favorite`                             | ACTIVE / ARCHIVED 与收藏状态          |
+| 审计时间     | `created_time`, `updated_time`                   | 创建与更新时间                          |
+
+具体字段定义和类型以当前真实 SQL Schema 为准。
+
+早期总体规划中可能出现：
+
+```text
+raw_content
+file_id
+created_at
+```
+
+等概念字段名。
+
+不要为了匹配旧规划而重新命名当前已经正常工作的数据库字段。
+
+遵循：
+
+```text
+Current Repository
+>
+Old Placeholder Naming
+```
+
+---
+
+# 5. Unified Inbox 原则
+
+所有 Capture 内容统一进入：
+
+```text
+TEXT ───┐
+URL ────┤
+FILE ───┤
+IMAGE ──┤
+        ▼
+    InboxItem
+```
+
+不要建立：
+
+```text
+text_item
+url_item
+file_item
+image_item
+```
+
+四套互相独立的核心业务模型。
+
+不同类型可以拥有不同：
+
+```text
+Extractor
+Parser
+OCR
+Processing Strategy
+```
+
+但业务状态统一围绕：
+
+```text
+InboxItem
+```
+
+组织。
+
+---
+
+# 6. AI Processing State
+
+当前 `ai_status` 只有：
+
+```text
+NOT_PROCESSED
+PROCESSING
+SUCCESS
+FAILED
+```
+
+## `NOT_PROCESSED`
+
+尚未开始 AI Analyze。
+
+## `PROCESSING`
+
+当前存在有效 Analyze Attempt。
+
+## `SUCCESS`
+
+最近一次有效 Attempt 成功。
+
+## `FAILED`
+
+最近一次有效 Attempt 失败，可以 Retry / Re-analyze。
+
+基本状态流：
+
+```text
+NOT_PROCESSED
+      ↓
+PROCESSING
+   ↙      ↘
+SUCCESS   FAILED
+```
+
+Retry / Re-analyze：
+
+```text
+FAILED / SUCCESS
+       ↓
+   PROCESSING
+       ↓
+SUCCESS / FAILED
+```
+
+---
+
+# 7. stale Processing
+
+stale 不作为独立数据库状态保存。
+
+数据库中不存在：
+
+```text
+STALE
+```
+
+Java 根据：
+
+```text
+ai_status = PROCESSING
++
+ai_started_time
++
+processing-stale-after
+```
+
+动态判断：
+
+```text
+aiProcessingStale
+```
+
+这样可以避免把：
+
+```text
+Runtime Timeout Judgment
+```
+
+错误建模成永久数据库状态。
+
+---
+
+# 8. AI Attempt Guard
+
+每次 Analyze 都拥有：
+
+```text
+ai_attempt_id
+```
+
+例如：
+
+```text
+Attempt A
+id = AAA
+```
+
+如果 Attempt A 超时，
+
+新的：
+
+```text
+Attempt B
+id = BBB
+```
+
+可以接管处理权。
+
+如果旧 Attempt A 后来返回：
+
+```text
+AAA != 当前 BBB
+```
+
+旧结果不能：
+
+```text
+覆盖新的 AnalyzeResult
+改变新的 AI Status
+覆盖新的 Searchable Content
+覆盖较新的处理结果
+```
+
+核心原则：
+
+```text
+Only Current Attempt
+May Commit Generated Result
+```
+
+---
+
+# 9. Analyze Result Replacement
+
+Re-analyze 成功时，Java 在一个短事务中：
+
+1. 检查当前 `ai_attempt_id`；
+2. 更新 `summary`、`category`；
+3. 完整替换 Tags；
+4. 完整替换 Keywords；
+5. 完整替换 Entities；
+6. 最后把同一 Attempt 标记为 `SUCCESS`。
+
+如果事务中的任一步出现异常：
+
+```text
+ROLLBACK
+```
+
+失败 Attempt：
+
+```text
+只更新 AI 状态和安全错误信息
+```
+
+不会主动删除上一次成功的：
+
+```text
+Summary
+Category
+Tags
+Keywords
+Entities
+```
+
+因此：
+
+```text
+New Analyze Failure
+≠
+Old Successful Result Lost
+```
+
+---
+
+# 10. Searchable Content
+
+`searchable_content` 当前为可空：
+
+```text
+MEDIUMTEXT
+```
+
+它属于：
+
+```text
+Derived / Rebuildable Retrieval Data
+```
+
+而不是：
+
+```text
+Original Business Source Data
+```
+
+---
+
+## TEXT
+
+TEXT 直接使用：
+
+```text
+content
+```
+
+参与检索。
+
+不额外复制原文到：
+
+```text
+searchable_content
+```
+
+避免保存两份相同原始文本。
+
+---
+
+## URL
+
+URL 复用当前安全网页正文提取能力：
+
+```text
+URL
+ ↓
+Web Content Extraction
+ ↓
+Normalized Text
+ ↓
+searchable_content
+```
+
+---
+
+## FILE
+
+FILE 复用当前已有文档文本提取能力。
+
+当前支持范围以真实代码为准，例如：
+
+```text
+TXT
+Markdown
+Text-layer PDF
+```
+
+提取成功后写入：
+
+```text
+searchable_content
+```
+
+---
+
+## IMAGE
+
+IMAGE 当前主要通过：
+
+```text
+OCR
+```
+
+得到文本：
+
+```text
+IMAGE
+ ↓
+OCR
+ ↓
+Normalized Text
+ ↓
+searchable_content
+```
+
+当前 OCR 能力不等同于完整 General Vision。
+
+---
+
+# 11. Searchable Content Normalization
+
+Java 当前统一进行：
+
+```text
+NFKC
+换行归一
+空白归一
+```
+
+当前最大保存长度：
+
+```text
+20,000 Java Characters
+```
+
+应用层应该继续限制派生正文长度。
+
+不要因为数据库字段是 `MEDIUMTEXT` 就允许无限保存提取文本。
+
+---
+
+# 12. 为什么使用 `MEDIUMTEXT`
+
+`searchable_content` 使用：
+
+```text
+MEDIUMTEXT
+```
+
+主要是为了在：
+
+```text
+utf8mb4
++
+最多约 20,000 Java Characters
+```
+
+条件下拥有足够明确的容量余量。
+
+数据库字段容量：
+
+```text
+≠
+应用允许的最大输入长度
+```
+
+应用层长度限制仍然必须生效。
+
+---
+
+# 13. Searchable Content 更新流程
+
+成功提取正文后：
+
+```text
+Content Preparation
+       ↓
+Attempt Guard
+       ↓
+Short Database Update
+       ↓
+searchable_content
+       ↓
+LLM Analyze
+```
+
+因此：
+
+```text
+Content Extraction Success
++
+LLM Failure
+```
+
+不会导致已经成功准备的 Searchable Content 丢失。
+
+---
+
+# 14. Searchable Content Failure
+
+如果发生：
+
+```text
+URL Extraction Failure
+FILE Extraction Failure
+OCR Failure
+Empty Extraction Result
+```
+
+不会自动清空：
+
+```text
+旧 searchable_content
+```
+
+同样：
+
+```text
+Expired Attempt
+```
+
+不能覆盖较新的 Searchable Content。
+
+---
+
+# 15. Searchable Content Reprocessing
+
+重新 Analyze 时：
+
+成功提取的新正文：
+
+```text
+Replace Old Searchable Content
+```
+
+而不是：
+
+```text
+Append Forever
+```
+
+当前仍然采用：
+
+```text
+Item-level Searchable Content
+```
+
+目前没有：
+
+```text
+document_chunk
+chunk table
+chunk embedding
+chunk retrieval
+```
+
+---
+
+# 16. `tag`
+
+`tag` 是全局展示字典。
+
+主要字段之一：
+
+```text
+normalized_name
+```
+
+用于保存经过：
+
+```text
+NFKC
+Whitespace Normalization
+Lowercase
+```
+
+处理后的唯一值。
+
+这样可以减少：
+
+```text
+Redis
+redis
+ Redis
+```
+
+等仅格式不同的重复 Tag。
+
+---
+
+# 17. `inbox_tag`
+
+`inbox_tag` 建立：
+
+```text
+InboxItem
+↔
+Tag
+```
+
+多对多关系。
+
+当前使用复合主键：
+
+```text
+(inbox_item_id, tag_id)
+```
+
+同一个 InboxItem 不会重复关联同一个 Tag。
+
+删除 InboxItem 时：
+
+相关 `inbox_tag` 根据当前外键设计级联清理。
+
+没有任何 InboxItem 引用的全局 Tag：
+
+当前不会自动删除。
+
+---
+
+# 18. `inbox_keyword`
+
+`inbox_keyword` 直接隶属于单条：
+
+```text
+InboxItem
+```
+
+当前 Keyword 最大长度：
+
+```text
+64 characters
+```
+
+唯一约束：
+
+```text
+(inbox_item_id, keyword)
+```
+
+同一 InboxItem 不重复保存完全相同 Keyword。
+
+删除 InboxItem 时：
+
+相关 Keyword 根据当前 Foreign Key 规则清理。
+
+---
+
+# 19. `inbox_entity`
+
+`inbox_entity` 同样直接属于 InboxItem。
+
+主要信息：
+
+```text
+name
+type
+```
+
+当前唯一约束：
+
+```text
+(inbox_item_id, name, type)
+```
+
+当前 Entity 类型：
+
+```text
+PERSON
+ORGANIZATION
+LOCATION
+TECHNOLOGY
+PRODUCT
+EVENT
+OTHER
+```
+
+Entity Type 属于有限枚举语义。
+
+不要让 LLM 任意创造无限的新 Entity 类型。
+
+---
+
+# 20. Keyword Search 与 MySQL
+
+Keyword Search 当前继续主要依赖：
+
+```text
+MySQL
+```
+
+可检索字段以实际代码为准，当前包括：
+
+```text
+title
+content
+summary
+category
+tags
+keywords
+entities
+searchable_content
+```
+
+关联数据查询使用：
+
+```text
+EXISTS
+```
+
+或当前等价数据库实现，
+
+避免：
+
+```text
+同一个 InboxItem
+因为多个 Tag / Keyword 命中
+出现多条重复结果
+```
+
+---
+
+# 21. Qdrant 不属于业务 Schema
+
+V0.3 已经引入：
+
+```text
+Qdrant
+```
+
+用于：
+
+```text
+Semantic Retrieval
+```
+
+但 Qdrant 不是 MySQL Schema 的一部分。
+
+数据所有权：
+
+```text
+MySQL
+=
+Authoritative Business Data
+
+Qdrant
+=
+Derived / Rebuildable Retrieval Index
+```
+
+Qdrant 当前可以保存类似：
+
+```text
+InboxItem ID
+Embedding Vector
+Embedding Model
+Content Hash
+Indexed Time
+Minimal Retrieval Metadata
+```
+
+但不能成为：
+
+```text
+InboxItem Source of Truth
+Favorite Source of Truth
+Archive Source of Truth
+AI Status Source of Truth
+Future Todo Source of Truth
+Future Deadline Source of Truth
+```
+
+---
+
+# 22. Embedding 不进入 MySQL
+
+当前不要在：
+
+```text
+inbox_item
+```
+
+中增加：
+
+```text
+embedding
+vector
+embedding_json
+```
+
+等字段。
+
+当前架构：
+
+```text
+Searchable Content
+       ↓
+Embedding Provider
+       ↓
+Vector
+       ↓
+Qdrant
+```
+
+Embedding 是：
+
+```text
+Rebuildable Retrieval Data
+```
+
+而不是业务字段。
+
+---
+
+# 23. Search Runtime Score 不持久化
+
+以下 Score 属于单次查询产生的运行时数据：
+
+```text
+Semantic Score
+RRF Score
+Rerank Score
+```
+
+不要保存进：
+
+```text
+inbox_item
+```
+
+也不要创建：
+
+```text
+semantic_score
+rrf_score
+rerank_score
+```
+
+数据库字段。
+
+原因：
+
+```text
+Query A
+→ Score A
+
+Query B
+→ Score B
+```
+
+这些 Score 不属于 InboxItem 的永久业务属性。
+
+---
+
+# 24. V0.4 数据库方向
+
+当前已经进入：
+
+```text
+V0.4 — Action Extractor
+```
+
+但当前数据库仍然是：
+
+```text
+V0.3 Final Schema
+```
+
+V0.4 首先需要解决的重要数据边界：
+
+```text
+AI 检测出的 Action
+≠
+用户真正确认的 Todo
+```
+
+因此推荐：
+
+```text
+AI Suggestion
+      ↓
+Action Candidate
+      ↓
+User Confirmation
+      ↓
+Todo
+```
+
+这属于：
+
+```text
+V0.4 Recommended Data Direction
+```
+
+尚未实际建表。
+
+---
+
+# 25. Action Candidate 与 Todo
+
+推荐概念：
+
+```text
+InboxItem
+    │
+    ▼
+Action Extraction
+    │
+    ▼
+action_candidate
+    │
+    ├── ACCEPT
+    │      ↓
+    │     todo
+    │
+    └── DISMISS
+```
+
+其中：
+
+```text
+action_candidate
+```
+
+属于：
+
+```text
+AI-generated Derived Suggestion
+```
+
+而：
+
+```text
+todo
+```
+
+属于：
+
+```text
+User-confirmed Business Data
+```
+
+两者不应该混为同一种状态。
+
+---
+
+# 26. 为什么需要 Action Candidate
+
+例如原始 InboxItem：
+
+```text
+软件工程课程设计
+8月25日前交报告
+```
+
+AI 可以识别：
+
+```text
+提交软件工程课程设计报告
+
+Deadline:
+2026-08-25
+```
+
+但此时：
+
+```text
+Todo
+```
+
+不应该自动创建。
+
+正确流程：
+
+```text
+AI Detect
+    ↓
+Action Candidate
+    ↓
+User Confirm
+    ↓
+Todo
+```
+
+因此不要：
+
+```text
+LLM Response
+↓
+直接 INSERT todo
+```
+
+---
+
+# 27. `action_candidate` 推荐方向
+
+以下内容属于：
+
+```text
+PLANNED
+```
+
+不是当前已经存在的 Schema。
+
+未来 `action_candidate` 推荐职责：
+
+> 保存 AI 从 InboxItem 中识别出的 Action 建议。
+
+概念字段可能包括：
+
+```text
+id
+
+inbox_item_id
+
+action_type
+
+title
+
+original_deadline_text
+
+normalized_deadline
+
+status
+
+ai_attempt_id
+
+created_time
+updated_time
+```
+
+注意：
+
+这只是数据库设计方向。
+
+最终字段：
+
+```text
+字段名
+字段类型
+Nullability
+Index
+Foreign Key
+Status Enum
+```
+
+必须在正式 V0.4 数据库 Task 中结合真实代码确定。
+
+不要仅因为此文档存在示例就直接照抄建表。
+
+---
+
+# 28. Action Candidate Status
+
+第一版推荐保持非常简单：
+
+```text
+PENDING
+ACCEPTED
+DISMISSED
+```
+
+## `PENDING`
+
+AI 已识别出 Candidate，
+
+但用户尚未决定。
+
+## `ACCEPTED`
+
+用户已经接受该 Candidate。
+
+## `DISMISSED`
+
+用户明确忽略该 Candidate。
+
+暂时不要提前加入：
+
+```text
+SNOOZED
+EXPIRED
+AUTO_ACCEPTED
+SYNCED
+FAILED_SYNC
+REMINDER_SENT
+```
+
+等复杂状态。
+
+---
+
+# 29. `todo` 推荐方向
+
+未来 `todo` 推荐职责：
+
+> 保存用户已经确认的行动。
+
+它属于：
+
+```text
+Business Data
+```
+
+而不是 AI 派生数据。
+
+未来最小概念字段可能类似：
+
+```text
+id
+
+source_inbox_item_id
+source_action_candidate_id
+
+title
+description
+
+status
+
+due_time
+
+completed_time
+
+created_time
+updated_time
+```
+
+同样：
+
+这些只是 V0.4 的设计方向，
+
+不是当前已经存在的 Schema。
+
+---
+
+# 30. Deadline 第一版不建议单独建表
+
+最初总体规划中曾经将：
+
+```text
+todo
+deadline
+```
+
+分别列为概念模型。
+
+进入实际实现阶段后，
+
+V0.4 第一版更推荐：
+
+```text
+Todo
+ ├── title
+ ├── status
+ └── due_time nullable
+```
+
+也就是：
+
+```text
+Deadline
+=
+Optional Property of Todo
+```
+
+例如：
+
+```text
+8月25日前交软件工程报告
+```
+
+本质上可以表示为：
+
+```text
+Todo:
+  title = 提交软件工程报告
+  due_time = 2026-08-25
+```
+
+没有必要一开始创建：
+
+```text
+todo
++
+deadline
+```
+
+两套生命周期高度重叠的业务实体。
+
+---
+
+# 31. 什么时候考虑独立 `deadline`
+
+只有未来出现真正独立的业务需求，例如：
+
+```text
+Deadline 有独立生命周期
+
+一个 Deadline 关联多个 Todo
+
+Deadline 有独立确认流程
+
+Deadline 有独立 Reminder
+
+Deadline 独立参与 Calendar / Scheduling
+```
+
+再考虑把：
+
+```text
+deadline
+```
+
+升级为独立业务实体。
+
+遵循：
+
+```text
+Requirement First
+Schema Second
+```
+
+---
+
+# 32. Action Source Traceability
+
+未来 Action Candidate 和 Todo 应尽可能追溯到：
+
+```text
+InboxItem
+```
+
+概念：
+
+```text
+InboxItem
+    ↓
+Action Candidate
+    ↓
+Todo
+```
+
+这样系统可以回答：
+
+```text
+这个 Todo 为什么出现？
+
+这个截止日期来自哪条保存的信息？
+```
+
+---
+
+# 33. 不复制完整 Source Content
+
+不要为了 Action Traceability，
+
+把整份：
+
+```text
+searchable_content
+PDF text
+Web body
+OCR result
+```
+
+复制到：
+
+```text
+action_candidate
+todo
+```
+
+表中。
+
+优先保存：
+
+```text
+source_inbox_item_id
+```
+
+引用 Source of Truth。
+
+如果确实需要保留证据，
+
+只保存最小必要内容，例如：
+
+```text
+original_deadline_text
+small evidence text
+```
+
+---
+
+# 34. Deadline 原始表达与标准化值
+
+Deadline Extraction 应区分：
+
+```text
+Original Expression
+```
+
+和：
+
+```text
+Normalized Deadline
+```
+
+例如：
+
+```text
+Original:
+“下周五之前”
+```
+
+可能最终得到：
+
+```text
+Normalized:
+2026-08-28
+```
+
+它们不是同一种数据。
+
+原始表达有利于：
+
+```text
+Traceability
+User Confirmation
+Debugging
+```
+
+---
+
+# 35. 不确定日期
+
+如果 AI 只看到：
+
+```text
+周五之前交
+```
+
+但无法可靠判断：
+
+```text
+哪一周
+哪一年
+timezone
+具体时间
+```
+
+系统不应该要求：
+
+```text
+必须生成精确 datetime
+```
+
+可以允许：
+
+```text
+normalized deadline = NULL
+```
+
+或者在未来 Schema 中表达：
+
+```text
+requires confirmation
+```
+
+不要为了满足数据库非空字段而伪造时间。
+
+---
+
+# 36. 用户确认优先级
+
+V0.4 以后应该保持：
+
+```text
+User-confirmed Business State
+            >
+Current Business State
+            >
+AI-generated Candidate
+```
+
+例如：
+
+AI 第一次识别：
+
+```text
+deadline = 2026-08-25
+```
+
+用户手动修改：
+
+```text
+deadline = 2026-08-28
+```
+
+后来重新 Analyze 后 AI 又产生：
+
+```text
+deadline = 2026-08-25
+```
+
+系统不能：
+
+```text
+Silent Overwrite
+
+2026-08-28
+→
+2026-08-25
+```
+
+用户确认后的 Todo：
+
+```text
+=
+Business Fact
+```
+
+AI Candidate：
+
+```text
+=
+Suggestion
+```
+
+---
+
+# 37. Action Reprocessing
+
+重新执行：
+
+```text
+Analyze
+Action Extraction
+Retry
+```
+
+可以根据后续正式设计更新：
+
+```text
+未确认的 Candidate
+```
+
+但不能自动覆盖：
+
+```text
+User Accepted Todo
+User Edited Todo
+Completed Todo
+Dismissed User Decision
+```
+
+用户业务状态不能因为 LLM 再跑一次而被还原。
+
+---
+
+# 38. Source InboxItem 删除行为
+
+未来需要区分：
+
+```text
+Action Candidate
+```
+
+和：
+
+```text
+Confirmed Todo
+```
+
+推荐原则：
+
+## 未确认 Candidate
+
+属于 InboxItem 的 AI 派生结果。
+
+如果 Source InboxItem 被真正删除：
+
+可以考虑一起清理。
+
+---
+
+## 已确认 Todo
+
+一旦用户确认：
+
+Todo 已经成为独立业务状态。
+
+删除原 InboxItem：
+
+不应该默认删除用户已经确认的 Todo。
+
+因此未来 Foreign Key 设计必须慎重选择：
+
+```text
+CASCADE
+SET NULL
+RESTRICT
+```
+
+不能机械地全部使用 Cascade。
+
+---
+
+# 39. Archive 与 Todo 生命周期
+
+Archive InboxItem：
+
+```text
+≠
+Complete Todo
+```
+
+也：
+
+```text
+≠
+Delete Todo
+```
+
+Inbox 生命周期和 Todo 生命周期属于不同业务概念。
+
+不能因为：
+
+```text
+InboxItem
+→ ARCHIVED
+```
+
+自动：
+
+```text
+Todo
+→ COMPLETED
+```
+
+---
+
+# 40. Delete 与 Todo 生命周期
+
+同样：
+
+```text
+Delete InboxItem
+```
+
+不应该无条件等于：
+
+```text
+Delete User-confirmed Todo
+```
+
+Todo 一旦被用户确认，
+
+应该拥有自己的生命周期。
+
+---
+
+# 41. Todo Status
+
+如果 V0.4 第一版创建 Todo，
+
+建议状态保持简单。
+
+最小方向：
+
+```text
+OPEN
+COMPLETED
+```
+
+是否需要：
+
+```text
+CANCELLED
+```
+
+应该根据实际产品需求决定。
+
+不要第一版就增加：
+
+```text
+IN_PROGRESS
+BLOCKED
+WAITING
+DEFERRED
+SNOOZED
+ARCHIVED
+```
+
+等复杂状态机。
+
+---
+
+# 42. Reminder 暂不建模
+
+V0.4 Action Extractor：
+
+```text
+≠
+Reminder System
+```
+
+因此当前不要提前创建：
+
+```text
+reminder
+reminder_job
+notification
+schedule
+```
+
+等表。
+
+未来真正开发 Reminder 时再设计。
+
+---
+
+# 43. Calendar 暂不建模
+
+识别出：
+
+```text
+Deadline
+```
+
+不意味着已经需要：
+
+```text
+Google Calendar Integration
+```
+
+V0.4 第一阶段不要为了可能存在的未来 Calendar 功能提前增加：
+
+```text
+calendar_event_id
+calendar_provider
+external_event_id
+sync_status
+```
+
+等字段。
+
+---
+
+# 44. Relations 暂不进入当前 Schema
+
+V0.5 计划中的：
+
+```text
+content_relation
+```
+
+目前仍属于：
+
+```text
+PLANNED
+```
+
+不是当前 Schema。
+
+未来可以优先从简单 MySQL 模型开始，例如概念：
+
+```text
+content_relation
+────────────────
+source_id
+target_id
+relation_type
+score
+```
+
+但不要为了 Roadmap 提前建表。
+
+---
+
+# 45. Personal AI 暂不产生 Schema
+
+当前不要为了未来：
+
+```text
+RAG
+Agent
+Conversation
+Memory
+MCP
+Workflow
+```
+
+提前创建：
+
+```text
+conversation
+message
+agent_memory
+workflow
+tool_call
+```
+
+等数据库表。
+
+等真正进入对应版本并出现真实需求后再设计。
+
+---
+
+# 46. 数据库索引原则
+
+索引只服务于真实查询。
+
+遵循：
+
+```text
+Current Query Pattern
+       ↓
+Evaluate Index
+```
+
+不要因为：
+
+```text
+以后可能需要
+```
+
+就提前建立大量索引。
+
+尤其不要未经验证就在：
+
+```text
+searchable_content
+AI generated text
+long text fields
+```
+
+上建立复杂索引体系。
+
+当前向量检索已经由：
+
+```text
+Qdrant
+```
+
+负责。
+
+---
+
+# 47. Foreign Key 原则
+
+对于完全依赖 InboxItem 生命周期的数据，例如当前：
+
+```text
+inbox_tag
+inbox_keyword
+inbox_entity
+```
+
+可以继续按照现有合理 Foreign Key 规则清理。
+
+但是未来：
+
+```text
+User-confirmed Todo
+```
+
+和：
+
+```text
+Derived AI Child Data
+```
+
+生命周期不同。
+
+因此不要机械复制：
+
+```text
+ON DELETE CASCADE
+```
+
+到所有未来表。
+
+---
+
+# 48. 数据库迁移原则
+
+当前项目没有：
+
+```text
+Flyway
+Liquibase
+```
+
+Schema Migration 继续使用：
+
+```text
+Manual SQL Migration
+```
+
+历史 Migration：
+
+```text
+必须保留
+```
+
+不要修改旧 Migration，
+
+让历史看起来像数据库一直就是当前状态。
+
+---
+
+# 49. V0.3 Fresh Schema
+
+V0.3 Final Schema 文件以仓库当前真实路径为准。
+
+当前文档和 SQL 目录应保持一致，例如仓库如果实际使用：
+
+```text
+docs/sql/v0.3-schema.sql
+```
+
+则该文件代表：
+
+```text
+Fresh Install
+→
+V0.3 Final Database State
+```
+
+不要为了 V0.4 修改或覆盖该历史版本文件。
+
+如果仓库当前实际路径不是 `docs/sql/v0.3-schema.sql`，
+
+应以仓库真实文件位置为准，并同步修改本文档。
+
+---
+
+# 50. V0.3 Incremental Migration
+
+当前已存在的 Searchable Content 增量 Migration，
+
+以仓库真实文件为准，例如：
+
+```text
+docs/sql/v0.3-task4-add-searchable-content.sql
+```
+
+用于已有旧数据库升级。
+
+不要在已经存在业务数据的数据库上重复执行：
+
+```text
+Fresh Schema
+```
+
+---
+
+# 51. V0.4 Fresh Schema
+
+当 V0.4 第一次真正发生数据库变更后，
+
+可以增加：
+
+```text
+docs/sql/v0.4-schema.sql
+```
+
+用于：
+
+```text
+Fresh Install
+→
+Current V0.4 Database State
+```
+
+但只有真正出现 V0.4 Schema Change 后才创建。
+
+不要提前创建空文件。
+
+也不要覆盖：
+
+```text
+v0.3-schema.sql
+```
+
+---
+
+# 52. V0.4 Incremental Migration
+
+已有 V0.3 数据库升级到 V0.4：
+
+应该使用增量 Migration。
+
+例如未来可能出现：
+
+```text
+docs/sql/v0.4-taskX-add-action-candidate.sql
+```
+
+以及：
+
+```text
+docs/sql/v0.4-taskY-add-todo.sql
+```
+
+具体：
+
+```text
+Task Number
+File Name
+Schema
+```
+
+必须根据实际实现确定。
+
+当前不要提前创建这些 SQL。
+
+---
+
+# 53. SQL 使用原则
+
+## 全新安装
+
+执行当前版本对应的：
+
+```text
+Fresh Schema
+```
+
+例如当前 V0.3 Final 环境：
+
+```text
+docs/sql/v0.3-schema.sql
+```
+
+具体路径以仓库真实结构为准。
+
+---
+
+## 已有数据库升级
+
+按照：
+
+```text
+docs/sql/
+```
+
+中真实存在的历史增量 Migration 顺序执行。
+
+不要跳过中间必要 Migration。
+
+---
+
+## 进入 V0.4
+
+只有对应 Task 真正产生 Schema Change 后：
+
+才执行对应：
+
+```text
+V0.4 Incremental Migration
+```
+
+进入一个版本：
+
+```text
+≠
+必须修改数据库
+```
+
+---
+
+# 54. Current 与 Planned 必须分开
+
+`database.md` 必须始终明确区分：
+
+```text
+CURRENT
+```
+
+与：
+
+```text
+PLANNED
+```
+
+当前存在的表：
+
+必须和真实 MySQL Schema 一致。
+
+未来模型：
+
+必须明确标注：
+
+```text
+Planned
+Recommended Direction
+Not Yet Implemented
+```
+
+禁止把计划功能写成已经完成。
+
+---
+
+# 55. 当前数据库总结
+
+截至 V0.3 完成：
+
+```text
+MySQL
+│
+├── inbox_item
+├── tag
+├── inbox_tag
+├── inbox_keyword
+└── inbox_entity
+```
+
+当前没有：
+
+```text
+action_candidate
+todo
+deadline
+reminder
+content_relation
+conversation
+agent_memory
+```
+
+这些表。
+
+当前正在进入：
+
+```text
+V0.4 — Action Extractor
+```
+
+推荐逐步演进方向：
+
+```text
+                     InboxItem
+                         │
+                         ▼
+                  Action Candidate
+                         │
+                    User Decision
+                         │
+                         ▼
+                        Todo
+                         │
+                         └── optional due_time
+```
+
+而不是一次性建立：
+
+```text
+Todo
+Deadline
+Reminder
+Calendar
+Workflow
+Agent
+```
+
+全部业务模型。
+
+---
+
+# 56. 长期数据库原则
+
+LifeInbox 数据库模型继续遵循：
+
+```text
+Capture
+   ↓
+InboxItem
+   ↓
+Derived AI Understanding
+   ↓
+Retrieval
+   ↓
+Action Candidate
+   ↓
+User-confirmed Business Action
+```
+
+核心数据所有权：
+
+```text
+MySQL
+=
+Business Source of Truth
+```
+
+AI 结果：
+
+```text
+=
+Derived / Suggested Information
+```
+
+Qdrant：
+
+```text
+=
+Derived / Rebuildable Retrieval Index
+```
+
+未来 Action Candidate：
+
+```text
+=
+AI Suggestion
+```
+
+未来 Todo：
+
+```text
+=
+User-confirmed Business State
+```
+
+始终坚持：
+
+```text
+Requirement First
+Schema Second
+```
+
+以及：
+
+```text
+AI Suggestion
+≠
+User-confirmed Business State
+```
