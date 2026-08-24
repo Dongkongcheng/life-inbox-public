@@ -14,6 +14,8 @@
 | GET | `/api/files/{storedName}` | 读取受管本地文件 |
 | POST | `/api/inbox/{id}/ai/analyze` | 四种类型共用的手工 Analyze / Retry / stale Recovery |
 | POST | `/api/inbox/{id}/ai/summary` | 旧兼容入口；仍执行统一 Analyze |
+| POST | `/api/inbox/{id}/action-candidates/extract` | 对 ACTIVE InboxItem 手动提取并原子替换 PENDING Candidate |
+| GET | `/api/inbox/{id}/action-candidates` | 查询 ACTIVE InboxItem 已持久化的 Action Candidate |
 | PUT | `/api/inbox/{id}/favorite` | 收藏 |
 | PUT | `/api/inbox/{id}/unfavorite` | 取消收藏 |
 | PUT | `/api/inbox/{id}/archive` | 归档；归档项不再出现在主列表 |
@@ -148,6 +150,46 @@ URL：
 
 fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，旧的成功结果仍可能继续出现在响应中。Java 不向浏览器透传 Python Traceback、SQL Exception、上游正文或 API Key。
 
+### Action Candidate 产品 API
+
+`POST /api/inbox/{id}/action-candidates/extract` 对指定 ACTIVE InboxItem 执行一次显式 Action Extraction：
+
+```text
+Load ACTIVE InboxItem
+→ TEXT 使用 content，URL/FILE/IMAGE 使用 searchable_content
+→ 可选 title 上下文 + 有界正文（总计最多 20,000 字符）
+→ FastAPI /action/extract
+→ Java 校验类型、数量、字段长度、日期与 hasAction 一致性
+→ 短事务中只替换该 Item 的 PENDING Candidate
+```
+
+成功响应和 `GET /api/inbox/{id}/action-candidates` 都返回产品侧 Candidate 数组：
+
+```json
+[
+  {
+    "id": 1,
+    "inboxItemId": 100,
+    "actionType": "DEADLINE",
+    "title": "提交软件工程课程设计报告",
+    "deadlineText": "2026年8月25日前",
+    "deadline": "2026-08-25",
+    "evidence": "2026年8月25日前提交软件工程课程设计报告",
+    "status": "PENDING",
+    "createdTime": "2026-08-24T10:00:00",
+    "updatedTime": "2026-08-24T10:00:00"
+  }
+]
+```
+
+- 所有新 Candidate 都是 `PENDING`；当前没有 Accept、Dismiss 或 Create Todo API；
+- FastAPI 成功返回空 `actions` 时，旧 PENDING Candidate 会在短事务中清除，并返回空数组；
+- 重新提取不会删除 `ACCEPTED` 或 `DISMISSED`；这些状态只为后续用户决策保留，Task 32 不会创建它们；
+- FastAPI 超时、5xx、非法类型、非法日期、字段越界或矛盾 `hasAction` 返回受控 503，且不会修改旧 Candidate；
+- InboxItem 不存在或已归档返回 404；title 与可用正文都为空返回 400，并且不会调用 FastAPI；
+- Archive 不自动删除 Candidate；真正删除 Source 时由 MySQL Foreign Key `ON DELETE CASCADE` 清理；
+- 外部 AI 调用不在数据库事务内。当前没有 Action Attempt Guard，并发手动提取的最终覆盖顺序不作持久化保证。
+
 ## Java → Python 内部 API
 
 | Method | Path | 输入 | 输出 |
@@ -219,7 +261,7 @@ Java 的当前 Analyze 流程对 URL/FILE/IMAGE 先调用对应 `/prepare/*`，�
 - 完整的 ISO 日期或 `YYYY年M月D日` 可以规范化为 `YYYY-MM-DD`。缺少年份或相对日期只保留 `deadlineText`，`deadline` 为 `null`；不会使用服务器日期、机器时区或 Provider 时区补全；
 - 日期必须与行动语义关联，出版/发布日期等描述性日期不自动产生 Action；零 Action 是正常成功结果；
 - 该能力复用现有 `LIFEINBOX_LLM_*` 配置、Chat Completions JSON Mode 与错误模型。配置/服务错误为 503，超时为 504，无效 Provider/结构化结果为 502；
-- 当前无 Java 调用方，不进入 Capture、Analyze、Search 或 Attempt Guard，不写 MySQL/Qdrant，也不创建或修改 Todo。
+- Java 的手动 Action Candidate API 会调用该内部协议，并在 Java 再次校验后写入 MySQL `action_candidate`；它仍不进入 Capture、Analyze、Search 或 Attempt Guard，不写 Qdrant，也不创建或修改 Todo。
 
 ### Embedding 内部协议
 

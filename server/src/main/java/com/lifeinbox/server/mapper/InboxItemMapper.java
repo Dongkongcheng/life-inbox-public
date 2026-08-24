@@ -144,6 +144,13 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
     );
 
     /**
+     * Action AI 调用完成后，在短事务中重新确认 Source 仍为 ACTIVE 并取得行锁。
+     * 这样归档或删除竞态不会在成功结果落库时生成新的 Candidate。
+     */
+    @Select("SELECT id FROM inbox_item WHERE id = #{id} AND status = 'ACTIVE' FOR UPDATE")
+    Long selectActiveIdForUpdate(@Param("id") Long id);
+
+    /**
      * 只更新本次 AI 分析拥有的列；同时取得该 InboxItem 的行锁，串行化并发重分析。
      */
     @Update("""

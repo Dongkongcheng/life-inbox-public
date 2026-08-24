@@ -28,7 +28,7 @@ Business Source of Truth
 
 Java 是 LifeInbox 业务数据的唯一 Owner。
 
-Python / FastAPI 负责 AI 理解、内容处理、Embedding、Semantic Retrieval、Rerank、未来 Action Extraction 等能力，但不拥有核心业务数据。
+Python / FastAPI 负责 AI 理解、内容处理、Embedding、Semantic Retrieval、Rerank、Action Extraction 等能力，但不拥有核心业务数据。
 
 Qdrant 负责向量检索，但同样不是业务数据库。
 
@@ -44,7 +44,7 @@ Qdrant 负责向量检索，但同样不是业务数据库。
                              │
            ┌─────────────────┼─────────────────┐
            ▼                 ▼                 ▼
-       InboxItem         AI Result       Future Action
+       InboxItem         AI Result      Action Candidate
            │
            ▼
     Searchable Content
@@ -79,7 +79,7 @@ V0.3 — Smart Search           ✅ Completed
 V0.4 — Action Extractor       🚧 Current
 ```
 
-截至 V0.3 完成，MySQL 当前仍然使用 5 张业务表：
+V0.4 Task 32 后，MySQL 当前使用 6 张业务表：
 
 ```text
 inbox_item
@@ -87,6 +87,7 @@ tag
 inbox_tag
 inbox_keyword
 inbox_entity
+action_candidate
 ```
 
 因此当前必须明确区分：
@@ -94,28 +95,18 @@ inbox_entity
 ```text
 Current Schema
 =
-V0.3 Final Schema
+V0.4 Current Schema
+=
+V0.3 Final Schema + action_candidate
 ```
 
 和：
 
 ```text
-V0.4 Action Schema
+Todo / Deadline / Reminder Schema
 =
 Planned / Not Yet Implemented
 ```
-
-进入 V0.4 不意味着立刻创建新的数据库表。
-
-只有对应 V0.4 Task 真正需要持久化：
-
-```text
-Action Candidate
-Todo
-Deadline
-```
-
-时，才增加正式 Migration。
 
 ---
 
@@ -126,10 +117,10 @@ Deadline
 ```text
                         inbox_item
                             │
-             ┌──────────────┼──────────────┐
-             │              │              │
-             ▼              ▼              ▼
-         inbox_tag     inbox_keyword   inbox_entity
+             ┌──────────────┼──────────────┬─────────────────┐
+             │              │              │                 │
+             ▼              ▼              ▼                 ▼
+         inbox_tag     inbox_keyword   inbox_entity   action_candidate
              │
              ▼
             tag
@@ -969,10 +960,12 @@ Query B
 V0.4 — Action Extractor
 ```
 
-但当前数据库仍然是：
+当前数据库已经是：
 
 ```text
-V0.3 Final Schema
+V0.4 Current Schema
+=
+V0.3 Final Schema + action_candidate
 ```
 
 V0.4 首先需要解决的重要数据边界：
@@ -995,13 +988,7 @@ User Confirmation
 Todo
 ```
 
-这属于：
-
-```text
-V0.4 Recommended Data Direction
-```
-
-尚未实际建表。
+`action_candidate` 已实际建表；用户确认和 Todo 仍是后续方向。
 
 ---
 
@@ -1101,21 +1088,13 @@ LLM Response
 
 ---
 
-# 27. `action_candidate` 推荐方向
+# 27. `action_candidate` 当前结构
 
-以下内容属于：
-
-```text
-PLANNED
-```
-
-不是当前已经存在的 Schema。
-
-未来 `action_candidate` 推荐职责：
+`action_candidate` 已在 V0.4 Task 32 实现，其职责是：
 
 > 保存 AI 从 InboxItem 中识别出的 Action 建议。
 
-概念字段可能包括：
+当前字段为：
 
 ```text
 id
@@ -1126,36 +1105,25 @@ action_type
 
 title
 
-original_deadline_text
+deadline_text
+deadline_date
 
-normalized_deadline
+evidence
 
 status
-
-ai_attempt_id
 
 created_time
 updated_time
 ```
 
-注意：
-
-这只是数据库设计方向。
-
-最终字段：
+关键约束：
 
 ```text
-字段名
-字段类型
-Nullability
-Index
-Foreign Key
-Status Enum
+action_type: TODO / DEADLINE（由 Java 受控 Enum 校验）
+status: PENDING / ACCEPTED / DISMISSED（Task 32 只创建 PENDING）
+index: (inbox_item_id, status)
+foreign key: inbox_item_id → inbox_item.id ON DELETE CASCADE
 ```
-
-必须在正式 V0.4 数据库 Task 中结合真实代码确定。
-
-不要仅因为此文档存在示例就直接照抄建表。
 
 ---
 
@@ -1965,9 +1933,7 @@ Fresh Schema
 
 # 51. V0.4 Fresh Schema
 
-当 V0.4 第一次真正发生数据库变更后，
-
-可以增加：
+V0.4 当前 Fresh Schema 已建立：
 
 ```text
 docs/sql/v0.4-schema.sql
@@ -1981,11 +1947,7 @@ Fresh Install
 Current V0.4 Database State
 ```
 
-但只有真正出现 V0.4 Schema Change 后才创建。
-
-不要提前创建空文件。
-
-也不要覆盖：
+它等价于 `v0.3-schema.sql` 加上 `action_candidate`，且没有覆盖历史文件：
 
 ```text
 v0.3-schema.sql
@@ -1999,29 +1961,13 @@ v0.3-schema.sql
 
 应该使用增量 Migration。
 
-例如未来可能出现：
+Task 32 已提供：
 
 ```text
-docs/sql/v0.4-taskX-add-action-candidate.sql
+docs/sql/v0.4-task2-add-action-candidate.sql
 ```
 
-以及：
-
-```text
-docs/sql/v0.4-taskY-add-todo.sql
-```
-
-具体：
-
-```text
-Task Number
-File Name
-Schema
-```
-
-必须根据实际实现确定。
-
-当前不要提前创建这些 SQL。
+该文件只新增 `action_candidate`。Todo、Deadline、Reminder 仍未建表。
 
 ---
 
@@ -2035,10 +1981,10 @@ Schema
 Fresh Schema
 ```
 
-例如当前 V0.3 Final 环境：
+当前 V0.4 全新环境：
 
 ```text
-docs/sql/v0.3-schema.sql
+docs/sql/v0.4-schema.sql
 ```
 
 具体路径以仓库真实结构为准。
@@ -2059,14 +2005,12 @@ docs/sql/
 
 ---
 
-## 进入 V0.4
+## 从 V0.3 进入当前 V0.4
 
-只有对应 Task 真正产生 Schema Change 后：
-
-才执行对应：
+执行：
 
 ```text
-V0.4 Incremental Migration
+docs/sql/v0.4-task2-add-action-candidate.sql
 ```
 
 进入一个版本：
@@ -2112,7 +2056,7 @@ Not Yet Implemented
 
 # 55. 当前数据库总结
 
-截至 V0.3 完成：
+截至 V0.4 Task 32：
 
 ```text
 MySQL
@@ -2121,13 +2065,13 @@ MySQL
 ├── tag
 ├── inbox_tag
 ├── inbox_keyword
-└── inbox_entity
+├── inbox_entity
+└── action_candidate
 ```
 
 当前没有：
 
 ```text
-action_candidate
 todo
 deadline
 reminder
@@ -2215,7 +2159,7 @@ Qdrant：
 Derived / Rebuildable Retrieval Index
 ```
 
-未来 Action Candidate：
+当前 Action Candidate：
 
 ```text
 =

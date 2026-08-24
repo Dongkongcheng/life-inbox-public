@@ -508,7 +508,7 @@ Original Business Source of Truth
 Keyword Search
 Embedding
 Semantic Retrieval
-Future Action Extraction
+Action Extraction
 ```
 
 ---
@@ -713,7 +713,7 @@ Favorite
 Archive
 Original Content
 AI Status
-Future Action Candidate
+Action Candidate
 Future Todo
 ```
 
@@ -872,7 +872,7 @@ deadline
 
 # Action Source Traceability
 
-未来 Action Candidate / Todo 应尽可能保留其来源：
+Action Candidate 和未来 Todo 应尽可能保留其来源：
 
 ```text
 InboxItem
@@ -1019,7 +1019,7 @@ Keyword Retrieval
 Hybrid Orchestration
 Final Business Results
 
-Future Action Candidate State
+Action Candidate State
 Future Todo
 Future Deadline Business State
 ```
@@ -1987,7 +1987,7 @@ Current known scope limitations include:
 * Semantic Search requires an Embedding Provider and Qdrant.
 * Reranking requires an explicitly configured Rerank Provider.
 * Action Extractor is currently under development.
-* Action Candidate / Todo functionality is not yet fully implemented.
+* Manual Action Candidate extraction and persistence are implemented; confirmation and Todo are not yet implemented.
 * Relations are not implemented yet.
 * Personal RAG is not implemented yet.
 * Personal Agent functionality is not implemented yet.

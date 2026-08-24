@@ -1,6 +1,7 @@
 package com.lifeinbox.server.client;
 
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
+import com.lifeinbox.server.dto.AiActionExtractionResponse;
 import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
@@ -33,6 +34,75 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AiServiceClientTests {
+
+    @Test
+    void actionExtractionPostsPreparedTextAndParsesTask31Contract() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/action/extract", exchange -> {
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = """
+                    {
+                      "hasAction":true,
+                      "actions":[{
+                        "actionType":"DEADLINE",
+                        "title":"提交课程设计报告",
+                        "deadlineText":"8月25日前",
+                        "deadline":"2026-08-25",
+                        "evidence":"8月25日前提交课程设计报告"
+                      }]
+                    }
+                    """.strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiActionExtractionResponse response = clientFor(server).extractActions(
+                    "标题：\n课程设计\n\n正文：\n8月25日前提交报告"
+            );
+
+            assertEquals(true, response.hasAction());
+            assertEquals(1, response.actions().size());
+            assertEquals("DEADLINE", response.actions().getFirst().actionType());
+            assertEquals("2026-08-25", response.actions().getFirst().deadline());
+            assertEquals(
+                    "{\"text\":\"标题：\\n课程设计\\n\\n正文：\\n8月25日前提交报告\"}",
+                    requestBody.get()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void actionExtractionConvertsUpstreamFailureWithoutLeakingResponse() throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/action/extract", exchange -> {
+            byte[] body = "{\"detail\":\"secret provider response\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(503, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceUnavailableException exception = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> clientFor(server).extractActions("正文")
+            );
+            assertEquals("AI Action 提取服务暂不可用", exception.getMessage());
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void healthReturnsStructuredPythonResponse() throws IOException {
