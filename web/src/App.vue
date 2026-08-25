@@ -1,5 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import ActionCandidatePanel from './components/ActionCandidatePanel.vue'
 import HighlightedText from './components/HighlightedText.vue'
 import { createLatestRequestGuard } from './searchRequestGuard.js'
 
@@ -864,6 +865,11 @@ onBeforeUnmount(() => {
           >
             {{ analysisErrorMessage }}
           </p>
+          <ActionCandidatePanel
+            v-if="isAnalyzableItem(item)"
+            :inbox-item-id="item.id"
+            :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || analyzingId === item.id"
+          />
         </article>
       </div>
     </section>
