@@ -57,6 +57,27 @@ public class InboxItem {
     @TableField(exist = false)
     private boolean aiProcessingStale;
 
+    /** Action Extraction 与 Analyze 可以独立成功、失败和重试，因此拥有独立状态。 */
+    private ActionProcessingStatus actionStatus = ActionProcessingStatus.NOT_PROCESSED;
+
+    /** 当前 Action Attempt 的内部所有权标识，不向产品 API 暴露。 */
+    @JsonIgnore
+    private String actionAttemptId;
+
+    /** 只保存安全的简短诊断，不保存上游响应、正文或异常栈。 */
+    @JsonIgnore
+    private String actionErrorMessage;
+
+    @JsonIgnore
+    private LocalDateTime actionStartedTime;
+
+    @JsonIgnore
+    private LocalDateTime actionFinishedTime;
+
+    /** stale 是运行时判断，不持久化第五种 Action 状态。 */
+    @TableField(exist = false)
+    private boolean actionProcessingStale;
+
     /** 标签存放在关系表中，这个字段只用于 API 返回，不映射 inbox_item 列。 */
     @TableField(exist = false)
     private List<String> tags = List.of();
@@ -195,6 +216,54 @@ public class InboxItem {
 
     public void setAiProcessingStale(boolean aiProcessingStale) {
         this.aiProcessingStale = aiProcessingStale;
+    }
+
+    public ActionProcessingStatus getActionStatus() {
+        return actionStatus;
+    }
+
+    public void setActionStatus(ActionProcessingStatus actionStatus) {
+        this.actionStatus = actionStatus;
+    }
+
+    public String getActionAttemptId() {
+        return actionAttemptId;
+    }
+
+    public void setActionAttemptId(String actionAttemptId) {
+        this.actionAttemptId = actionAttemptId;
+    }
+
+    public String getActionErrorMessage() {
+        return actionErrorMessage;
+    }
+
+    public void setActionErrorMessage(String actionErrorMessage) {
+        this.actionErrorMessage = actionErrorMessage;
+    }
+
+    public LocalDateTime getActionStartedTime() {
+        return actionStartedTime;
+    }
+
+    public void setActionStartedTime(LocalDateTime actionStartedTime) {
+        this.actionStartedTime = actionStartedTime;
+    }
+
+    public LocalDateTime getActionFinishedTime() {
+        return actionFinishedTime;
+    }
+
+    public void setActionFinishedTime(LocalDateTime actionFinishedTime) {
+        this.actionFinishedTime = actionFinishedTime;
+    }
+
+    public boolean isActionProcessingStale() {
+        return actionProcessingStale;
+    }
+
+    public void setActionProcessingStale(boolean actionProcessingStale) {
+        this.actionProcessingStale = actionProcessingStale;
     }
 
     public List<String> getTags() {

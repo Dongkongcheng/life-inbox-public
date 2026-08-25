@@ -9,6 +9,8 @@ import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.mapper.ActionCandidateMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -20,9 +22,11 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** 手动 Action 提取编排：准备 Source、调用 Task 31、校验后再交给短事务持久化。 */
+/** 手动与自动 Action 提取共用的统一编排；两种入口只在线程与响应方式上不同。 */
 @Service
 public class ActionCandidateService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ActionCandidateService.class);
 
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final int MAX_ACTIONS = 10;
@@ -37,35 +41,53 @@ public class ActionCandidateService {
     private final InboxSearchableContentService searchableContentService;
     private final AiServiceClient aiServiceClient;
     private final ActionCandidatePersistenceService persistenceService;
+    private final ActionProcessingStatusService statusService;
 
     public ActionCandidateService(
             InboxItemMapper inboxItemMapper,
             ActionCandidateMapper actionCandidateMapper,
             InboxSearchableContentService searchableContentService,
             AiServiceClient aiServiceClient,
-            ActionCandidatePersistenceService persistenceService
+            ActionCandidatePersistenceService persistenceService,
+            ActionProcessingStatusService statusService
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.actionCandidateMapper = actionCandidateMapper;
         this.searchableContentService = searchableContentService;
         this.aiServiceClient = aiServiceClient;
         this.persistenceService = persistenceService;
+        this.statusService = statusService;
     }
 
     public List<ActionCandidateResponse> extract(Long inboxItemId) {
-        InboxItem inboxItem = requireActiveItem(inboxItemId);
-        LocalDate referenceDate = requireReferenceDate(inboxItem);
-        String sourceText = buildSourceText(inboxItem);
+        requireActiveItem(inboxItemId);
+        String attemptId = statusService.markProcessing(inboxItemId);
 
-        // 外部 LLM 调用可能耗时或失败，必须在任何数据库事务开始前完成。
-        AiActionExtractionResponse aiResponse = aiServiceClient.extractActions(
-                sourceText,
-                referenceDate
-        );
-        List<ValidatedActionCandidate> candidates = validate(aiResponse);
+        List<ValidatedActionCandidate> candidates;
+        try {
+            // Claim 后重新读取，避免后台任务消费事件发布前的旧实体快照。
+            InboxItem inboxItem = requireActiveItem(inboxItemId);
+            LocalDate referenceDate = requireReferenceDate(inboxItem);
+            String sourceText = buildSourceText(inboxItem);
 
-        // 只有成功响应才会进入短事务；Provider 失败或非法响应会原样保留旧候选。
-        return persistenceService.replacePending(inboxItemId, candidates);
+            // Claim 已在短事务提交；外部 LLM 调用不持有数据库事务或行锁。
+            AiActionExtractionResponse aiResponse = aiServiceClient.extractActions(
+                    sourceText,
+                    referenceDate
+            );
+            candidates = validate(aiResponse);
+        } catch (RuntimeException exception) {
+            recordFailure(inboxItemId, attemptId, safeFailureMessage(exception), exception);
+            throw exception;
+        }
+
+        try {
+            // 当前 Attempt 的 Candidate Replacement 与 SUCCESS 在同一短事务原子提交。
+            return persistenceService.completeSuccess(inboxItemId, attemptId, candidates);
+        } catch (RuntimeException exception) {
+            recordFailure(inboxItemId, attemptId, "Action 结果保存失败", exception);
+            throw exception;
+        }
     }
 
     public List<ActionCandidateResponse> list(Long inboxItemId) {
@@ -97,8 +119,36 @@ public class ActionCandidateService {
         return inboxItem.getCreatedTime().toLocalDate();
     }
 
+    private String safeFailureMessage(RuntimeException exception) {
+        if (exception instanceof AiServiceUnavailableException) {
+            return "Action AI 服务暂时不可用";
+        }
+        if (exception instanceof ResponseStatusException responseException
+                && responseException.getReason() != null) {
+            return responseException.getReason();
+        }
+        return "Action 提取失败";
+    }
+
+    private void recordFailure(
+            Long inboxItemId,
+            String attemptId,
+            String safeMessage,
+            RuntimeException originalException
+    ) {
+        try {
+            boolean saved = statusService.markFailed(inboxItemId, attemptId, safeMessage);
+            if (!saved) {
+                LOGGER.info("忽略已失效 Action Attempt 的失败结果，InboxItem={}", inboxItemId);
+            }
+        } catch (RuntimeException statusException) {
+            originalException.addSuppressed(statusException);
+            LOGGER.warn("InboxItem {} 的 Action 失败状态保存失败", inboxItemId, statusException);
+        }
+    }
+
     private String buildSourceText(InboxItem inboxItem) {
-        // URL/FILE/IMAGE 复用既有 searchable_content，不在手动提取时重复 Fetch、Parse 或 OCR。
+        // URL/FILE/IMAGE 复用既有 searchable_content，不在 Action 流程重复 Fetch、Parse 或 OCR。
         String primaryContent = searchableContentService.resolveForRetrieval(inboxItem);
         String title = searchableContentService.normalize(inboxItem.getTitle());
         if (title == null && primaryContent == null) {

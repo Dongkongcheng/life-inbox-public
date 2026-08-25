@@ -171,6 +171,8 @@ IMAGE
 | AI 主结果   | `summary`, `category`                            | 最近一次成功 Analyze 的主 AI 结果          |
 | AI 状态    | `ai_status`, `ai_attempt_id`, `ai_error_message` | AI 状态机、Attempt Guard 和安全错误信息     |
 | AI 时间    | `ai_started_time`, `ai_finished_time`            | 当前有效 Attempt 的开始和结束时间            |
+| Action 状态 | `action_status`, `action_attempt_id`, `action_error_message` | 独立 Action 状态机、Attempt Guard 与安全错误摘要 |
+| Action 时间 | `action_started_time`, `action_finished_time`    | 当前有效 Action Attempt 的开始和结束时间      |
 | Inbox 状态 | `status`, `favorite`                             | ACTIVE / ARCHIVED 与收藏状态          |
 | 审计时间     | `created_time`, `updated_time`                   | 创建与更新时间                          |
 
@@ -969,7 +971,7 @@ V0.4 — Action Extractor
 ```text
 V0.4 Current Schema
 =
-V0.3 Final Schema + action_candidate + todo
+V0.3 Final Schema + action_candidate + todo + InboxItem Action Processing State
 ```
 
 V0.4 首先需要解决的重要数据边界：
@@ -1125,7 +1127,7 @@ updated_time
 
 ```text
 action_type: TODO / DEADLINE（由 Java 受控 Enum 校验）
-status: PENDING / ACCEPTED / DISMISSED（Task 32 只创建 PENDING）
+status: PENDING / ACCEPTED / DISMISSED（自动与手动提取都只创建 PENDING）
 index: (inbox_item_id, status)
 foreign key: inbox_item_id → inbox_item.id ON DELETE CASCADE
 ```
@@ -1183,6 +1185,39 @@ REMINDER_SENT
 ```
 
 等复杂状态。
+
+---
+
+# 28.1 Action Processing State 与 Attempt Guard
+
+`inbox_item` 现在同时拥有两套互相独立的处理元数据：
+
+```text
+Analyze:
+ai_status / ai_attempt_id / ai_error_message / ai_*_time
+
+Action Extraction:
+action_status / action_attempt_id / action_error_message / action_*_time
+```
+
+这不是重复状态。Analyze 与 Action 可以独立成功、失败和重试；Action 失败不能修改 `ai_status`，Analyze 失败也
+不能阻止已经拥有可用正文的 Action Attempt。`action_status` 使用：
+
+```text
+NOT_PROCESSED → PROCESSING → SUCCESS / FAILED
+```
+
+`SUCCESS + 0 Candidates` 是合法结果。stale 仍由 `PROCESSING + action_started_time + processing-stale-after`
+运行时判断，不新增数据库 `STALE` 状态；Action 与 Analyze 复用同一阈值配置以避免无意义配置分裂，但状态与
+Attempt ID 完全独立。
+
+每次 Action 开始先在短事务中写入新的 UUID Attempt；FastAPI 调用不在事务内。成功完成事务会先锁定当前
+Attempt Owner，再锁定同一 InboxItem 的 Candidate，删除旧 `PENDING`、插入新 `PENDING`，最后写入 `SUCCESS`。
+任一步失败都会回滚整个完成事务，并由独立短事务按当前 Attempt 记录 `FAILED`。迟到成功或失败因为 Attempt ID
+不匹配而不产生任何 Candidate 或状态修改。
+
+自动重新提取永远保留 `ACCEPTED` / `DISMISSED`。若新结果与终态 Candidate 的 `action_type + 规范化 title +
+规范化 deadline_text + deadline_date` 完全相同，则不重新插入 PENDING；当前不做语义相似度去重。
 
 ---
 
@@ -1974,7 +2009,7 @@ Fresh Install
 Current V0.4 Database State
 ```
 
-它等价于 `v0.3-schema.sql` 加上 `action_candidate`，且没有覆盖历史文件：
+它等价于 `v0.3-schema.sql` 依次应用 Task 32、Task 34 与 Task 37 增量 Migration，且没有覆盖历史文件：
 
 ```text
 v0.3-schema.sql
@@ -1988,13 +2023,16 @@ v0.3-schema.sql
 
 应该使用增量 Migration。
 
-Task 32 已提供：
+当前依次提供：
 
 ```text
 docs/sql/v0.4-task2-add-action-candidate.sql
+docs/sql/v0.4-task4-add-todo.sql
+docs/sql/v0.4-task7-add-action-processing-state.sql
 ```
 
-该文件只新增 `action_candidate`。Todo、Deadline、Reminder 仍未建表。
+它们分别新增 `action_candidate`、`todo`，以及 InboxItem 的独立 Action Processing Metadata。
+Deadline 第一版继续使用 `todo.due_date`，Reminder 仍未建表。
 
 ---
 
@@ -2038,6 +2076,8 @@ docs/sql/
 
 ```text
 docs/sql/v0.4-task2-add-action-candidate.sql
+docs/sql/v0.4-task4-add-todo.sql
+docs/sql/v0.4-task7-add-action-processing-state.sql
 ```
 
 进入一个版本：

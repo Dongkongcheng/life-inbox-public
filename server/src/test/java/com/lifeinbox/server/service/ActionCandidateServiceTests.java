@@ -41,13 +41,21 @@ class ActionCandidateServiceTests {
     private final AiServiceClient aiServiceClient = mock(AiServiceClient.class);
     private final ActionCandidatePersistenceService persistenceService =
             mock(ActionCandidatePersistenceService.class);
+    private final ActionProcessingStatusService statusService =
+            mock(ActionProcessingStatusService.class);
     private final ActionCandidateService service = new ActionCandidateService(
             inboxItemMapper,
             actionCandidateMapper,
             searchableContentService,
             aiServiceClient,
-            persistenceService
+            persistenceService,
+            statusService
     );
+
+    ActionCandidateServiceTests() {
+        when(statusService.markProcessing(anyLong())).thenReturn("action-attempt");
+        when(statusService.markFailed(anyLong(), anyString(), anyString())).thenReturn(true);
+    }
 
     @Test
     void textTodoIsValidatedAndPersistedAsOneCandidate() {
@@ -64,13 +72,18 @@ class ActionCandidateServiceTests {
                 "整理 Java 面试题",
                 null
         ));
-        when(persistenceService.replacePending(anyLong(), anyList())).thenReturn(persisted);
+        when(persistenceService.completeSuccess(anyLong(), anyString(), anyList()))
+                .thenReturn(persisted);
 
         assertEquals(persisted, service.extract(1L));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ValidatedActionCandidate>> candidates = ArgumentCaptor.forClass(List.class);
-        verify(persistenceService).replacePending(org.mockito.ArgumentMatchers.eq(1L), candidates.capture());
+        verify(persistenceService).completeSuccess(
+                org.mockito.ArgumentMatchers.eq(1L),
+                org.mockito.ArgumentMatchers.eq("action-attempt"),
+                candidates.capture()
+        );
         assertEquals(1, candidates.getValue().size());
         assertEquals(ActionCandidateType.TODO, candidates.getValue().getFirst().actionType());
         assertEquals("整理 Java 面试题", candidates.getValue().getFirst().title());
@@ -98,13 +111,18 @@ class ActionCandidateServiceTests {
                 ),
                 todo("整理参考文献")
                 ));
-        when(persistenceService.replacePending(anyLong(), anyList())).thenReturn(List.of());
+        when(persistenceService.completeSuccess(anyLong(), anyString(), anyList()))
+                .thenReturn(List.of());
 
         service.extract(2L);
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ValidatedActionCandidate>> candidates = ArgumentCaptor.forClass(List.class);
-        verify(persistenceService).replacePending(org.mockito.ArgumentMatchers.eq(2L), candidates.capture());
+        verify(persistenceService).completeSuccess(
+                org.mockito.ArgumentMatchers.eq(2L),
+                org.mockito.ArgumentMatchers.eq("action-attempt"),
+                candidates.capture()
+        );
         assertEquals(2, candidates.getValue().size());
         ValidatedActionCandidate deadline = candidates.getValue().getFirst();
         assertEquals(ActionCandidateType.DEADLINE, deadline.actionType());
@@ -120,10 +138,11 @@ class ActionCandidateServiceTests {
         ));
         when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
                 .thenReturn(new AiActionExtractionResponse(false, List.of()));
-        when(persistenceService.replacePending(3L, List.of())).thenReturn(List.of());
+        when(persistenceService.completeSuccess(3L, "action-attempt", List.of()))
+                .thenReturn(List.of());
 
         assertEquals(List.of(), service.extract(3L));
-        verify(persistenceService).replacePending(3L, List.of());
+        verify(persistenceService).completeSuccess(3L, "action-attempt", List.of());
     }
 
     @Test
@@ -135,7 +154,28 @@ class ActionCandidateServiceTests {
                 .thenThrow(new AiServiceUnavailableException("mock timeout"));
 
         assertThrows(AiServiceUnavailableException.class, () -> service.extract(4L));
-        verify(persistenceService, never()).replacePending(anyLong(), anyList());
+        verify(persistenceService, never()).completeSuccess(anyLong(), anyString(), anyList());
+        verify(statusService).markFailed(4L, "action-attempt", "Action AI 服务暂时不可用");
+    }
+
+    @Test
+    void completionFailureMarksCurrentAttemptFailedWithoutASecondReplacement() {
+        when(inboxItemMapper.selectById(41L)).thenReturn(item(
+                41L, "TEXT", "ACTIVE", null, "整理复习资料。", null
+        ));
+        when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
+                .thenReturn(extraction(true, todo("整理复习资料")));
+        when(persistenceService.completeSuccess(anyLong(), anyString(), anyList()))
+                .thenThrow(new IllegalStateException("mock transaction rollback"));
+
+        assertThrows(IllegalStateException.class, () -> service.extract(41L));
+
+        verify(persistenceService).completeSuccess(
+                org.mockito.ArgumentMatchers.eq(41L),
+                org.mockito.ArgumentMatchers.eq("action-attempt"),
+                anyList()
+        );
+        verify(statusService).markFailed(41L, "action-attempt", "Action 结果保存失败");
     }
 
     @Test
@@ -160,7 +200,7 @@ class ActionCandidateServiceTests {
             )).thenReturn(response);
             assertThrows(AiServiceUnavailableException.class, () -> service.extract(5L));
         }
-        verify(persistenceService, never()).replacePending(anyLong(), anyList());
+        verify(persistenceService, never()).completeSuccess(anyLong(), anyString(), anyList());
     }
 
     @Test
@@ -197,7 +237,8 @@ class ActionCandidateServiceTests {
 
     @Test
     void urlFileAndImageReuseSearchableContent() {
-        when(persistenceService.replacePending(anyLong(), anyList())).thenReturn(List.of());
+        when(persistenceService.completeSuccess(anyLong(), anyString(), anyList()))
+                .thenReturn(List.of());
         when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
                 .thenReturn(new AiActionExtractionResponse(false, List.of()));
         String[] types = {"URL", "FILE", "IMAGE"};
@@ -233,7 +274,8 @@ class ActionCandidateServiceTests {
         ));
         when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
                 .thenReturn(new AiActionExtractionResponse(false, List.of()));
-        when(persistenceService.replacePending(anyLong(), anyList())).thenReturn(List.of());
+        when(persistenceService.completeSuccess(anyLong(), anyString(), anyList()))
+                .thenReturn(List.of());
 
         service.extract(30L);
 
@@ -276,7 +318,8 @@ class ActionCandidateServiceTests {
         when(inboxItemMapper.selectById(50L)).thenReturn(source);
         when(aiServiceClient.extractActions("明天提交报告", LocalDate.of(2026, 8, 24)))
                 .thenReturn(new AiActionExtractionResponse(false, List.of()));
-        when(persistenceService.replacePending(50L, List.of())).thenReturn(List.of());
+        when(persistenceService.completeSuccess(50L, "action-attempt", List.of()))
+                .thenReturn(List.of());
 
         service.extract(50L);
         service.extract(50L);

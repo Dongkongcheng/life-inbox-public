@@ -1,6 +1,7 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.event.InboxActionContentReadyEvent;
 import com.lifeinbox.server.event.InboxItemCapturedEvent;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.springframework.context.ApplicationEventPublisher;
@@ -42,6 +43,10 @@ public class InboxCapturePersistenceService {
         }
 
         eventPublisher.publishEvent(new InboxItemCapturedEvent(savedItem.getId()));
+        if ("TEXT".equals(savedItem.getType())) {
+            // TEXT 原文提交后即是可用正文；其他类型必须等待提取正文成功写入。
+            eventPublisher.publishEvent(new InboxActionContentReadyEvent(savedItem.getId()));
+        }
         return savedItem;
     }
 }

@@ -2,8 +2,11 @@ package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.event.InboxActionContentReadyEvent;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,9 +29,20 @@ public class InboxSearchableContentService {
     private static final Pattern INLINE_WHITESPACE = Pattern.compile("[\\p{Zs}\\t\\f\\u000B]+");
 
     private final InboxItemMapper inboxItemMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public InboxSearchableContentService(InboxItemMapper inboxItemMapper) {
+    @Autowired
+    public InboxSearchableContentService(
+            InboxItemMapper inboxItemMapper,
+            ApplicationEventPublisher eventPublisher
+    ) {
         this.inboxItemMapper = inboxItemMapper;
+        this.eventPublisher = eventPublisher;
+    }
+
+    InboxSearchableContentService(InboxItemMapper inboxItemMapper) {
+        this(inboxItemMapper, event -> {
+        });
     }
 
     /** TEXT 的 content 就是业务源数据，规范化后直接消费，不额外复制到派生列。 */
@@ -65,6 +79,8 @@ public class InboxSearchableContentService {
         if (updatedRows != 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "AI 分析尝试已失效");
         }
+        // 事件与正文更新共享事务，只有提交成功后 Action 后台监听器才会收到。
+        eventPublisher.publishEvent(new InboxActionContentReadyEvent(inboxItemId));
         return normalized;
     }
 

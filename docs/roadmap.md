@@ -44,6 +44,7 @@ V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、�
 - ✅ Task 4 / Overall Task 34 — Todo Core Business Model（独立业务表、来源追溯、Candidate 唯一约束与最小 Java 持久化）
 - ✅ Task 5 / Overall Task 35 — Candidate Confirm / Dismiss（终态状态机、原子 Candidate → Todo、幂等与并发保护）
 - ✅ Task 6 / Overall Task 36 — Frontend Action Candidate UI（按需加载、手动检测、创建 Todo/忽略与局部状态反馈）
+- ✅ Task 7 / Overall Task 37 — Automatic Action Extraction（可用正文 AFTER_COMMIT 自动触发、独立状态、Attempt Guard、失败降级与终态精确去重）
 - Todo 列表与 Todo 完成/编辑等生命周期 API 尚未实现
 - Reminder / Action Item 后续能力仍为 Planned
 

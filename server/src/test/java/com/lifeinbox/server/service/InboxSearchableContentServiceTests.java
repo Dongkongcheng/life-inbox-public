@@ -2,9 +2,11 @@ package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.event.InboxActionContentReadyEvent;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -23,8 +25,10 @@ import static org.mockito.ArgumentMatchers.anyLong;
 class InboxSearchableContentServiceTests {
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final InboxSearchableContentService service = new InboxSearchableContentService(
-            inboxItemMapper
+            inboxItemMapper,
+            eventPublisher
     );
 
     @Test
@@ -57,6 +61,7 @@ class InboxSearchableContentServiceTests {
                 AiProcessingStatus.PROCESSING,
                 "第一页\n\n第二页"
         );
+        verify(eventPublisher).publishEvent(new InboxActionContentReadyEvent(8L));
     }
 
     @Test
@@ -74,6 +79,7 @@ class InboxSearchableContentServiceTests {
         );
 
         assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
@@ -98,6 +104,27 @@ class InboxSearchableContentServiceTests {
         );
 
         verify(inboxItemMapper, never()).updateSearchableContent(anyLong(), any(), any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    void urlFileAndImagePreparedContentEachPublishOneReadyEvent() {
+        for (long inboxItemId = 20L; inboxItemId <= 22L; inboxItemId++) {
+            when(inboxItemMapper.updateSearchableContent(
+                    inboxItemId,
+                    "attempt-" + inboxItemId,
+                    AiProcessingStatus.PROCESSING,
+                    "可用正文-" + inboxItemId
+            )).thenReturn(1);
+
+            service.replaceExtractedContent(
+                    inboxItemId,
+                    "attempt-" + inboxItemId,
+                    "可用正文-" + inboxItemId
+            );
+
+            verify(eventPublisher).publishEvent(new InboxActionContentReadyEvent(inboxItemId));
+        }
     }
 
     @Test

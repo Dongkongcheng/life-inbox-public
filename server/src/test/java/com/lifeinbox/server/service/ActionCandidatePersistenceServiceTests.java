@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.entity.ActionCandidate;
 import com.lifeinbox.server.entity.ActionCandidateStatus;
 import com.lifeinbox.server.entity.ActionCandidateType;
+import com.lifeinbox.server.entity.ActionProcessingStatus;
 import com.lifeinbox.server.mapper.ActionCandidateMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
@@ -25,10 +26,13 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ActionCandidatePersistenceServiceTests {
+
+    private static final String ATTEMPT_ID = "attempt-current";
 
     private final InboxItemMapper inboxItemMapper = mock(InboxItemMapper.class);
     private final ActionCandidateMapper actionCandidateMapper = mock(ActionCandidateMapper.class);
@@ -36,101 +40,171 @@ class ActionCandidatePersistenceServiceTests {
             new ActionCandidatePersistenceService(inboxItemMapper, actionCandidateMapper);
 
     @Test
-    void successfulReplacementLocksSourceDeletesPendingAndInsertsEveryCandidate() {
-        when(inboxItemMapper.selectActiveIdForUpdate(1L)).thenReturn(1L);
+    void successfulReplacementOwnsAttemptReplacesPendingAndMarksSuccessLast() {
+        allowCurrentAttempt(1L);
+        when(actionCandidateMapper.selectByInboxItemIdForUpdate(1L)).thenReturn(List.of());
         when(actionCandidateMapper.insert(any(ActionCandidate.class))).thenReturn(1);
+        when(inboxItemMapper.markActionSuccess(
+                1L,
+                ATTEMPT_ID,
+                ActionProcessingStatus.PROCESSING,
+                ActionProcessingStatus.SUCCESS
+        )).thenReturn(1);
         when(actionCandidateMapper.selectByInboxItemId(1L)).thenReturn(List.of());
         List<ValidatedActionCandidate> candidates = List.of(
-                new ValidatedActionCandidate(
-                        ActionCandidateType.DEADLINE,
-                        "提交报告",
-                        "明天",
-                        LocalDate.of(2026, 8, 25),
-                        "明天提交报告"
-                ),
-                new ValidatedActionCandidate(
-                        ActionCandidateType.TODO,
-                        "整理参考文献",
-                        null,
-                        null,
-                        "整理参考文献"
-                ),
-                new ValidatedActionCandidate(
-                        ActionCandidateType.DEADLINE,
-                        "确认模糊截止时间",
-                        "月底左右",
-                        null,
-                        "月底左右确认截止时间"
-                )
+                deadline("提交报告", "明天", LocalDate.of(2026, 8, 25)),
+                todo("整理参考文献"),
+                deadline("确认模糊截止时间", "月底左右", null)
         );
 
-        service.replacePending(1L, candidates);
+        service.completeSuccess(1L, ATTEMPT_ID, candidates);
 
         ArgumentCaptor<ActionCandidate> inserted = ArgumentCaptor.forClass(ActionCandidate.class);
-        verify(actionCandidateMapper, org.mockito.Mockito.times(3)).insert(inserted.capture());
+        verify(actionCandidateMapper, times(3)).insert(inserted.capture());
         assertEquals(ActionCandidateType.DEADLINE, inserted.getAllValues().getFirst().getActionType());
         assertEquals(LocalDate.of(2026, 8, 25), inserted.getAllValues().getFirst().getDeadlineDate());
-        assertEquals(ActionCandidateStatus.PENDING, inserted.getAllValues().getFirst().getStatus());
         assertEquals(ActionCandidateStatus.PENDING, inserted.getAllValues().get(1).getStatus());
-        assertEquals(ActionCandidateType.DEADLINE, inserted.getAllValues().get(2).getActionType());
         assertNull(inserted.getAllValues().get(2).getDeadlineDate());
 
         InOrder order = inOrder(inboxItemMapper, actionCandidateMapper);
-        order.verify(inboxItemMapper).selectActiveIdForUpdate(1L);
+        order.verify(inboxItemMapper).selectCurrentActionAttemptForUpdate(
+                1L,
+                ATTEMPT_ID,
+                ActionProcessingStatus.PROCESSING
+        );
+        order.verify(actionCandidateMapper).selectByInboxItemIdForUpdate(1L);
         order.verify(actionCandidateMapper).deletePendingByInboxItemId(1L);
-        order.verify(actionCandidateMapper, org.mockito.Mockito.times(3)).insert(any(ActionCandidate.class));
-        order.verify(actionCandidateMapper).selectByInboxItemId(1L);
+        order.verify(actionCandidateMapper, times(3)).insert(any(ActionCandidate.class));
+        order.verify(inboxItemMapper).markActionSuccess(
+                1L,
+                ATTEMPT_ID,
+                ActionProcessingStatus.PROCESSING,
+                ActionProcessingStatus.SUCCESS
+        );
     }
 
     @Test
-    void successfulNoActionDeletesOldPendingWithoutInserting() {
-        when(inboxItemMapper.selectActiveIdForUpdate(2L)).thenReturn(2L);
+    void successfulNoActionDeletesPendingAndStillMarksSuccess() {
+        allowCurrentAttempt(2L);
+        when(actionCandidateMapper.selectByInboxItemIdForUpdate(2L)).thenReturn(List.of());
+        when(inboxItemMapper.markActionSuccess(
+                2L, ATTEMPT_ID, ActionProcessingStatus.PROCESSING, ActionProcessingStatus.SUCCESS
+        )).thenReturn(1);
         when(actionCandidateMapper.selectByInboxItemId(2L)).thenReturn(List.of());
 
-        assertEquals(List.of(), service.replacePending(2L, List.of()));
+        assertEquals(List.of(), service.completeSuccess(2L, ATTEMPT_ID, List.of()));
 
         verify(actionCandidateMapper).deletePendingByInboxItemId(2L);
         verify(actionCandidateMapper, never()).insert(any(ActionCandidate.class));
+        verify(inboxItemMapper).markActionSuccess(
+                2L, ATTEMPT_ID, ActionProcessingStatus.PROCESSING, ActionProcessingStatus.SUCCESS
+        );
     }
 
     @Test
-    void sourceArchivedDuringAiCallStopsBeforeDeletingPending() {
-        when(inboxItemMapper.selectActiveIdForUpdate(3L)).thenReturn(null);
+    void expiredAttemptCannotMutateCandidatesOrStatus() {
+        when(inboxItemMapper.selectCurrentActionAttemptForUpdate(
+                3L,
+                ATTEMPT_ID,
+                ActionProcessingStatus.PROCESSING
+        )).thenReturn(null);
 
         ResponseStatusException exception = assertThrows(
                 ResponseStatusException.class,
-                () -> service.replacePending(3L, List.of())
+                () -> service.completeSuccess(3L, ATTEMPT_ID, List.of())
         );
 
-        assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+        assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
         verify(actionCandidateMapper, never()).deletePendingByInboxItemId(anyLong());
+        verify(inboxItemMapper, never()).markActionSuccess(
+                anyLong(), any(), any(), any()
+        );
     }
 
     @Test
-    void insertFailureEscapesAndSkipsReload() {
-        when(inboxItemMapper.selectActiveIdForUpdate(4L)).thenReturn(4L);
+    void insertFailureEscapesBeforeSuccessSoTransactionCanRollbackEverything() {
+        allowCurrentAttempt(4L);
+        when(actionCandidateMapper.selectByInboxItemIdForUpdate(4L)).thenReturn(List.of());
         when(actionCandidateMapper.insert(any(ActionCandidate.class)))
                 .thenThrow(new IllegalStateException("mock insert failure"));
 
         assertThrows(
                 IllegalStateException.class,
-                () -> service.replacePending(4L, List.of(new ValidatedActionCandidate(
-                        ActionCandidateType.TODO, "整理资料", null, null, "整理资料"
-                )))
+                () -> service.completeSuccess(4L, ATTEMPT_ID, List.of(todo("整理资料")))
         );
 
         verify(actionCandidateMapper).deletePendingByInboxItemId(4L);
-        verify(actionCandidateMapper, never()).selectByInboxItemId(anyLong());
+        verify(inboxItemMapper, never()).markActionSuccess(anyLong(), any(), any(), any());
     }
 
     @Test
-    void replacePendingDefinesSpringTransactionBoundary() throws NoSuchMethodException {
+    void exactAcceptedAndDismissedDuplicatesAreSuppressedButDifferentCandidateRemains() {
+        allowCurrentAttempt(5L);
+        when(actionCandidateMapper.selectByInboxItemIdForUpdate(5L)).thenReturn(List.of(
+                terminal(ActionCandidateStatus.ACCEPTED, ActionCandidateType.TODO,
+                        "提交　报告", null, null),
+                terminal(ActionCandidateStatus.DISMISSED, ActionCandidateType.DEADLINE,
+                        "确认截止时间", "月底左右", null)
+        ));
+        when(actionCandidateMapper.insert(any(ActionCandidate.class))).thenReturn(1);
+        when(inboxItemMapper.markActionSuccess(
+                5L, ATTEMPT_ID, ActionProcessingStatus.PROCESSING, ActionProcessingStatus.SUCCESS
+        )).thenReturn(1);
+        when(actionCandidateMapper.selectByInboxItemId(5L)).thenReturn(List.of());
+
+        service.completeSuccess(5L, ATTEMPT_ID, List.of(
+                todo("提交 报告"),
+                deadline("确认截止时间", "月底左右", null),
+                todo("准备答辩 PPT")
+        ));
+
+        ArgumentCaptor<ActionCandidate> inserted = ArgumentCaptor.forClass(ActionCandidate.class);
+        verify(actionCandidateMapper).insert(inserted.capture());
+        assertEquals("准备答辩 PPT", inserted.getValue().getTitle());
+        verify(actionCandidateMapper).deletePendingByInboxItemId(5L);
+    }
+
+    @Test
+    void completeSuccessDefinesSpringTransactionBoundary() throws NoSuchMethodException {
         Method method = ActionCandidatePersistenceService.class.getMethod(
-                "replacePending",
+                "completeSuccess",
                 Long.class,
+                String.class,
                 List.class
         );
 
         assertTrue(method.isAnnotationPresent(Transactional.class));
+    }
+
+    private void allowCurrentAttempt(Long inboxItemId) {
+        when(inboxItemMapper.selectCurrentActionAttemptForUpdate(
+                inboxItemId,
+                ATTEMPT_ID,
+                ActionProcessingStatus.PROCESSING
+        )).thenReturn(inboxItemId);
+    }
+
+    private ValidatedActionCandidate todo(String title) {
+        return new ValidatedActionCandidate(ActionCandidateType.TODO, title, null, null, title);
+    }
+
+    private ValidatedActionCandidate deadline(String title, String text, LocalDate date) {
+        return new ValidatedActionCandidate(ActionCandidateType.DEADLINE, title, text, date, title);
+    }
+
+    private ActionCandidate terminal(
+            ActionCandidateStatus status,
+            ActionCandidateType type,
+            String title,
+            String deadlineText,
+            LocalDate deadline
+    ) {
+        ActionCandidate candidate = new ActionCandidate();
+        candidate.setActionType(type);
+        candidate.setTitle(title);
+        candidate.setDeadlineText(deadlineText);
+        candidate.setDeadlineDate(deadline);
+        candidate.setStatus(status);
+        return candidate;
     }
 }

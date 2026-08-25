@@ -796,7 +796,7 @@ Task 35 已实现的后端产品流程是：
 ```text
 InboxItem
     ↓
-Action Extraction
+可用正文提交后后台 Action Extraction
     ↓
 Structured Action Candidate
     ↓
@@ -806,6 +806,11 @@ Accept   Dismiss
    ↓
  Todo
 ```
+
+Task 37 已把检测升级为 best-effort 自动后台能力：TEXT 在 Capture 提交后触发，URL/FILE/IMAGE 在现有
+`searchable_content` 成功写入后触发。手动“检测行动”仍保留为同步 Retry / Re-extraction 入口；两种入口共享
+同一套独立 Action Processing State、Attempt Guard 和 PENDING Replacement。Action 失败不会回滚 Capture，
+也不会修改 Analyze 状态或 Search 数据。
 
 AI 发现：
 
@@ -2006,7 +2011,9 @@ Current known scope limitations include:
 * Semantic Search requires an Embedding Provider and Qdrant.
 * Reranking requires an explicitly configured Rerank Provider.
 * Action Extractor is currently under development.
-* Manual Action Candidate extraction、Accept/Dismiss、Candidate → Todo conversion 与前端按需确认 UI 已实现；Todo 列表/完成/编辑 API 尚未实现。
+* Automatic/Manual Action Candidate extraction、Accept/Dismiss、Candidate → Todo conversion 与前端按需确认 UI 已实现；当前只做完全相同终态 Candidate 去重，不做语义去重。
+* Action 自动完成后没有实时推送、通知、提醒或日历同步；用户仍需展开条目并确认是否创建 Todo。
+* Todo 列表/完成/编辑 API 尚未实现。
 * Relations are not implemented yet.
 * Personal RAG is not implemented yet.
 * Personal Agent functionality is not implemented yet.

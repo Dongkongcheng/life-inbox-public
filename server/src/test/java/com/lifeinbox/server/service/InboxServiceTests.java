@@ -49,6 +49,9 @@ class InboxServiceTests {
     private final InboxAnalysisStatusService analysisStatusService = mock(
             InboxAnalysisStatusService.class
     );
+    private final ActionProcessingStatusService actionStatusService = mock(
+            ActionProcessingStatusService.class
+    );
     private final InboxCapturePersistenceService capturePersistenceService = mock(
             InboxCapturePersistenceService.class
     );
@@ -67,6 +70,7 @@ class InboxServiceTests {
             urlMetadataService,
             fileStorageService,
             analysisStatusService,
+            actionStatusService,
             capturePersistenceService,
             vectorIndexScheduler,
             aiServiceClient,
@@ -87,6 +91,7 @@ class InboxServiceTests {
                 entity("OpenAI", "ORGANIZATION")
         ));
         when(analysisStatusService.isProcessingStale(item)).thenReturn(true);
+        when(actionStatusService.isProcessingStale(item)).thenReturn(true);
 
         List<InboxItem> result = inboxService.list();
 
@@ -97,6 +102,7 @@ class InboxServiceTests {
                 new AiEntityResponse("OpenAI", "ORGANIZATION")
         ), result.getFirst().getEntities());
         assertTrue(result.getFirst().isAiProcessingStale());
+        assertTrue(result.getFirst().isActionProcessingStale());
         verify(inboxTagMapper).selectTagNamesByInboxItemId(1L);
         verify(inboxKeywordMapper).selectKeywordsByInboxItemId(1L);
         verify(inboxEntityMapper).selectEntitiesByInboxItemId(1L);
@@ -1049,6 +1055,7 @@ class InboxServiceTests {
                 urlMetadataService,
                 fileStorageService,
                 analysisStatusService,
+                actionStatusService,
                 capturePersistenceService,
                 vectorIndexScheduler,
                 aiServiceClient,

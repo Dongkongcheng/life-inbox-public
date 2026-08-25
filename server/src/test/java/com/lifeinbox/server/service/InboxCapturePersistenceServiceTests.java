@@ -1,6 +1,7 @@
 package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.event.InboxActionContentReadyEvent;
 import com.lifeinbox.server.event.InboxItemCapturedEvent;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 class InboxCapturePersistenceServiceTests {
 
@@ -29,7 +31,7 @@ class InboxCapturePersistenceServiceTests {
             new InboxCapturePersistenceService(inboxItemMapper, eventPublisher);
 
     @Test
-    void savePublishesOnlyThePersistedInboxItemId() {
+    void textSavePublishesCaptureAndActionContentReadyInsideTransaction() {
         InboxItem item = new InboxItem();
         item.setId(42L);
         item.setType("TEXT");
@@ -38,10 +40,29 @@ class InboxCapturePersistenceServiceTests {
 
         assertEquals(item, persistenceService.save(item));
 
-        ArgumentCaptor<InboxItemCapturedEvent> eventCaptor =
-                ArgumentCaptor.forClass(InboxItemCapturedEvent.class);
-        verify(eventPublisher).publishEvent(eventCaptor.capture());
-        assertEquals(42L, eventCaptor.getValue().inboxItemId());
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher, times(2)).publishEvent(eventCaptor.capture());
+        assertEquals(
+                java.util.List.of(
+                        new InboxItemCapturedEvent(42L),
+                        new InboxActionContentReadyEvent(42L)
+                ),
+                eventCaptor.getAllValues()
+        );
+    }
+
+    @Test
+    void urlCaptureDoesNotPublishActionReadyBeforeExtractedContentExists() {
+        InboxItem item = new InboxItem();
+        item.setId(43L);
+        item.setType("URL");
+        when(inboxItemMapper.insert(item)).thenReturn(1);
+        when(inboxItemMapper.selectById(43L)).thenReturn(item);
+
+        persistenceService.save(item);
+
+        verify(eventPublisher).publishEvent(new InboxItemCapturedEvent(43L));
+        verify(eventPublisher, never()).publishEvent(any(InboxActionContentReadyEvent.class));
     }
 
     @Test
