@@ -1501,6 +1501,10 @@ AI Candidate
 Confirmed Business Action
 ```
 
+Task 33 的日期上下文沿现有边界传递：Java 从 `InboxItem.created_time` 取 `LocalDate`，作为
+`referenceDate` 发送给 Python；Python 的纯 `DeadlineNormalizer` 只根据 `deadlineText + referenceDate`
+做确定性日期运算。两端都不使用当前执行日期解释 Source，因此同一条 InboxItem 重新提取时语义稳定。
+
 ---
 
 # 29. Action Extraction Input
@@ -1718,7 +1722,10 @@ Normalized Date / Time
 “下周五之前”
 ```
 
-可能需要根据上下文转换为具体日期。
+现在会在存在稳定 `referenceDate` 时根据 ISO Monday→Sunday 周规则转换为具体日期。今天/明天/后天、
+本周/下周星期、本月底/月底/下月底、今年/明年也使用标准日历运算；原始表达保存在 `deadlineText`。
+
+缺少年份的月日、单独星期和模糊表达不会补全；没有 `referenceDate` 时相对表达返回 `deadline = null`。
 
 但是不能无依据猜测：
 

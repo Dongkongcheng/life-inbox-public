@@ -961,9 +961,18 @@ Normalized Deadline
 Original:
 下周五之前
 
+Reference Date:
+2026-08-24
+
 Normalized:
-2026-08-28
+2026-09-04
 ```
+
+当前实现由 Java 从 `InboxItem.created_time` 提供稳定 `referenceDate`，Python 使用确定性标准库逻辑解析今天、
+明天、后天、本周/下周星期、月底和今年/明年等明确相对表达。重新提取不会因为执行日期变化而漂移。
+
+缺少年份的 `8月25日`、单独 `周五`、模糊表达，或没有 `referenceDate` 的相对日期仍保持
+`deadline = null`；原始表达继续保存在 `deadlineText`。
 
 如果信息不足以确定：
 

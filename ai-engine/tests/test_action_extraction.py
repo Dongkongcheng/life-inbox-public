@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from typing import get_args
 
 import httpx
@@ -32,7 +33,11 @@ class StaticActionLlmClient:
     def __init__(self, content: str) -> None:
         self._content = content
 
-    def generate_action_extraction(self, text: str) -> str:
+    def generate_action_extraction(
+        self,
+        text: str,
+        reference_date: date | None = None,
+    ) -> str:
         return self._content
 
 
@@ -71,13 +76,19 @@ def action_candidate(**overrides) -> dict:
     return candidate
 
 
-def extract_from_payload(text: str, actions: list[dict]) -> ActionExtractionResult:
+def extract_from_payload(
+    text: str,
+    actions: list[dict],
+    reference_date: date | None = None,
+) -> ActionExtractionResult:
     service = ActionExtractorService(
         StaticActionLlmClient(
             json.dumps({"actions": actions}, ensure_ascii=False),
         )
     )
-    return service.extract(ActionExtractionRequest(text=text))
+    return service.extract(
+        ActionExtractionRequest(text=text, reference_date=reference_date)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -93,9 +104,17 @@ def clear_dependency_overrides():
         ({"text": ""}, None),
         ({"text": "   "}, None),
         ({"text": "x" * (MAX_ACTION_EXTRACTION_INPUT_CHARS + 1)}, None),
+        ({"text": "正文", "referenceDate": "2026-02-31"}, None),
         (None, b"not-json"),
     ],
-    ids=["missing", "empty", "whitespace", "too-long", "invalid-json"],
+    ids=[
+        "missing",
+        "empty",
+        "whitespace",
+        "too-long",
+        "invalid-reference-date",
+        "invalid-json",
+    ],
 )
 def test_action_endpoint_rejects_invalid_input(body, content) -> None:
     if content is not None:
@@ -117,7 +136,10 @@ def test_action_endpoint_returns_camel_case_structured_result() -> None:
 
     response = client.post(
         "/action/extract",
-        json={"text": "记得整理一下本周的 Java 面试题。"},
+        json={
+            "text": "记得整理一下本周的 Java 面试题。",
+            "referenceDate": "2026-08-24",
+        },
     )
 
     assert response.status_code == 200
@@ -218,6 +240,7 @@ def test_missing_year_preserves_expression_and_discards_provider_guess() -> None
                 evidence="软件工程课程设计报告需要在8月25日前提交",
             )
         ],
+        reference_date=date(2026, 8, 24),
     )
 
     assert result.actions[0].deadline_text == "8月25日前"
@@ -240,6 +263,47 @@ def test_relative_deadline_preserves_expression_without_runtime_date() -> None:
     )
 
     assert result.actions[0].deadline_text == "下周五之前"
+    assert result.actions[0].deadline is None
+
+
+def test_relative_deadline_is_normalized_from_explicit_reference_date() -> None:
+    source = "明天之前提交软件工程课程设计报告。"
+    result = extract_from_payload(
+        source,
+        [
+            action_candidate(
+                actionType="DEADLINE",
+                title="提交软件工程课程设计报告",
+                deadlineText="明天之前",
+                deadline=None,
+                evidence="明天之前提交软件工程课程设计报告",
+            )
+        ],
+        reference_date=date(2026, 8, 24),
+    )
+
+    assert result.actions[0].action_type == "DEADLINE"
+    assert result.actions[0].deadline_text == "明天之前"
+    assert result.actions[0].deadline == "2026-08-25"
+
+
+def test_invalid_explicit_date_keeps_deadline_candidate_unresolved() -> None:
+    source = "2026年2月31日前提交报告。"
+    result = extract_from_payload(
+        source,
+        [
+            action_candidate(
+                actionType="DEADLINE",
+                title="提交报告",
+                deadlineText="2026年2月31日前",
+                deadline=None,
+                evidence="2026年2月31日前提交报告",
+            )
+        ],
+        reference_date=date(2026, 2, 1),
+    )
+
+    assert result.actions[0].deadline_text == "2026年2月31日前"
     assert result.actions[0].deadline is None
 
 
@@ -415,7 +479,10 @@ def test_action_llm_client_reuses_provider_and_json_mode() -> None:
         transport=httpx.MockTransport(handler),
     )
 
-    raw_result = llm_client.generate_action_extraction("Redis 是内存数据库。")
+    raw_result = llm_client.generate_action_extraction(
+        "Redis 是内存数据库。",
+        date(2026, 8, 24),
+    )
 
     assert json.loads(raw_result) == {"actions": []}
     assert captured_request is not None
@@ -428,6 +495,8 @@ def test_action_llm_client_reuses_provider_and_json_mode() -> None:
     assert "返回零个" not in body["messages"][0]["content"]
     assert "没有行动时" in body["messages"][0]["content"]
     assert "不要创造年份" in body["messages"][0]["content"]
+    assert "相对日期由应用" in body["messages"][0]["content"]
+    assert "2026-08-24" in body["messages"][1]["content"]
     assert "Redis 是内存数据库" in body["messages"][1]["content"]
     for action_type in ALLOWED_ACTION_TYPES:
         assert action_type in body["messages"][0]["content"]

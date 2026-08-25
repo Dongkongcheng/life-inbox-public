@@ -1125,6 +1125,10 @@ index: (inbox_item_id, status)
 foreign key: inbox_item_id → inbox_item.id ON DELETE CASCADE
 ```
 
+Task 33 没有修改 Schema。`deadline_date` 仍是可空 `DATE`：它既可保存完整绝对日期，也可保存 Python 根据
+`InboxItem.created_time` 派生的稳定 `referenceDate` 所解析出的相对日期；无法安全确定时保留
+`deadline_text`，并让 `deadline_date = NULL`。
+
 ---
 
 # 28. Action Candidate Status

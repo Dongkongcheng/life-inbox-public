@@ -94,11 +94,12 @@ Keywords 允许 0～8 个，每项最长 64 个字符。Python 会执行 NFKC �
 
 ## 提取 Action 建议
 
-`POST /action/extract` 是 V0.4 Task 31 的独立内部能力，只接收已经准备好的纯文本：
+`POST /action/extract` 是 V0.4 的独立内部能力，接收已经准备好的纯文本和可选稳定参考日期：
 
 ```powershell
 $body = @{
-  text = "软件工程课程设计报告需要在2026年8月25日前提交。"
+  text = "明天之前提交软件工程课程设计报告。"
+  referenceDate = "2026-08-24"
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post `
@@ -116,9 +117,9 @@ Invoke-RestMethod -Method Post `
     {
       "actionType": "DEADLINE",
       "title": "提交软件工程课程设计报告",
-      "deadlineText": "2026年8月25日前",
+      "deadlineText": "明天之前",
       "deadline": "2026-08-25",
-      "evidence": "软件工程课程设计报告需要在2026年8月25日前提交"
+      "evidence": "明天之前提交软件工程课程设计报告"
     }
   ]
 }
@@ -127,10 +128,12 @@ Invoke-RestMethod -Method Post `
 契约与边界：
 
 - `text` trim 后不能为空，最多 20,000 个字符；缺失、空白、超长或非法 JSON 返回 422；
+- `referenceDate` 是可选 ISO 日期。Java 正常调用会从 `InboxItem.created_time.toLocalDate()` 取得；它是解释相对日期的稳定 Source Context，而不是请求执行当天；
 - 允许 0～10 个候选。没有明确行动是正常成功结果：`{"hasAction": false, "actions": []}`；
 - `actionType` 第一版只支持 `TODO` 与 `DEADLINE`。标题最长 200 字符，`deadlineText` 最长 100 字符，`evidence` 最长 500 字符；
 - `TODO` 不携带截止信息；`DEADLINE` 必须保留来自原文、且同时出现在 evidence 中的 `deadlineText`；evidence 必须是输入正文中的纯文本片段；
-- 只有完整 ISO 日期或 `YYYY年M月D日` 才会生成 `YYYY-MM-DD`。缺少年份和“明天”“下周五”等相对表达会保留 `deadlineText`，但 `deadline` 为 `null`，不会依赖机器日期或隐藏时区推算；
+- 纯 `DeadlineNormalizer` 使用标准库确定性处理完整日期、今天/明天/后天、本周或下周星期、本月底/月底/下月底、今年/明年；完整原始表达始终保留在 `deadlineText`；
+- 没有 `referenceDate` 时只处理完整绝对日期。缺少年份的月日、单独“周五”和模糊表达保持 `deadline=null`，不会使用机器日期、系统时区或 Provider 猜测；
 - 日期本身不等于行动。Prompt 明确排除出版/发布日期等描述性日期，也允许模型返回零个行动；
 - `hasAction` 不接受 LLM 输入，而是由应用根据校验后的 `actions` 计算；未知类型、非法日期、字段越界、伪造 evidence、额外字段和畸形 JSON 都按无效结构化输出处理；
 - Action Extraction 复用现有 `LIFEINBOX_LLM_*` 配置、OpenAI-compatible `/chat/completions`、JSON Mode、Timeout 与安全错误映射，不新增 Action 专属 Key、Model 或 Base URL；

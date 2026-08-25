@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 import httpx
@@ -41,12 +42,16 @@ class LlmClient:
             build_analyze_user_prompt(title, text),
         )
 
-    def generate_action_extraction(self, text: str) -> str:
+    def generate_action_extraction(
+        self,
+        text: str,
+        reference_date: date | None = None,
+    ) -> str:
         """Action 与 Analyze 复用同一 Provider、配置和安全错误边界。"""
 
         return self._generate_json(
             ACTION_EXTRACTION_SYSTEM_PROMPT,
-            build_action_extraction_user_prompt(text),
+            build_action_extraction_user_prompt(text, reference_date),
         )
 
     def _generate_json(self, system_prompt: str, user_prompt: str) -> str:

@@ -54,10 +54,14 @@ public class ActionCandidateService {
 
     public List<ActionCandidateResponse> extract(Long inboxItemId) {
         InboxItem inboxItem = requireActiveItem(inboxItemId);
+        LocalDate referenceDate = requireReferenceDate(inboxItem);
         String sourceText = buildSourceText(inboxItem);
 
         // 外部 LLM 调用可能耗时或失败，必须在任何数据库事务开始前完成。
-        AiActionExtractionResponse aiResponse = aiServiceClient.extractActions(sourceText);
+        AiActionExtractionResponse aiResponse = aiServiceClient.extractActions(
+                sourceText,
+                referenceDate
+        );
         List<ValidatedActionCandidate> candidates = validate(aiResponse);
 
         // 只有成功响应才会进入短事务；Provider 失败或非法响应会原样保留旧候选。
@@ -80,6 +84,17 @@ public class ActionCandidateService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "InboxItem 类型不支持 Action 提取");
         }
         return inboxItem;
+    }
+
+    private LocalDate requireReferenceDate(InboxItem inboxItem) {
+        if (inboxItem.getCreatedTime() == null) {
+            // 相对日期必须绑定 Source 的稳定创建日期，缺失时不能用服务器当前日期猜测。
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "InboxItem 缺少稳定的创建日期"
+            );
+        }
+        return inboxItem.getCreatedTime().toLocalDate();
     }
 
     private String buildSourceText(InboxItem inboxItem) {

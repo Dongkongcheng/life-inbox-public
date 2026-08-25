@@ -1,5 +1,7 @@
 package com.lifeinbox.server.dto;
 
-/** Java 只把已经准备好的有界纯文本交给 Task 31。 */
-public record AiActionExtractionRequest(String text) {
+import java.time.LocalDate;
+
+/** Java 把有界纯文本和 Source 的稳定日期上下文交给 Action Extraction。 */
+public record AiActionExtractionRequest(String text, LocalDate referenceDate) {
 }
