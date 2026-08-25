@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,9 +44,9 @@ class ActionCandidatePersistenceServiceTests {
                 new ValidatedActionCandidate(
                         ActionCandidateType.DEADLINE,
                         "提交报告",
-                        "8月25日前",
+                        "明天",
                         LocalDate.of(2026, 8, 25),
-                        "8月25日前提交报告"
+                        "明天提交报告"
                 ),
                 new ValidatedActionCandidate(
                         ActionCandidateType.TODO,
@@ -53,22 +54,31 @@ class ActionCandidatePersistenceServiceTests {
                         null,
                         null,
                         "整理参考文献"
+                ),
+                new ValidatedActionCandidate(
+                        ActionCandidateType.DEADLINE,
+                        "确认模糊截止时间",
+                        "月底左右",
+                        null,
+                        "月底左右确认截止时间"
                 )
         );
 
         service.replacePending(1L, candidates);
 
         ArgumentCaptor<ActionCandidate> inserted = ArgumentCaptor.forClass(ActionCandidate.class);
-        verify(actionCandidateMapper, org.mockito.Mockito.times(2)).insert(inserted.capture());
+        verify(actionCandidateMapper, org.mockito.Mockito.times(3)).insert(inserted.capture());
         assertEquals(ActionCandidateType.DEADLINE, inserted.getAllValues().getFirst().getActionType());
         assertEquals(LocalDate.of(2026, 8, 25), inserted.getAllValues().getFirst().getDeadlineDate());
         assertEquals(ActionCandidateStatus.PENDING, inserted.getAllValues().getFirst().getStatus());
         assertEquals(ActionCandidateStatus.PENDING, inserted.getAllValues().get(1).getStatus());
+        assertEquals(ActionCandidateType.DEADLINE, inserted.getAllValues().get(2).getActionType());
+        assertNull(inserted.getAllValues().get(2).getDeadlineDate());
 
         InOrder order = inOrder(inboxItemMapper, actionCandidateMapper);
         order.verify(inboxItemMapper).selectActiveIdForUpdate(1L);
         order.verify(actionCandidateMapper).deletePendingByInboxItemId(1L);
-        order.verify(actionCandidateMapper, org.mockito.Mockito.times(2)).insert(any(ActionCandidate.class));
+        order.verify(actionCandidateMapper, org.mockito.Mockito.times(3)).insert(any(ActionCandidate.class));
         order.verify(actionCandidateMapper).selectByInboxItemId(1L);
     }
 

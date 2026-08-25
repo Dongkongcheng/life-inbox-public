@@ -16,11 +16,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -51,7 +53,10 @@ class ActionCandidateServiceTests {
     void textTodoIsValidatedAndPersistedAsOneCandidate() {
         when(inboxItemMapper.selectById(1L)).thenReturn(item(1L, "TEXT", "ACTIVE", null,
                 "记得整理 Java 面试题。", null));
-        when(aiServiceClient.extractActions("记得整理 Java 面试题。"))
+        when(aiServiceClient.extractActions(
+                "记得整理 Java 面试题。",
+                LocalDate.of(2026, 8, 24)
+        ))
                 .thenReturn(extraction(true, todo("整理 Java 面试题")));
         List<ActionCandidateResponse> persisted = List.of(response(
                 10L,
@@ -81,7 +86,8 @@ class ActionCandidateServiceTests {
                 "8月25日前提交报告，同时整理参考文献。",
                 null
         ));
-        when(aiServiceClient.extractActions(anyString())).thenReturn(extraction(
+        when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
+                .thenReturn(extraction(
                 true,
                 new AiActionCandidateResponse(
                         "DEADLINE",
@@ -91,7 +97,7 @@ class ActionCandidateServiceTests {
                         "8月25日前提交报告"
                 ),
                 todo("整理参考文献")
-        ));
+                ));
         when(persistenceService.replacePending(anyLong(), anyList())).thenReturn(List.of());
 
         service.extract(2L);
@@ -112,7 +118,7 @@ class ActionCandidateServiceTests {
         when(inboxItemMapper.selectById(3L)).thenReturn(item(
                 3L, "TEXT", "ACTIVE", null, "今天读了一篇文章。", null
         ));
-        when(aiServiceClient.extractActions(anyString()))
+        when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
                 .thenReturn(new AiActionExtractionResponse(false, List.of()));
         when(persistenceService.replacePending(3L, List.of())).thenReturn(List.of());
 
@@ -125,7 +131,7 @@ class ActionCandidateServiceTests {
         when(inboxItemMapper.selectById(4L)).thenReturn(item(
                 4L, "TEXT", "ACTIVE", null, "记得复习。", null
         ));
-        when(aiServiceClient.extractActions(anyString()))
+        when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
                 .thenThrow(new AiServiceUnavailableException("mock timeout"));
 
         assertThrows(AiServiceUnavailableException.class, () -> service.extract(4L));
@@ -148,7 +154,10 @@ class ActionCandidateServiceTests {
         );
 
         for (AiActionExtractionResponse response : invalidResponses) {
-            when(aiServiceClient.extractActions(anyString())).thenReturn(response);
+            when(aiServiceClient.extractActions(
+                    anyString(),
+                    any(LocalDate.class)
+            )).thenReturn(response);
             assertThrows(AiServiceUnavailableException.class, () -> service.extract(5L));
         }
         verify(persistenceService, never()).replacePending(anyLong(), anyList());
@@ -180,13 +189,16 @@ class ActionCandidateServiceTests {
         assertEquals(HttpStatus.NOT_FOUND, missing.getStatusCode());
         assertEquals(HttpStatus.NOT_FOUND, archived.getStatusCode());
         assertEquals(HttpStatus.BAD_REQUEST, blank.getStatusCode());
-        verify(aiServiceClient, never()).extractActions(anyString());
+        verify(aiServiceClient, never()).extractActions(
+                anyString(),
+                any(LocalDate.class)
+        );
     }
 
     @Test
     void urlFileAndImageReuseSearchableContent() {
         when(persistenceService.replacePending(anyLong(), anyList())).thenReturn(List.of());
-        when(aiServiceClient.extractActions(anyString()))
+        when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
                 .thenReturn(new AiActionExtractionResponse(false, List.of()));
         String[] types = {"URL", "FILE", "IMAGE"};
         for (int index = 0; index < types.length; index++) {
@@ -203,7 +215,10 @@ class ActionCandidateServiceTests {
         }
 
         ArgumentCaptor<String> sourceTexts = ArgumentCaptor.forClass(String.class);
-        verify(aiServiceClient, times(3)).extractActions(sourceTexts.capture());
+        verify(aiServiceClient, times(3)).extractActions(
+                sourceTexts.capture(),
+                any(LocalDate.class)
+        );
         assertEquals(
                 List.of("已准备正文-URL", "已准备正文-FILE", "已准备正文-IMAGE"),
                 sourceTexts.getAllValues()
@@ -216,14 +231,17 @@ class ActionCandidateServiceTests {
         when(inboxItemMapper.selectById(30L)).thenReturn(item(
                 30L, "URL", "ACTIVE", "Java 开发实习生", null, content
         ));
-        when(aiServiceClient.extractActions(anyString()))
+        when(aiServiceClient.extractActions(anyString(), any(LocalDate.class)))
                 .thenReturn(new AiActionExtractionResponse(false, List.of()));
         when(persistenceService.replacePending(anyLong(), anyList())).thenReturn(List.of());
 
         service.extract(30L);
 
         ArgumentCaptor<String> text = ArgumentCaptor.forClass(String.class);
-        verify(aiServiceClient).extractActions(text.capture());
+        verify(aiServiceClient).extractActions(
+                text.capture(),
+                any(LocalDate.class)
+        );
         assertTrue(text.getValue().startsWith("标题：\nJava 开发实习生\n\n正文：\n"));
         assertTrue(text.getValue().contains("网申截止时间为2026年9月10日"));
         assertEquals(20_000, text.getValue().length());
@@ -251,6 +269,42 @@ class ActionCandidateServiceTests {
         assertEquals(ActionCandidateStatus.PENDING, results.getFirst().status());
     }
 
+    @Test
+    void repeatedExtractionUsesTheSameSourceCreatedDate() {
+        InboxItem source = item(50L, "TEXT", "ACTIVE", null, "明天提交报告", null);
+        source.setCreatedTime(LocalDateTime.of(2026, 8, 24, 23, 59));
+        when(inboxItemMapper.selectById(50L)).thenReturn(source);
+        when(aiServiceClient.extractActions("明天提交报告", LocalDate.of(2026, 8, 24)))
+                .thenReturn(new AiActionExtractionResponse(false, List.of()));
+        when(persistenceService.replacePending(50L, List.of())).thenReturn(List.of());
+
+        service.extract(50L);
+        service.extract(50L);
+
+        verify(aiServiceClient, times(2)).extractActions(
+                "明天提交报告",
+                LocalDate.of(2026, 8, 24)
+        );
+    }
+
+    @Test
+    void missingSourceCreatedDateStopsBeforeFastApi() {
+        InboxItem source = item(51L, "TEXT", "ACTIVE", null, "明天提交报告", null);
+        source.setCreatedTime(null);
+        when(inboxItemMapper.selectById(51L)).thenReturn(source);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.extract(51L)
+        );
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
+        verify(aiServiceClient, never()).extractActions(
+                anyString(),
+                any(LocalDate.class)
+        );
+    }
+
     private InboxItem item(
             Long id,
             String type,
@@ -266,6 +320,7 @@ class ActionCandidateServiceTests {
         item.setTitle(title);
         item.setContent(content);
         item.setSearchableContent(searchableContent);
+        item.setCreatedTime(LocalDateTime.of(2026, 8, 24, 12, 0));
         return item;
     }
 

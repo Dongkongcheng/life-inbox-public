@@ -158,6 +158,7 @@ fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，�
 Load ACTIVE InboxItem
 → TEXT 使用 content，URL/FILE/IMAGE 使用 searchable_content
 → 可选 title 上下文 + 有界正文（总计最多 20,000 字符）
+→ created_time.toLocalDate() 生成稳定 referenceDate
 → FastAPI /action/extract
 → Java 校验类型、数量、字段长度、日期与 hasAction 一致性
 → 短事务中只替换该 Item 的 PENDING Candidate
@@ -196,7 +197,7 @@ Load ACTIVE InboxItem
 | --- | --- | --- | --- |
 | GET | `/health` | 无 | `{status, service}` |
 | POST | `/analyze` | JSON `{title?, text}` | AnalyzeResult |
-| POST | `/action/extract` | JSON `{text}` | `{hasAction, actions[]}`；只返回 Action 建议 |
+| POST | `/action/extract` | JSON `{text, referenceDate?}` | `{hasAction, actions[]}`；只返回 Action 建议 |
 | POST | `/embedding` | JSON `{text}` | `{model, dimension, embedding}`；只生成并校验瞬时向量 |
 | POST | `/vector/index` | JSON `{inboxItemId, text}` | 生成 Embedding 并按稳定 Point ID Upsert 到 Qdrant |
 | DELETE | `/vector/index/{inboxItemId}` | 路径 ID | 幂等删除该 Collection 前缀下的受管 Point |
@@ -231,10 +232,13 @@ Java 的当前 Analyze 流程对 URL/FILE/IMAGE 先调用对应 `/prepare/*`，�
 
 ### Action Extraction 内部协议
 
-`POST /action/extract` 是 V0.4 Task 31 的独立 AI 能力。它接收准备好的纯文本，不接收 InboxItem、favorite、archive、权限或其他业务字段：
+`POST /action/extract` 是 V0.4 的独立 AI 能力。它接收准备好的纯文本和可选稳定参考日期，不接收完整 InboxItem、favorite、archive、权限或其他业务字段：
 
 ```json
-{"text": "2026年8月25日前提交软件工程课程设计报告。"}
+{
+  "text": "明天之前提交软件工程课程设计报告。",
+  "referenceDate": "2026-08-24"
+}
 ```
 
 成功响应：
@@ -246,19 +250,20 @@ Java 的当前 Analyze 流程对 URL/FILE/IMAGE 先调用对应 `/prepare/*`，�
     {
       "actionType": "DEADLINE",
       "title": "提交软件工程课程设计报告",
-      "deadlineText": "2026年8月25日前",
+      "deadlineText": "明天之前",
       "deadline": "2026-08-25",
-      "evidence": "2026年8月25日前提交软件工程课程设计报告"
+      "evidence": "明天之前提交软件工程课程设计报告"
     }
   ]
 }
 ```
 
 - `text` trim 后不能为空，最多 20,000 字符；请求缺失、空白、超长或非法 JSON 返回 422；
+- `referenceDate` 可省略；Java 正常调用始终使用 `InboxItem.created_time.toLocalDate()`。省略时，相对日期保持未解析，绝不回退到服务器当前日期；
 - `actions` 允许为空，最多 10 项；`hasAction` 由 Python 根据校验后的数组计算，不信任 Provider 布尔值；
 - `actionType` 仅允许 `TODO` 与 `DEADLINE`。TODO 的 `deadlineText/deadline` 都为 `null`；DEADLINE 必须保留来自原文的截止表达；
 - 标题最长 200 字符，`deadlineText` 最长 100 字符，纯文本 `evidence` 最长 500 字符并且必须可追溯到输入；
-- 完整的 ISO 日期或 `YYYY年M月D日` 可以规范化为 `YYYY-MM-DD`。缺少年份或相对日期只保留 `deadlineText`，`deadline` 为 `null`；不会使用服务器日期、机器时区或 Provider 时区补全；
+- 应用层 `DeadlineNormalizer` 确定性处理完整日期、今天/明天/后天、本周或下周星期、本月底/月底/下月底、今年/明年；缺少年份、单独“周五”和模糊表达只保留 `deadlineText`，`deadline` 为 `null`；
 - 日期必须与行动语义关联，出版/发布日期等描述性日期不自动产生 Action；零 Action 是正常成功结果；
 - 该能力复用现有 `LIFEINBOX_LLM_*` 配置、Chat Completions JSON Mode 与错误模型。配置/服务错误为 503，超时为 504，无效 Provider/结构化结果为 502；
 - Java 的手动 Action Candidate API 会调用该内部协议，并在 Java 再次校验后写入 MySQL `action_candidate`；它仍不进入 Capture、Analyze、Search 或 Attempt Guard，不写 Qdrant，也不创建或修改 Todo。

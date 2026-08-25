@@ -40,6 +40,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -129,11 +130,11 @@ public class AiServiceClient {
     }
 
     /** 调用 Task 31 Action Extraction；业务校验与 Candidate 持久化仍由 Java 负责。 */
-    public AiActionExtractionResponse extractActions(String text) {
+    public AiActionExtractionResponse extractActions(String text, LocalDate referenceDate) {
         try {
             AiActionExtractionResponse response = analysisRestClient.post()
                     .uri("/action/extract")
-                    .body(new AiActionExtractionRequest(text))
+                    .body(new AiActionExtractionRequest(text, referenceDate))
                     .retrieve()
                     .body(AiActionExtractionResponse.class);
             if (response == null) {

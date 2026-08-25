@@ -60,11 +60,12 @@ IsoCalendarDate = Annotated[
 
 
 class ActionExtractionRequest(BaseModel):
-    """只接收已经准备好的纯文本，不接收 InboxItem 或业务状态。"""
+    """接收准备文本和可选稳定参考日期，不接收 InboxItem 或业务状态。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     text: str = Field(min_length=1, max_length=MAX_ACTION_EXTRACTION_INPUT_CHARS)
+    reference_date: date | None = Field(default=None, alias="referenceDate")
 
     @field_validator("text")
     @classmethod

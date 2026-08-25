@@ -26,6 +26,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -65,7 +66,8 @@ class AiServiceClientTests {
 
         try {
             AiActionExtractionResponse response = clientFor(server).extractActions(
-                    "标题：\n课程设计\n\n正文：\n8月25日前提交报告"
+                    "标题：\n课程设计\n\n正文：\n8月25日前提交报告",
+                    LocalDate.of(2026, 8, 24)
             );
 
             assertEquals(true, response.hasAction());
@@ -73,7 +75,8 @@ class AiServiceClientTests {
             assertEquals("DEADLINE", response.actions().getFirst().actionType());
             assertEquals("2026-08-25", response.actions().getFirst().deadline());
             assertEquals(
-                    "{\"text\":\"标题：\\n课程设计\\n\\n正文：\\n8月25日前提交报告\"}",
+                    "{\"text\":\"标题：\\n课程设计\\n\\n正文：\\n8月25日前提交报告\","
+                            + "\"referenceDate\":\"2026-08-24\"}",
                     requestBody.get()
             );
         } finally {
@@ -96,7 +99,10 @@ class AiServiceClientTests {
         try {
             AiServiceUnavailableException exception = assertThrows(
                     AiServiceUnavailableException.class,
-                    () -> clientFor(server).extractActions("正文")
+                    () -> clientFor(server).extractActions(
+                            "正文",
+                            LocalDate.of(2026, 8, 24)
+                    )
             );
             assertEquals("AI Action 提取服务暂不可用", exception.getMessage());
         } finally {
