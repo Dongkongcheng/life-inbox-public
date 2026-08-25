@@ -11,7 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 
-/** Todo 是 Java/MySQL 拥有的独立业务状态；当前只提供内部创建与按 ID 读取能力。 */
+/** Todo 是 Java/MySQL 拥有的独立业务状态；当前只提供内部创建与最小查询能力。 */
 @Service
 public class TodoService {
 
@@ -73,6 +73,11 @@ public class TodoService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Todo 不存在");
         }
         return todo;
+    }
+
+    /** Candidate 重复 Accept 时按唯一来源查回原 Todo，不把 SQL 冲突当作正常幂等流程。 */
+    public Todo findBySourceActionCandidateId(Long candidateId) {
+        return todoMapper.selectBySourceActionCandidateId(candidateId);
     }
 
     private String normalizeTitle(String title) {
