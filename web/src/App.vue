@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import ActionCandidatePanel from './components/ActionCandidatePanel.vue'
 import HighlightedText from './components/HighlightedText.vue'
+import TodoPanel from './components/TodoPanel.vue'
 import { createLatestRequestGuard } from './searchRequestGuard.js'
 
 // Capture 表单状态由四种类型共用，切换类型时只展示该类型需要的字段。
@@ -33,6 +34,7 @@ const analyzingId = ref(null)
 const analysisErrorItemId = ref(null)
 const analysisErrorMessage = ref('')
 const errorMessage = ref('')
+const activeView = ref('inbox')
 
 const AI_STATUS_POLL_INTERVAL_MS = 1500
 const CAPTURE_STATUS_DISCOVERY_REFRESHES = 3
@@ -478,10 +480,31 @@ onBeforeUnmount(() => {
     <header class="page-header">
       <p class="eyebrow">Capture first, organize later</p>
       <h1>LifeInbox</h1>
-      <p>先把值得保留的文字、链接、文件和图片放进来。</p>
+      <p>{{ activeView === 'inbox'
+        ? '先把值得保留的文字、链接、文件和图片放进来。'
+        : '查看已经确认的行动，并在完成后保留清晰状态。' }}</p>
     </header>
 
-    <section class="capture-card" aria-labelledby="capture-heading">
+    <nav class="primary-view-switch" aria-label="主要功能">
+      <button
+        type="button"
+        :class="{ active: activeView === 'inbox' }"
+        :aria-current="activeView === 'inbox' ? 'page' : undefined"
+        @click="activeView = 'inbox'"
+      >
+        Inbox
+      </button>
+      <button
+        type="button"
+        :class="{ active: activeView === 'todos' }"
+        :aria-current="activeView === 'todos' ? 'page' : undefined"
+        @click="activeView = 'todos'"
+      >
+        Todo
+      </button>
+    </nav>
+
+    <section v-if="activeView === 'inbox'" class="capture-card" aria-labelledby="capture-heading">
       <h2 id="capture-heading">添加到 Inbox</h2>
       <div class="capture-type-switch" aria-label="选择内容类型">
         <button
@@ -599,7 +622,7 @@ onBeforeUnmount(() => {
       <p v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
     </section>
 
-    <section class="inbox-section" aria-labelledby="inbox-heading">
+    <section v-if="activeView === 'inbox'" class="inbox-section" aria-labelledby="inbox-heading">
       <form class="search-form" role="search" @submit.prevent="searchInbox">
         <label for="inbox-search">搜索 Inbox</label>
         <div class="search-controls">
@@ -873,5 +896,6 @@ onBeforeUnmount(() => {
         </article>
       </div>
     </section>
+    <TodoPanel v-if="activeView === 'todos'" />
   </main>
 </template>

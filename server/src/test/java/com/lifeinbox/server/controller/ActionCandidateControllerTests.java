@@ -72,9 +72,15 @@ class ActionCandidateControllerTests {
                 candidate(ActionCandidateStatus.ACCEPTED),
                 new TodoResponse(
                         200L,
+                        100L,
+                        1L,
                         "提交软件工程课程设计报告",
+                        null,
                         TodoStatus.OPEN,
-                        LocalDate.of(2026, 8, 25)
+                        LocalDate.of(2026, 8, 25),
+                        null,
+                        null,
+                        null
                 )
         );
         when(decisionService.accept(100L, 1L)).thenReturn(accepted);

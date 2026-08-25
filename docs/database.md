@@ -1267,7 +1267,9 @@ completed_time: 新建 Todo 时为 NULL
 ```
 
 Task 34 建立 Entity、Mapper 与内部 Service 持久化基础；Task 35 已复用该 Service 实现 Candidate Accept / Dismiss
-和 Candidate → Todo Conversion。当前仍没有独立 Public Todo 列表、完成、编辑或删除 API。
+和 Candidate → Todo Conversion。Task 38 在不修改 Schema 的前提下增加独立 Todo List、Complete 与 Reopen：
+列表只查询 `todo`，不依赖 Source JOIN；生命周期在短事务中锁定 Todo 行并保持 `OPEN → completed_time NULL`、
+`COMPLETED → completed_time NOT NULL`。当前仍没有 Todo Edit、Delete 或 Manual Create API。
 
 ---
 
@@ -1699,9 +1701,7 @@ Todo 一旦被用户确认，
 
 # 41. Todo Status
 
-如果 V0.4 第一版创建 Todo，
-
-建议状态保持简单。
+V0.4 第一版 Todo 状态已保持为两个值：
 
 最小方向：
 
@@ -1710,7 +1710,15 @@ OPEN
 COMPLETED
 ```
 
-是否需要：
+Task 38 实现的转换为：
+
+```text
+OPEN --Complete--> COMPLETED
+COMPLETED --Reopen--> OPEN
+```
+
+Complete 只在第一次有效转换时写入 Java 业务时间，重复请求不刷新 `completed_time`；Reopen 必须清空它。
+两个动作都不修改来源 Candidate。是否需要：
 
 ```text
 CANCELLED

@@ -133,7 +133,7 @@ public class ActionCandidateDecisionService {
     ) {
         return new ActionCandidateAcceptanceResponse(
                 ActionCandidatePersistenceService.toResponse(candidate),
-                new TodoResponse(todo.getId(), todo.getTitle(), todo.getStatus(), todo.getDueDate())
+                TodoResponse.from(todo)
         );
     }
 
