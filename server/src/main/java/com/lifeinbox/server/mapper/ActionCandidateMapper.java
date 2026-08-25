@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -24,4 +25,25 @@ public interface ActionCandidateMapper extends BaseMapper<ActionCandidate> {
             ORDER BY created_time ASC, id ASC
             """)
     List<ActionCandidate> selectByInboxItemId(@Param("inboxItemId") Long inboxItemId);
+
+    /** 用户决策必须先锁定 Candidate，串行化同一条建议的并发 Accept / Dismiss。 */
+    @Select("""
+            SELECT id, inbox_item_id, action_type, title, deadline_text, deadline_date,
+                   evidence, status, created_time, updated_time
+            FROM action_candidate
+            WHERE inbox_item_id = #{inboxItemId} AND id = #{candidateId}
+            FOR UPDATE
+            """)
+    ActionCandidate selectByInboxItemIdAndIdForUpdate(
+            @Param("inboxItemId") Long inboxItemId,
+            @Param("candidateId") Long candidateId
+    );
+
+    @Update("UPDATE action_candidate SET status = 'ACCEPTED' "
+            + "WHERE id = #{candidateId} AND status = 'PENDING'")
+    int markPendingAccepted(@Param("candidateId") Long candidateId);
+
+    @Update("UPDATE action_candidate SET status = 'DISMISSED' "
+            + "WHERE id = #{candidateId} AND status = 'PENDING'")
+    int markPendingDismissed(@Param("candidateId") Long candidateId);
 }

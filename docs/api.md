@@ -16,6 +16,8 @@
 | POST | `/api/inbox/{id}/ai/summary` | 旧兼容入口；仍执行统一 Analyze |
 | POST | `/api/inbox/{id}/action-candidates/extract` | 对 ACTIVE InboxItem 手动提取并原子替换 PENDING Candidate |
 | GET | `/api/inbox/{id}/action-candidates` | 查询 ACTIVE InboxItem 已持久化的 Action Candidate |
+| POST | `/api/inbox/{id}/action-candidates/{candidateId}/accept` | 接受 Candidate，原子创建唯一 OPEN Todo |
+| POST | `/api/inbox/{id}/action-candidates/{candidateId}/dismiss` | 忽略 Candidate，不创建 Todo |
 | PUT | `/api/inbox/{id}/favorite` | 收藏 |
 | PUT | `/api/inbox/{id}/unfavorite` | 取消收藏 |
 | PUT | `/api/inbox/{id}/archive` | 归档；归档项不再出现在主列表 |
@@ -183,14 +185,71 @@ Load ACTIVE InboxItem
 ]
 ```
 
-- 所有新 Candidate 都是 `PENDING`；当前没有 Accept、Dismiss 或 Create Todo API；
+- 所有新 Candidate 都是 `PENDING`；只有下面的显式 Accept API 才会创建 Todo；
 - FastAPI 成功返回空 `actions` 时，旧 PENDING Candidate 会在短事务中清除，并返回空数组；
 - 重新提取不会删除 `ACCEPTED` 或 `DISMISSED`；这些状态只为后续用户决策保留，Task 32 不会创建它们；
 - FastAPI 超时、5xx、非法类型、非法日期、字段越界或矛盾 `hasAction` 返回受控 503，且不会修改旧 Candidate；
 - InboxItem 不存在或已归档返回 404；title 与可用正文都为空返回 400，并且不会调用 FastAPI；
 - Archive 不自动删除 Candidate；真正删除 Source 时由 MySQL Foreign Key `ON DELETE CASCADE` 清理；
 - 外部 AI 调用不在数据库事务内。当前没有 Action Attempt Guard，并发手动提取的最终覆盖顺序不作持久化保证。
-- Task 34 已建立 Todo Entity、Mapper 与内部 Service，但没有 Public Todo API，也没有 Accept、Dismiss 或 Candidate → Todo Conversion；现有产品端点不变。
+- 当前没有独立 Todo List / Complete / Edit / Delete API。
+
+#### Accept Candidate
+
+`POST /api/inbox/{id}/action-candidates/{candidateId}/accept` 无 Request Body。它确认已经持久化的 Candidate，
+不会再次调用 FastAPI、LLM 或日期归一化器：
+
+```text
+SELECT Candidate FOR UPDATE
+→ 校验状态
+→ TodoService.create
+→ Candidate PENDING → ACCEPTED
+→ 同一短事务提交
+```
+
+首次成功响应：
+
+```json
+{
+  "candidate": {
+    "id": 1,
+    "inboxItemId": 100,
+    "actionType": "DEADLINE",
+    "title": "提交软件工程课程设计报告",
+    "deadlineText": "2026年8月25日前",
+    "deadline": "2026-08-25",
+    "evidence": "2026年8月25日前提交软件工程课程设计报告",
+    "status": "ACCEPTED",
+    "createdTime": "2026-08-24T10:00:00",
+    "updatedTime": "2026-08-24T10:01:00"
+  },
+  "todo": {
+    "id": 200,
+    "title": "提交软件工程课程设计报告",
+    "status": "OPEN",
+    "dueDate": "2026-08-25"
+  }
+}
+```
+
+字段只复制一次：`title → Todo.title`、`deadline → Todo.dueDate`、Inbox/Candidate ID → 两个 Source ID；
+`Todo.description=null`、`status=OPEN`、`completedTime=null`。`evidence`、`deadlineText` 和 `actionType` 不复制到 Todo。
+无法确定具体日期的 DEADLINE 也可以接受，此时 `dueDate=null`。
+
+- 对已经 `ACCEPTED` 且关联 Todo 存在的 Candidate 重复 Accept，会返回同一个 Todo，不会新建第二条；
+- `DISMISSED → ACCEPTED` 返回 409；Candidate 或嵌套路由中的 Inbox ID 不匹配时返回 404；
+- `ACCEPTED` 但关联 Todo 缺失属于数据完整性异常，返回受控 500 并记录安全日志，不会偷偷重建；
+- MySQL Candidate 行锁负责串行化并发决策，`UNIQUE(todo.source_action_candidate_id)` 是最后一道重复保护。
+
+#### Dismiss Candidate
+
+`POST /api/inbox/{id}/action-candidates/{candidateId}/dismiss` 同样无 Request Body。`PENDING` 会在短事务中变为
+`DISMISSED` 并返回完整 Candidate 产品 DTO；不会删除 Candidate，也不会创建或删除 Todo。
+
+- 对 `DISMISSED` 重复 Dismiss 幂等返回当前 Candidate；
+- `ACCEPTED → DISMISSED` 返回 409，已有 Todo 保持不变；
+- Candidate 不存在或 Inbox ID 不匹配返回 404；
+- 普通 Re-extraction 仍只替换 `PENDING`，不会删除 `ACCEPTED` 或 `DISMISSED` 用户决定。
 
 ## Java → Python 内部 API
 

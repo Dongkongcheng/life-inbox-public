@@ -157,6 +157,16 @@ class TodoServiceTests {
     }
 
     @Test
+    void findBySourceCandidateDelegatesToUniqueSourceQuery() {
+        Todo existing = new Todo();
+        existing.setId(6L);
+        when(todoMapper.selectBySourceActionCandidateId(200L)).thenReturn(existing);
+
+        assertSame(existing, service.findBySourceActionCandidateId(200L));
+        verify(todoMapper).selectBySourceActionCandidateId(200L);
+    }
+
+    @Test
     void createDefinesBusinessTransactionBoundary() throws NoSuchMethodException {
         Method create = TodoService.class.getMethod(
                 "create",

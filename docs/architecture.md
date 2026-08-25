@@ -1490,7 +1490,7 @@ Spring Boot Business Layer
 User Confirmation / Ignore
     │
     ▼
-Todo Core Model / Future Decision Flow
+Todo Core Model / Confirmed Business State
 ```
 
 这里最重要的架构边界是：
@@ -1506,7 +1506,9 @@ Task 33 的日期上下文沿现有边界传递：Java 从 `InboxItem.created_ti
 做确定性日期运算。两端都不使用当前执行日期解释 Source，因此同一条 InboxItem 重新提取时语义稳定。
 
 Task 34 已在 Java / MySQL 建立独立 Todo 核心模型。Todo 只保存自身的 title、description、OPEN/COMPLETED、
-可选 due_date 与可空 Source 引用；Source 删除使用 `ON DELETE SET NULL`。Candidate 用户决策和转换仍未实现。
+可选 due_date 与可空 Source 引用；Source 删除使用 `ON DELETE SET NULL`。Task 35 已在 Java 业务层实现
+`PENDING → ACCEPTED / DISMISSED`：Accept 在同一短事务中锁定 Candidate、创建唯一 Todo 并更新状态，Dismiss
+只记录用户决定。重复同向请求幂等，两个终态之间不能互转；整个确认过程不调用 Python 或 LLM。
 
 ---
 

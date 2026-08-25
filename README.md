@@ -791,7 +791,7 @@ AI Suggestion
 Confirmed Business Action
 ```
 
-因此推荐的产品流程是：
+Task 35 已实现的后端产品流程是：
 
 ```text
 InboxItem
@@ -839,7 +839,8 @@ Todo
 Todo 是 Java / MySQL 拥有的业务状态；来源 InboxItem 或 ActionCandidate 被删除时只清空追溯引用，
 不会级联删除 Todo。同一个 ActionCandidate 最多关联一个 Todo。
 
-当前仍没有 Candidate Accept / Dismiss、Candidate → Todo Conversion 或 Public Todo API。
+Task 35 已实现 Candidate Accept / Dismiss 与 Candidate → Todo Conversion；Accept 会在一个短事务中创建唯一 Todo
+并把 Candidate 标记为 `ACCEPTED`，Dismiss 只保留 `DISMISSED` 用户决定。当前仍没有独立 Todo 列表或生命周期 API。
 
 而不是一开始创建：
 
@@ -2003,7 +2004,7 @@ Current known scope limitations include:
 * Semantic Search requires an Embedding Provider and Qdrant.
 * Reranking requires an explicitly configured Rerank Provider.
 * Action Extractor is currently under development.
-* Manual Action Candidate extraction and persistence are implemented; confirmation and Todo are not yet implemented.
+* Manual Action Candidate extraction、Accept/Dismiss 与 Candidate → Todo conversion 已实现；前端确认 UI 和 Todo 列表/完成/编辑 API 尚未实现。
 * Relations are not implemented yet.
 * Personal RAG is not implemented yet.
 * Personal Agent functionality is not implemented yet.

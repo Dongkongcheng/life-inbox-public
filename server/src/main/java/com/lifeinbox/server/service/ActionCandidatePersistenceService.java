@@ -65,7 +65,7 @@ public class ActionCandidatePersistenceService {
         return candidates.stream().map(ActionCandidatePersistenceService::toResponse).toList();
     }
 
-    private static ActionCandidateResponse toResponse(ActionCandidate candidate) {
+    static ActionCandidateResponse toResponse(ActionCandidate candidate) {
         return new ActionCandidateResponse(
                 candidate.getId(),
                 candidate.getInboxItemId(),

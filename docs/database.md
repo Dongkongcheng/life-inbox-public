@@ -79,7 +79,7 @@ V0.3 — Smart Search           ✅ Completed
 V0.4 — Action Extractor       🚧 Current
 ```
 
-V0.4 Task 34 后，MySQL 当前使用 7 张业务表：
+V0.4 Task 35 后，MySQL 当前仍使用 7 张业务表：
 
 ```text
 inbox_item
@@ -101,10 +101,10 @@ V0.4 Current Schema
 V0.3 Final Schema + action_candidate + todo
 ```
 
-和：
+Task 35 的 Candidate Decision 使用现有两张表完成，没有新增 Schema。仍未实现的是：
 
 ```text
-Candidate Decision / Deadline / Reminder Schema
+Independent Deadline / Reminder Schema
 =
 Planned / Not Yet Implemented
 ```
@@ -969,7 +969,7 @@ V0.4 — Action Extractor
 ```text
 V0.4 Current Schema
 =
-V0.3 Final Schema + action_candidate
+V0.3 Final Schema + action_candidate + todo
 ```
 
 V0.4 首先需要解决的重要数据边界：
@@ -992,7 +992,8 @@ User Confirmation
 Todo
 ```
 
-`action_candidate` 已实际建表；用户确认和 Todo 仍是后续方向。
+`action_candidate` 与 `todo` 已实际建表；Task 35 已使用现有 Schema 实现用户 Accept / Dismiss，
+没有新增 Decision 或 History 表。
 
 ---
 
@@ -1137,7 +1138,7 @@ Task 33 没有修改 Schema。`deadline_date` 仍是可空 `DATE`：它既可保
 
 # 28. Action Candidate Status
 
-第一版推荐保持非常简单：
+当前已实现的状态保持非常简单：
 
 ```text
 PENDING
@@ -1158,6 +1159,17 @@ AI 已识别出 Candidate，
 ## `DISMISSED`
 
 用户明确忽略该 Candidate。
+
+Task 35 当前状态机：
+
+```text
+PENDING ── Accept  ──> ACCEPTED
+PENDING ── Dismiss ──> DISMISSED
+```
+
+`ACCEPTED` 与 `DISMISSED` 都是终态。Accept 使用 `SELECT ... FOR UPDATE` 锁定 Candidate，在同一短事务中创建
+Todo 并更新状态；`todo.source_action_candidate_id` 的唯一约束保证一个 Candidate 最多对应一个 Todo。
+重复 Accept 返回已有 Todo，重复 Dismiss 返回当前 Candidate，普通 Re-extraction 仍只删除 `PENDING`。
 
 暂时不要提前加入：
 
@@ -1219,8 +1231,8 @@ due_date: nullable DATE
 completed_time: 新建 Todo 时为 NULL
 ```
 
-Task 34 只建立 Entity、Mapper 与内部 Service 持久化基础；当前没有 Public Todo API，也没有
-Candidate Accept / Dismiss 或 Candidate → Todo Conversion。
+Task 34 建立 Entity、Mapper 与内部 Service 持久化基础；Task 35 已复用该 Service 实现 Candidate Accept / Dismiss
+和 Candidate → Todo Conversion。当前仍没有独立 Public Todo 列表、完成、编辑或删除 API。
 
 ---
 
@@ -2071,7 +2083,7 @@ Not Yet Implemented
 
 # 55. 当前数据库总结
 
-截至 V0.4 Task 34：
+截至 V0.4 Task 35：
 
 ```text
 MySQL
@@ -2111,7 +2123,7 @@ V0.4 — Action Extractor
                          ▼
                   Action Candidate
                          │
-                  Future User Decision
+                   User Accept / Dismiss
                          │
                          ▼
                         Todo
