@@ -79,7 +79,7 @@ V0.3 — Smart Search           ✅ Completed
 V0.4 — Action Extractor       🚧 Current
 ```
 
-V0.4 Task 32 后，MySQL 当前使用 6 张业务表：
+V0.4 Task 34 后，MySQL 当前使用 7 张业务表：
 
 ```text
 inbox_item
@@ -88,6 +88,7 @@ inbox_tag
 inbox_keyword
 inbox_entity
 action_candidate
+todo
 ```
 
 因此当前必须明确区分：
@@ -97,13 +98,13 @@ Current Schema
 =
 V0.4 Current Schema
 =
-V0.3 Final Schema + action_candidate
+V0.3 Final Schema + action_candidate + todo
 ```
 
 和：
 
 ```text
-Todo / Deadline / Reminder Schema
+Candidate Decision / Deadline / Reminder Schema
 =
 Planned / Not Yet Implemented
 ```
@@ -117,14 +118,17 @@ Planned / Not Yet Implemented
 ```text
                         inbox_item
                             │
-             ┌──────────────┼──────────────┬─────────────────┐
-             │              │              │                 │
-             ▼              ▼              ▼                 ▼
-         inbox_tag     inbox_keyword   inbox_entity   action_candidate
+             ┌──────────────┼──────────────┬─────────────────┬──────────────┐
+             │              │              │                 │              │
+             ▼              ▼              ▼                 ▼              ▼
+         inbox_tag     inbox_keyword   inbox_entity   action_candidate     todo
              │
              ▼
             tag
 ```
+
+`todo` 的两个 Source 外键均可为空；它可以追溯 InboxItem / ActionCandidate，但来源删除时只清空引用，
+不会删除已经形成的业务任务。
 
 其中：
 
@@ -866,7 +870,7 @@ InboxItem Source of Truth
 Favorite Source of Truth
 Archive Source of Truth
 AI Status Source of Truth
-Future Todo Source of Truth
+Todo Source of Truth
 Future Deadline Source of Truth
 ```
 
@@ -1170,11 +1174,11 @@ REMINDER_SENT
 
 ---
 
-# 29. `todo` 推荐方向
+# 29. `todo` 当前结构
 
-未来 `todo` 推荐职责：
+`todo` 已在 V0.4 Task 34 实现，其职责是：
 
-> 保存用户已经确认的行动。
+> 保存独立的用户业务任务状态。
 
 它属于：
 
@@ -1184,7 +1188,7 @@ Business Data
 
 而不是 AI 派生数据。
 
-未来最小概念字段可能类似：
+当前字段为：
 
 ```text
 id
@@ -1197,7 +1201,7 @@ description
 
 status
 
-due_time
+due_date
 
 completed_time
 
@@ -1205,11 +1209,18 @@ created_time
 updated_time
 ```
 
-同样：
+关键约束：
 
-这些只是 V0.4 的设计方向，
+```text
+status: OPEN / COMPLETED（Task 34 新建时只允许 OPEN）
+source_inbox_item_id: nullable，ON DELETE SET NULL
+source_action_candidate_id: nullable + UNIQUE，ON DELETE SET NULL
+due_date: nullable DATE
+completed_time: 新建 Todo 时为 NULL
+```
 
-不是当前已经存在的 Schema。
+Task 34 只建立 Entity、Mapper 与内部 Service 持久化基础；当前没有 Public Todo API，也没有
+Candidate Accept / Dismiss 或 Candidate → Todo Conversion。
 
 ---
 
@@ -1232,7 +1243,7 @@ V0.4 第一版更推荐：
 Todo
  ├── title
  ├── status
- └── due_time nullable
+ └── due_date nullable
 ```
 
 也就是：
@@ -1254,7 +1265,7 @@ Optional Property of Todo
 ```text
 Todo:
   title = 提交软件工程报告
-  due_time = 2026-08-25
+  due_date = 2026-08-25
 ```
 
 没有必要一开始创建：
@@ -2060,7 +2071,7 @@ Not Yet Implemented
 
 # 55. 当前数据库总结
 
-截至 V0.4 Task 32：
+截至 V0.4 Task 34：
 
 ```text
 MySQL
@@ -2070,13 +2081,13 @@ MySQL
 ├── inbox_tag
 ├── inbox_keyword
 ├── inbox_entity
-└── action_candidate
+├── action_candidate
+└── todo
 ```
 
 当前没有：
 
 ```text
-todo
 deadline
 reminder
 content_relation
@@ -2100,12 +2111,12 @@ V0.4 — Action Extractor
                          ▼
                   Action Candidate
                          │
-                    User Decision
+                  Future User Decision
                          │
                          ▼
                         Todo
                          │
-                         └── optional due_time
+                        └── optional due_date
 ```
 
 而不是一次性建立：
@@ -2170,11 +2181,11 @@ Derived / Rebuildable Retrieval Index
 AI Suggestion
 ```
 
-未来 Todo：
+当前 Todo Core Model：
 
 ```text
 =
-User-confirmed Business State
+Independent Business State Foundation
 ```
 
 始终坚持：

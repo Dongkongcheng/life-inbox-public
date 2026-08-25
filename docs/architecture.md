@@ -259,7 +259,7 @@ Business Filters
 Final Result Composition
 
 V0.4 Action Candidate Business State
-Future Todo
+Todo Core Business State
 Future Deadline
 
 Future Authentication
@@ -1490,7 +1490,7 @@ Spring Boot Business Layer
 User Confirmation / Ignore
     │
     ▼
-Future Todo / Deadline
+Todo Core Model / Future Decision Flow
 ```
 
 这里最重要的架构边界是：
@@ -1504,6 +1504,9 @@ Confirmed Business Action
 Task 33 的日期上下文沿现有边界传递：Java 从 `InboxItem.created_time` 取 `LocalDate`，作为
 `referenceDate` 发送给 Python；Python 的纯 `DeadlineNormalizer` 只根据 `deadlineText + referenceDate`
 做确定性日期运算。两端都不使用当前执行日期解释 Source，因此同一条 InboxItem 重新提取时语义稳定。
+
+Task 34 已在 Java / MySQL 建立独立 Todo 核心模型。Todo 只保存自身的 title、description、OPEN/COMPLETED、
+可选 due_date 与可空 Source 引用；Source 删除使用 `ON DELETE SET NULL`。Candidate 用户决策和转换仍未实现。
 
 ---
 

@@ -190,6 +190,7 @@ Load ACTIVE InboxItem
 - InboxItem 不存在或已归档返回 404；title 与可用正文都为空返回 400，并且不会调用 FastAPI；
 - Archive 不自动删除 Candidate；真正删除 Source 时由 MySQL Foreign Key `ON DELETE CASCADE` 清理；
 - 外部 AI 调用不在数据库事务内。当前没有 Action Attempt Guard，并发手动提取的最终覆盖顺序不作持久化保证。
+- Task 34 已建立 Todo Entity、Mapper 与内部 Service，但没有 Public Todo API，也没有 Accept、Dismiss 或 Candidate → Todo Conversion；现有产品端点不变。
 
 ## Java → Python 内部 API
 
