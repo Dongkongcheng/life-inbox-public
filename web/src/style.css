@@ -122,16 +122,18 @@ button:disabled { cursor: wait; opacity: 0.65; }
 }
 .todo-list { display: grid; gap: 12px; margin-top: 22px; }
 .todo-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
   padding: 17px;
   border: 1px solid #dfe8e4;
   border-radius: 13px;
   background: #fbfdfc;
 }
 .todo-item.is-completed { background: #f5f8f6; }
+.todo-item-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
 .todo-item-main { min-width: 0; }
 .todo-item h3 { margin: 0; color: #1b3027; font-size: 1rem; overflow-wrap: anywhere; }
 .todo-item.is-completed h3 { color: #607069; text-decoration: line-through; }
@@ -143,11 +145,55 @@ button:disabled { cursor: wait; opacity: 0.65; }
 .todo-date { color: #6f5917; }
 .todo-completed-time { color: #65736d; }
 .todo-operation-error { color: #b42318; }
+.todo-item-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .todo-complete-button,
-.todo-reopen-button { flex: 0 0 auto; width: auto; margin: 0; padding: 8px 13px; }
+.todo-reopen-button,
+.todo-source-button { flex: 0 0 auto; width: auto; margin: 0; padding: 8px 13px; }
 .todo-complete-button { background: #2f745b; }
 .todo-reopen-button { border: 1px solid #b9cbc3; background: #fff; color: #456157; }
 .todo-reopen-button:hover { background: #eef4f1; }
+.todo-source-button { border: 1px solid #b9cbc3; background: #fff; color: #456157; }
+.todo-source-button:hover { background: #eef4f1; }
+.todo-no-source { color: #84908a; font-size: 0.8rem; }
+.todo-source-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #dfe8e4;
+}
+.todo-source-status,
+.todo-source-unavailable,
+.todo-source-error { margin: 0; font-size: 0.86rem; }
+.todo-source-status,
+.todo-source-unavailable { color: #65736d; }
+.todo-source-error { color: #b42318; }
+.todo-source-error button {
+  width: auto;
+  margin: 0 0 0 8px;
+  padding: 5px 9px;
+  background: #fff1f0;
+  color: #b42318;
+}
+.todo-source-block + .todo-source-block { margin-top: 13px; }
+.todo-source-block {
+  padding: 12px;
+  border-radius: 10px;
+  background: #f0f6f3;
+}
+.todo-source-heading { display: flex; justify-content: space-between; gap: 12px; }
+.todo-source-heading strong { color: #294b3d; }
+.todo-source-heading span,
+.todo-source-meta { color: #718078; font-size: 0.78rem; }
+.todo-source-title,
+.todo-source-preview,
+.todo-source-meta,
+.todo-source-deadline,
+.todo-source-evidence { margin: 7px 0 0; overflow-wrap: anywhere; }
+.todo-source-title { color: #334b41; font-weight: 700; }
+.todo-source-preview,
+.todo-source-evidence { color: #53665d; line-height: 1.55; white-space: pre-wrap; }
+.todo-source-deadline { color: #6f5917; font-size: 0.84rem; }
+.todo-source-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.todo-source-links a { color: #2f745b; font-size: 0.84rem; font-weight: 700; }
 .search-form { margin: 0 0 24px; }
 .search-controls {
   display: grid;
@@ -490,7 +536,10 @@ button:disabled { cursor: wait; opacity: 0.65; }
   .action-panel-actions { width: 100%; }
   .action-panel-actions button,
   .candidate-actions button { flex: 1 1 120px; }
-  .todo-item { align-items: stretch; flex-direction: column; }
+  .todo-item-row { align-items: stretch; flex-direction: column; }
+  .todo-item-actions { align-items: stretch; flex-wrap: wrap; }
   .todo-complete-button,
-  .todo-reopen-button { width: 100%; }
+  .todo-reopen-button,
+  .todo-source-button { flex: 1 1 120px; width: auto; }
+  .todo-source-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
 }

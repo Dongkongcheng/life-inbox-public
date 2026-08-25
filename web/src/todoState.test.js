@@ -4,6 +4,8 @@ import test from 'node:test'
 
 import {
   applyTodoOperationResult,
+  candidateCalendarDate,
+  hasTodoSourceReference,
   TODO_STATUS,
   todoCalendarDate
 } from './todoState.js'
@@ -12,6 +14,19 @@ test('displays dueDate as the backend calendar-date string without timezone conv
   assert.equal(todoCalendarDate({ dueDate: '2026-08-25' }), '2026-08-25')
   assert.equal(todoCalendarDate({ dueDate: null }), null)
   assert.equal(todoCalendarDate({}), null)
+})
+
+test('detects source references without requiring both source rows', () => {
+  assert.equal(hasTodoSourceReference({ sourceInboxItemId: 1, sourceActionCandidateId: null }), true)
+  assert.equal(hasTodoSourceReference({ sourceInboxItemId: null, sourceActionCandidateId: 2 }), true)
+  assert.equal(hasTodoSourceReference({ sourceInboxItemId: null, sourceActionCandidateId: null }), false)
+  assert.equal(hasTodoSourceReference(null), false)
+})
+
+test('shows candidate deadline as backend calendar date and leaves unresolved dates unknown', () => {
+  assert.equal(candidateCalendarDate({ deadline: '2026-08-25' }), '2026-08-25')
+  assert.equal(candidateCalendarDate({ deadline: null }), null)
+  assert.equal(candidateCalendarDate({}), null)
 })
 
 test('removes completed Todo from OPEN and reopened Todo from COMPLETED views', () => {
@@ -55,4 +70,29 @@ test('Todo component separates list loading, errors, empty states and per-item o
   assert.match(component, /完成中…/)
   assert.match(component, /重新打开中…/)
   assert.doesNotMatch(component, /new Date\s*\(\s*todo(?:\?|\.)dueDate/)
+})
+
+test('Todo source UI is per-item, lazy, cacheable and isolated from list lifecycle', async () => {
+  const component = await readFile(
+    new URL('./components/TodoPanel.vue', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(component, /const todoSources = ref\(\{\}\)/)
+  assert.match(component, /const toggleTodoSource = \(todo\) =>/)
+  assert.match(component, /if \(current\.loading \|\| current\.loaded\) return/)
+  assert.match(component, /if \(expanded\) loadTodoSource\(todo\.id\)/)
+  assert.match(component, /getTodoSource\(todoId\)/)
+  assert.match(component, /查看来源/)
+  assert.match(component, /无来源/)
+  assert.match(component, /原始来源已不可用，Todo 仍可正常使用。/)
+  assert.match(component, /正在加载来源…/)
+  assert.match(component, /Todo 来源加载失败/)
+  assert.match(component, /日期原文/)
+  assert.match(component, /归一化日期/)
+  assert.match(component, /未确定/)
+  assert.match(component, /依据：/)
+  assert.match(component, /v-if="hasTodoSourceReference\(todo\)"/)
+  assert.doesNotMatch(component, /onMounted\([^)]*getTodoSource/)
+  assert.doesNotMatch(component, /new Date\s*\([^)]*(?:deadline|dueDate)/)
 })

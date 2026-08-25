@@ -19,6 +19,7 @@
 | POST | `/api/inbox/{id}/action-candidates/{candidateId}/accept` | 接受 Candidate，原子创建唯一 OPEN Todo |
 | POST | `/api/inbox/{id}/action-candidates/{candidateId}/dismiss` | 忽略 Candidate，不创建 Todo |
 | GET | `/api/todos?status=OPEN|COMPLETED` | 查询 Todo；缺省 status 时返回 OPEN |
+| GET | `/api/todos/{id}/source` | 按需读取 Todo 的只读 Inbox/Candidate 来源上下文 |
 | POST | `/api/todos/{id}/complete` | 幂等完成 Todo；完成时间由 Java 生成 |
 | POST | `/api/todos/{id}/reopen` | 幂等重新打开 Todo，并清空完成时间 |
 | PUT | `/api/inbox/{id}/favorite` | 收藏 |
@@ -300,6 +301,46 @@ OPEN 排序为：有 `dueDate` 的记录优先，按 `dueDate ASC`，再按 `cre
 ```
 
 `dueDate` 是 Calendar Date 字符串，不代表 UTC 时间戳。
+
+#### Todo Source Context
+
+`GET /api/todos/{id}/source` 只在用户查看单条 Todo 来源时调用，不属于列表查询：
+
+```json
+{
+  "todoId": 200,
+  "sourceAvailable": true,
+  "inboxItem": {
+    "id": 100,
+    "type": "TEXT",
+    "title": "软件工程课程设计",
+    "preview": "课程设计报告需要在2026年8月25日前提交",
+    "sourceUrl": null,
+    "fileUrl": null,
+    "status": "ARCHIVED",
+    "createdTime": "2026-08-20T09:30:00"
+  },
+  "actionCandidate": {
+    "id": 1,
+    "actionType": "DEADLINE",
+    "title": "提交软件工程课程设计报告",
+    "deadlineText": "2026年8月25日前",
+    "deadline": "2026-08-25",
+    "evidence": "课程设计报告需要在2026年8月25日前提交",
+    "status": "ACCEPTED"
+  }
+}
+```
+
+- Todo 不存在时沿用 404；Todo 没有来源时返回 200、`sourceAvailable=false` 且两个摘要为 `null`；
+- 某个引用失效时返回仍存在的部分；两个来源都不存在时同样安全返回不可用，不返回 500；
+- ARCHIVED InboxItem 可作为来源上下文读取，但不会重新进入普通 Inbox 列表；
+- Inbox `preview` 是最多 300 个 Unicode 字符的纯文本。TEXT 来自 `content`；URL/FILE/IMAGE 只读已经持久化的
+  `searchable_content`，为空时回退 title；不会抓取 URL、解析文件、执行 OCR 或调用 AI；
+- 响应不包含完整 `searchable_content`、AI/Action Attempt 状态或本地文件路径；只返回合法 HTTP(S) 原链接和
+  `/api/files/...` 受管文件地址；
+- `deadlineText` 保留原表达，`deadline` 是可空 Calendar Date；客户端必须把空值显示为“未确定”，不能猜年份；
+- 该 API 无事务写入，不修改 Todo、ActionCandidate 或 InboxItem。Todo List 继续只查询 `todo`，避免 Source JOIN 与 N+1。
 
 #### Complete Todo
 

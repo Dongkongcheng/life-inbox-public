@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { completeTodo, getTodos, reopenTodo } from './todoApi.js'
+import { completeTodo, getTodoSource, getTodos, reopenTodo } from './todoApi.js'
 
 test('Todo API client uses list status and explicit lifecycle routes', async (t) => {
   const originalFetch = globalThis.fetch
@@ -13,11 +13,13 @@ test('Todo API client uses list status and explicit lifecycle routes', async (t)
   }
 
   await getTodos('OPEN')
+  await getTodoSource(1)
   await completeTodo(1)
   await reopenTodo(1)
 
   assert.deepEqual(calls, [
     { endpoint: '/api/todos?status=OPEN', options: undefined },
+    { endpoint: '/api/todos/1/source', options: undefined },
     { endpoint: '/api/todos/1/complete', options: { method: 'POST' } },
     { endpoint: '/api/todos/1/reopen', options: { method: 'POST' } }
   ])
@@ -33,4 +35,5 @@ test('Todo API failures expose backend detail without manufacturing successful s
 
   await assert.rejects(() => completeTodo(99), { message: 'Todo 不存在' })
   await assert.rejects(() => reopenTodo(99), { message: 'Todo 不存在' })
+  await assert.rejects(() => getTodoSource(99), { message: 'Todo 不存在' })
 })

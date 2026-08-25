@@ -849,6 +849,8 @@ Task 35 已实现 Candidate Accept / Dismiss 与 Candidate → Todo Conversion�
 按需加载的 Action Candidate Review：用户可以手动检测、创建 Todo 或忽略建议，列表加载不会逐条查询 Candidate。
 Task 38 已新增独立 Todo 入口、OPEN/COMPLETED 列表，以及幂等 Complete/Reopen API。列表不依赖 Source JOIN；
 首次 Complete 由 Java 写入完成时间，Reopen 清空完成时间，两者都不修改 Candidate 或调用 AI。
+Task 39 已新增按需来源追溯：Todo 列表仍只读 `todo`，用户点击单条 Todo 的“查看来源”后，Java 才返回有界
+Inbox 摘要与 Candidate 依据。归档来源可读；来源已删除或引用失效时安全显示不可用，Todo 生命周期不受影响。
 
 而不是一开始创建：
 
@@ -907,6 +909,10 @@ Todo
 ```
 
 原始信息仍然由 InboxItem 保存。
+
+当前产品通过 `GET /api/todos/{id}/source` 按需解析引用，不在 Todo 列表中 JOIN 或逐条加载来源。Inbox 预览最多
+300 个 Unicode 字符；TEXT 使用原正文，URL/FILE/IMAGE 只使用已持久化的 `searchable_content`，不会重新抓取、
+解析或 OCR。Candidate 同时展示日期原文、可空归一化日期与 evidence，但这些字段不会复制进 Todo。
 
 Action 数据不需要复制整份：
 
@@ -2014,7 +2020,7 @@ Current known scope limitations include:
 * Action Extractor is currently under development.
 * Automatic/Manual Action Candidate extraction、Accept/Dismiss、Candidate → Todo conversion 与前端按需确认 UI 已实现；当前只做完全相同终态 Candidate 去重，不做语义去重。
 * Action 自动完成后没有实时推送、通知、提醒或日历同步；用户仍需展开条目并确认是否创建 Todo。
-* Todo 列表、完成与重新打开已实现；编辑、删除、手动创建、提醒与日历仍未实现。
+* Todo 列表、完成、重新打开与按需来源查看已实现；当前没有 Inbox 详情路由，因此来源面板提供只读摘要和已有安全链接，不提供应用内详情跳转；编辑、删除、手动创建、提醒与日历仍未实现。
 * Relations are not implemented yet.
 * Personal RAG is not implemented yet.
 * Personal Agent functionality is not implemented yet.
