@@ -1269,7 +1269,9 @@ completed_time: 新建 Todo 时为 NULL
 Task 34 建立 Entity、Mapper 与内部 Service 持久化基础；Task 35 已复用该 Service 实现 Candidate Accept / Dismiss
 和 Candidate → Todo Conversion。Task 38 在不修改 Schema 的前提下增加独立 Todo List、Complete 与 Reopen：
 列表只查询 `todo`，不依赖 Source JOIN；生命周期在短事务中锁定 Todo 行并保持 `OPEN → completed_time NULL`、
-`COMPLETED → completed_time NOT NULL`。当前仍没有 Todo Edit、Delete 或 Manual Create API。
+`COMPLETED → completed_time NOT NULL`。Task 39 继续复用两个可空 Source 外键，没有新增表或字段：来源通过独立
+只读 API 按 Todo ID 延迟解析，列表仍不查询 `inbox_item` / `action_candidate`。当前仍没有 Todo Edit、Delete
+或 Manual Create API。
 
 ---
 
@@ -1364,7 +1366,7 @@ Schema Second
 
 # 32. Action Source Traceability
 
-未来 Action Candidate 和 Todo 应尽可能追溯到：
+Action Candidate 和 Todo 当前可以追溯到：
 
 ```text
 InboxItem
@@ -1387,6 +1389,10 @@ Todo
 
 这个截止日期来自哪条保存的信息？
 ```
+
+Task 39 使用 `todo.source_inbox_item_id` 与 `todo.source_action_candidate_id` 按需读取当前 Source of Truth。
+`sourceAvailable` 是运行时派生值，不持久化；来源缺失返回空或部分摘要。ARCHIVED 仍可读，真正删除时现有
+`ON DELETE SET NULL` 保证 Todo 保留。该读取不会反向同步 Todo，也不会修改 Candidate 用户决定。
 
 ---
 
@@ -1632,6 +1638,8 @@ Todo 已经成为独立业务状态。
 删除原 InboxItem：
 
 不应该默认删除用户已经确认的 Todo。
+
+当前实现的来源查询在两个引用被清空后返回 `sourceAvailable=false`；Todo 仍可列出、完成、重新打开。
 
 因此未来 Foreign Key 设计必须慎重选择：
 

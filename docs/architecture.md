@@ -1522,6 +1522,11 @@ Task 38 继续把 Todo 作为独立业务状态：`GET /api/todos` 只查询 Tod
 Complete / Reopen 使用 Todo 行锁和短事务维护 `OPEN ↔ COMPLETED`，第一次 Complete 的 Java 业务时间保持稳定，
 Reopen 清空完成时间。这个生命周期不调用 AI，也不反向修改保持 `ACCEPTED` 的 ActionCandidate。
 
+Task 39 通过独立 `GET /api/todos/{id}/source` 延迟读取来源，保持 Todo List 与来源解析的依赖隔离。来源 Service
+只按现有外键读取 MySQL：TEXT 从 `content` 生成有界预览，URL/FILE/IMAGE 只使用已持久化
+`searchable_content`；它不调用 FastAPI、Parser/OCR 或向量检索，也没有写事务。ARCHIVED 来源允许只读查看，
+删除或脏引用返回空/部分上下文，Todo 仍可独立完成与重新打开。
+
 ```text
 ActionCandidate ACCEPTED
         ↓ User Accept
@@ -1697,7 +1702,7 @@ AI Again
 
 # 33. Action Source Traceability
 
-未来 Action / Todo / Deadline 应尽可能能够追溯到原始 InboxItem。
+Action Candidate / Todo 当前能够按需追溯到原始 InboxItem。
 
 概念：
 
@@ -1717,6 +1722,10 @@ InboxItem
 ```
 
 不要为了追溯而复制整份原始内容。
+
+当前前端只在用户点击 Todo 的“查看来源”后请求单条来源，上下文成功后在页面会话内缓存。普通 Todo List 不
+JOIN Source，也不为列表中的每条 Todo 发来源请求；来源加载失败只影响当前展开区域。由于当前应用没有 Inbox
+详情路由，来源区域展示有界只读预览，并仅在已有安全 URL / 受管文件地址时提供链接。
 
 优先引用：
 

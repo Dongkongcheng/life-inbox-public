@@ -46,6 +46,7 @@ V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、�
 - ✅ Task 6 / Overall Task 36 — Frontend Action Candidate UI（按需加载、手动检测、创建 Todo/忽略与局部状态反馈）
 - ✅ Task 7 / Overall Task 37 — Automatic Action Extraction（可用正文 AFTER_COMMIT 自动触发、独立状态、Attempt Guard、失败降级与终态精确去重）
 - ✅ Task 8 / Overall Task 38 — Todo List & Todo Lifecycle（OPEN/COMPLETED 列表、幂等完成/重开与前端 Todo 体验）
+- ✅ Task 9 / Overall Task 39 — Source Traceability & Integration（按需只读来源上下文、有界预览、缺失降级与 Todo UI）
 - Todo 编辑、删除、手动创建与 Reminder 等后续能力尚未实现
 - Reminder / Action Item 后续能力仍为 Planned
 
