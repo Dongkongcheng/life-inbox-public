@@ -1518,6 +1518,17 @@ Task 37 在不建立第二套 Parser/OCR 的前提下复用可用正文：TEXT C
 队列拒绝和 Provider 失败都不会传播回 Capture。Action 使用独立于 `ai_status` 的状态与 UUID Attempt Guard；迟到
 成功/失败都没有覆盖新 Attempt 的权限，成功时 Candidate Replacement 与 `action_status=SUCCESS` 原子提交。
 
+Task 38 继续把 Todo 作为独立业务状态：`GET /api/todos` 只查询 Todo 表，来源删除不会让列表项消失；
+Complete / Reopen 使用 Todo 行锁和短事务维护 `OPEN ↔ COMPLETED`，第一次 Complete 的 Java 业务时间保持稳定，
+Reopen 清空完成时间。这个生命周期不调用 AI，也不反向修改保持 `ACCEPTED` 的 ActionCandidate。
+
+```text
+ActionCandidate ACCEPTED
+        ↓ User Accept
+Todo OPEN ←──────── Reopen ──────── Todo COMPLETED
+          ──────── Complete ───────→
+```
+
 ---
 
 # 29. Action Extraction Input

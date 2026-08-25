@@ -847,7 +847,8 @@ Todo 是 Java / MySQL 拥有的业务状态；来源 InboxItem 或 ActionCandida
 Task 35 已实现 Candidate Accept / Dismiss 与 Candidate → Todo Conversion；Accept 会在一个短事务中创建唯一 Todo
 并把 Candidate 标记为 `ACCEPTED`，Dismiss 只保留 `DISMISSED` 用户决定。Task 36 已在每条 Inbox 卡片中加入
 按需加载的 Action Candidate Review：用户可以手动检测、创建 Todo 或忽略建议，列表加载不会逐条查询 Candidate。
-当前仍没有独立 Todo 列表或生命周期 API。
+Task 38 已新增独立 Todo 入口、OPEN/COMPLETED 列表，以及幂等 Complete/Reopen API。列表不依赖 Source JOIN；
+首次 Complete 由 Java 写入完成时间，Reopen 清空完成时间，两者都不修改 Candidate 或调用 AI。
 
 而不是一开始创建：
 
@@ -2013,7 +2014,7 @@ Current known scope limitations include:
 * Action Extractor is currently under development.
 * Automatic/Manual Action Candidate extraction、Accept/Dismiss、Candidate → Todo conversion 与前端按需确认 UI 已实现；当前只做完全相同终态 Candidate 去重，不做语义去重。
 * Action 自动完成后没有实时推送、通知、提醒或日历同步；用户仍需展开条目并确认是否创建 Todo。
-* Todo 列表/完成/编辑 API 尚未实现。
+* Todo 列表、完成与重新打开已实现；编辑、删除、手动创建、提醒与日历仍未实现。
 * Relations are not implemented yet.
 * Personal RAG is not implemented yet.
 * Personal Agent functionality is not implemented yet.

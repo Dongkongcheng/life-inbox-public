@@ -18,6 +18,9 @@
 | GET | `/api/inbox/{id}/action-candidates` | 查询 ACTIVE InboxItem 已持久化的 Action Candidate |
 | POST | `/api/inbox/{id}/action-candidates/{candidateId}/accept` | 接受 Candidate，原子创建唯一 OPEN Todo |
 | POST | `/api/inbox/{id}/action-candidates/{candidateId}/dismiss` | 忽略 Candidate，不创建 Todo |
+| GET | `/api/todos?status=OPEN|COMPLETED` | 查询 Todo；缺省 status 时返回 OPEN |
+| POST | `/api/todos/{id}/complete` | 幂等完成 Todo；完成时间由 Java 生成 |
+| POST | `/api/todos/{id}/reopen` | 幂等重新打开 Todo，并清空完成时间 |
 | PUT | `/api/inbox/{id}/favorite` | 收藏 |
 | PUT | `/api/inbox/{id}/unfavorite` | 取消收藏 |
 | PUT | `/api/inbox/{id}/archive` | 归档；归档项不再出现在主列表 |
@@ -196,7 +199,7 @@ Load ACTIVE InboxItem → Claim Action Attempt
 - InboxItem 不存在或已归档返回 404；title 与可用正文都为空返回 400，并且不会调用 FastAPI；
 - Archive 不自动删除 Candidate；真正删除 Source 时由 MySQL Foreign Key `ON DELETE CASCADE` 清理；
 - 外部 AI 调用不在数据库事务内。每次手动/自动提取都使用独立 Action Attempt Guard；fresh PROCESSING 返回 409，stale PROCESSING 可由新 Attempt 接管，迟到成功或失败不能覆盖新结果。
-- 当前没有独立 Todo List / Complete / Edit / Delete API。
+- Todo List / Complete / Reopen 已由下面的独立产品 API 提供；当前没有 Edit / Delete / Manual Create API。
 
 自动入口不新增产品 API：TEXT 在 Capture 事务提交后投递；URL/FILE/IMAGE 在现有内容准备成功写入
 `searchable_content` 后投递。两者都通过 AFTER_COMMIT 与现有有界 AI Executor 执行。队列拒绝发生在 Claim
@@ -233,9 +236,15 @@ SELECT Candidate FOR UPDATE
   },
   "todo": {
     "id": 200,
+    "sourceInboxItemId": 100,
+    "sourceActionCandidateId": 1,
     "title": "提交软件工程课程设计报告",
+    "description": null,
     "status": "OPEN",
-    "dueDate": "2026-08-25"
+    "dueDate": "2026-08-25",
+    "completedTime": null,
+    "createdTime": "2026-08-24T10:01:00",
+    "updatedTime": "2026-08-24T10:01:00"
   }
 }
 ```
@@ -258,6 +267,53 @@ SELECT Candidate FOR UPDATE
 - `ACCEPTED → DISMISSED` 返回 409，已有 Todo 保持不变；
 - Candidate 不存在或 Inbox ID 不匹配返回 404；
 - 普通 Re-extraction 仍只替换 `PENDING`，不会删除 `ACCEPTED` 或 `DISMISSED` 用户决定。
+
+### Todo 产品 API
+
+#### List Todo
+
+`GET /api/todos` 默认等价于 `GET /api/todos?status=OPEN`。`status` 只允许精确的 `OPEN` 或
+`COMPLETED`，其他值返回受控 400；正常无数据返回 `[]`。
+
+OPEN 排序为：有 `dueDate` 的记录优先，按 `dueDate ASC`，再按 `createdTime DESC, id DESC`；没有
+`dueDate` 的记录排在其后。COMPLETED 按 `completedTime DESC`，历史异常的空完成时间排在非空值之后，
+再以 `createdTime DESC, id DESC` 稳定排序。查询只读取 `todo`，不 JOIN InboxItem 或 ActionCandidate，
+因此来源引用为空或来源已删除后 Todo 仍可见。
+
+响应是 Todo 产品 DTO 数组：
+
+```json
+[
+  {
+    "id": 200,
+    "sourceInboxItemId": 100,
+    "sourceActionCandidateId": 1,
+    "title": "提交软件工程课程设计报告",
+    "description": null,
+    "status": "OPEN",
+    "dueDate": "2026-08-25",
+    "completedTime": null,
+    "createdTime": "2026-08-24T10:01:00",
+    "updatedTime": "2026-08-24T10:01:00"
+  }
+]
+```
+
+`dueDate` 是 Calendar Date 字符串，不代表 UTC 时间戳。
+
+#### Complete Todo
+
+`POST /api/todos/{id}/complete` 无 Request Body。Service 在短事务中锁定 Todo 行，首次执行
+`OPEN → COMPLETED`，并使用 Java 当前业务时间设置 `completedTime`。已是 COMPLETED 时幂等返回当前 DTO，
+不会刷新第一次成功完成时间；不存在返回 404。
+
+#### Reopen Todo
+
+`POST /api/todos/{id}/reopen` 无 Request Body。Service 在短事务中执行 `COMPLETED → OPEN` 并把
+`completedTime` 清空；已是 `OPEN + completedTime=null` 时幂等返回当前 DTO；不存在返回 404。
+
+Complete / Reopen 都只修改 Todo，不修改关联 ActionCandidate，不重新运行 Action Extraction，也不调用
+FastAPI、LLM 或 Qdrant。当前没有 Todo Edit、Delete、Manual Create、Reminder 或 Calendar API。
 
 ## Java → Python 内部 API
 
