@@ -714,7 +714,7 @@ Archive
 Original Content
 AI Status
 Action Candidate
-Future Todo
+Todo Business State
 ```
 
 理论上：
@@ -823,16 +823,23 @@ INSERT Todo
 
 ---
 
-# Todo and Deadline Direction
+# Todo Core Model and Deadline Direction
 
-V0.4 第一阶段推荐：
+V0.4 Task 34 已建立独立的 Todo 持久化基础：
 
 ```text
 Todo
  ├── title
+ ├── description
  ├── status
- └── optional due_time
+ ├── optional due_date
+ └── optional source links
 ```
+
+Todo 是 Java / MySQL 拥有的业务状态；来源 InboxItem 或 ActionCandidate 被删除时只清空追溯引用，
+不会级联删除 Todo。同一个 ActionCandidate 最多关联一个 Todo。
+
+当前仍没有 Candidate Accept / Dismiss、Candidate → Todo Conversion 或 Public Todo API。
 
 而不是一开始创建：
 
@@ -855,7 +862,7 @@ Deadline
 ```text
 Todo:
   title = 提交报告
-  due_time = 2026-08-25
+  due_date = 2026-08-25
 ```
 
 只有未来真正出现独立 Deadline 生命周期需求时，
@@ -872,7 +879,7 @@ deadline
 
 # Action Source Traceability
 
-Action Candidate 和未来 Todo 应尽可能保留其来源：
+Action Candidate 和 Todo 应尽可能保留其来源：
 
 ```text
 InboxItem
@@ -1029,7 +1036,7 @@ Hybrid Orchestration
 Final Business Results
 
 Action Candidate State
-Future Todo
+Todo Business State
 Future Deadline Business State
 ```
 
@@ -1140,11 +1147,11 @@ Structured Action Candidate
 Spring Boot
     │
     ▼
-User Confirmation
+Future User Confirmation
     │
     ▼
 Todo
-└── optional due_time
+└── optional due_date
 ```
 
 ---
