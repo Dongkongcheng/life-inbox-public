@@ -2,6 +2,7 @@ package com.lifeinbox.server.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.lifeinbox.server.entity.AiProcessingStatus;
+import com.lifeinbox.server.entity.ActionProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -144,11 +145,81 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
     );
 
     /**
-     * Action AI 调用完成后，在短事务中重新确认 Source 仍为 ACTIVE 并取得行锁。
-     * 这样归档或删除竞态不会在成功结果落库时生成新的 Candidate。
+     * Action 成功提交前锁定当前 Attempt Owner；状态与 Candidate Replacement 随后在同一事务完成。
      */
-    @Select("SELECT id FROM inbox_item WHERE id = #{id} AND status = 'ACTIVE' FOR UPDATE")
-    Long selectActiveIdForUpdate(@Param("id") Long id);
+    @Select("""
+            SELECT id
+            FROM inbox_item
+            WHERE id = #{id}
+              AND status = 'ACTIVE'
+              AND action_status = #{processingStatus}
+              AND action_attempt_id = #{attemptId}
+            FOR UPDATE
+            """)
+    Long selectCurrentActionAttemptForUpdate(
+            @Param("id") Long id,
+            @Param("attemptId") String attemptId,
+            @Param("processingStatus") ActionProcessingStatus processingStatus
+    );
+
+    /** Action Attempt 与 Analyze 使用相同的 fresh/stale 接管策略，但写入完全独立的列。 */
+    @Update("""
+            UPDATE inbox_item
+            SET action_status = #{processingStatus},
+                action_attempt_id = #{attemptId},
+                action_error_message = NULL,
+                action_started_time = #{startedTime},
+                action_finished_time = NULL
+            WHERE id = #{id}
+              AND status = 'ACTIVE'
+              AND (
+                    action_status <> #{processingStatus}
+                    OR action_started_time IS NULL
+                    OR action_started_time <= #{staleBefore}
+              )
+            """)
+    int markActionProcessing(
+            @Param("id") Long id,
+            @Param("processingStatus") ActionProcessingStatus processingStatus,
+            @Param("attemptId") String attemptId,
+            @Param("startedTime") java.time.LocalDateTime startedTime,
+            @Param("staleBefore") java.time.LocalDateTime staleBefore
+    );
+
+    /** 只允许当前 Action Attempt 记录失败，迟到的旧失败没有状态写权限。 */
+    @Update("""
+            UPDATE inbox_item
+            SET action_status = #{failedStatus},
+                action_error_message = #{errorMessage},
+                action_finished_time = CURRENT_TIMESTAMP
+            WHERE id = #{id}
+              AND action_status = #{processingStatus}
+              AND action_attempt_id = #{attemptId}
+            """)
+    int markActionFailed(
+            @Param("id") Long id,
+            @Param("attemptId") String attemptId,
+            @Param("processingStatus") ActionProcessingStatus processingStatus,
+            @Param("failedStatus") ActionProcessingStatus failedStatus,
+            @Param("errorMessage") String errorMessage
+    );
+
+    /** Candidate Replacement 完成后最后设置 SUCCESS，仍必须持有同一 Attempt。 */
+    @Update("""
+            UPDATE inbox_item
+            SET action_status = #{successStatus},
+                action_error_message = NULL,
+                action_finished_time = CURRENT_TIMESTAMP
+            WHERE id = #{id}
+              AND action_status = #{processingStatus}
+              AND action_attempt_id = #{attemptId}
+            """)
+    int markActionSuccess(
+            @Param("id") Long id,
+            @Param("attemptId") String attemptId,
+            @Param("processingStatus") ActionProcessingStatus processingStatus,
+            @Param("successStatus") ActionProcessingStatus successStatus
+    );
 
     /**
      * 只更新本次 AI 分析拥有的列；同时取得该 InboxItem 的行锁，串行化并发重分析。

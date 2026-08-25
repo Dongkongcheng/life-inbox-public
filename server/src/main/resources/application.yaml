@@ -35,3 +35,6 @@ life-inbox:
     processing-stale-after: 5m
     # 自动 Analyze 默认关闭，避免升级后未经用户确认就调用真实 LLM 并产生费用。
     auto-analyze-enabled: ${LIFEINBOX_AI_AUTO_ANALYZE_ENABLED:false}
+  action:
+    # Task 37 默认在可用正文提交后后台提取；可在需要控制 Provider 调用时显式关闭。
+    auto-extract-enabled: ${LIFEINBOX_ACTION_AUTO_EXTRACT_ENABLED:true}

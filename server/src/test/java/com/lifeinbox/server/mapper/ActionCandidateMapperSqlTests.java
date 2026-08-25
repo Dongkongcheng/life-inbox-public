@@ -1,5 +1,6 @@
 package com.lifeinbox.server.mapper;
 
+import com.lifeinbox.server.entity.ActionProcessingStatus;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
@@ -27,15 +28,6 @@ class ActionCandidateMapperSqlTests {
     }
 
     @Test
-    void activeSourceLockUsesDatabaseRowLock() throws NoSuchMethodException {
-        Method method = InboxItemMapper.class.getMethod("selectActiveIdForUpdate", Long.class);
-        String sql = method.getAnnotation(Select.class).value()[0];
-
-        assertTrue(sql.contains("status = 'ACTIVE'"));
-        assertTrue(sql.contains("FOR UPDATE"));
-    }
-
-    @Test
     void candidateDecisionUsesRowLockAndPendingOnlyTransitions() throws NoSuchMethodException {
         Method lock = ActionCandidateMapper.class.getMethod(
                 "selectByInboxItemIdAndIdForUpdate",
@@ -56,5 +48,73 @@ class ActionCandidateMapperSqlTests {
         String dismissSql = dismiss.getAnnotation(Update.class).value()[0];
         assertTrue(dismissSql.contains("status = 'DISMISSED'"));
         assertTrue(dismissSql.contains("status = 'PENDING'"));
+    }
+
+    @Test
+    void actionAttemptSqlUsesIndependentColumnsAndOwnershipGuards() throws NoSuchMethodException {
+        Method claim = InboxItemMapper.class.getMethod(
+                "markActionProcessing",
+                Long.class,
+                ActionProcessingStatus.class,
+                String.class,
+                java.time.LocalDateTime.class,
+                java.time.LocalDateTime.class
+        );
+        String claimSql = claim.getAnnotation(Update.class).value()[0];
+        assertTrue(claimSql.contains("action_status"));
+        assertTrue(claimSql.contains("action_attempt_id"));
+        assertTrue(claimSql.contains("action_started_time <= #{staleBefore}"));
+        assertFalse(claimSql.contains("ai_status"));
+
+        Method owner = InboxItemMapper.class.getMethod(
+                "selectCurrentActionAttemptForUpdate",
+                Long.class,
+                String.class,
+                ActionProcessingStatus.class
+        );
+        String ownerSql = owner.getAnnotation(Select.class).value()[0];
+        assertTrue(ownerSql.contains("action_status = #{processingStatus}"));
+        assertTrue(ownerSql.contains("action_attempt_id = #{attemptId}"));
+        assertTrue(ownerSql.contains("FOR UPDATE"));
+
+        Method failure = InboxItemMapper.class.getMethod(
+                "markActionFailed",
+                Long.class,
+                String.class,
+                ActionProcessingStatus.class,
+                ActionProcessingStatus.class,
+                String.class
+        );
+        String failureSql = failure.getAnnotation(Update.class).value()[0];
+        assertTrue(failureSql.contains("action_attempt_id = #{attemptId}"));
+        assertTrue(failureSql.contains("action_status = #{processingStatus}"));
+        assertTrue(failureSql.contains("action_finished_time = CURRENT_TIMESTAMP"));
+        assertFalse(failureSql.contains("ai_status"));
+        assertFalse(failureSql.contains("searchable_content"));
+
+        Method success = InboxItemMapper.class.getMethod(
+                "markActionSuccess",
+                Long.class,
+                String.class,
+                ActionProcessingStatus.class,
+                ActionProcessingStatus.class
+        );
+        String successSql = success.getAnnotation(Update.class).value()[0];
+        assertTrue(successSql.contains("action_status = #{successStatus}"));
+        assertTrue(successSql.contains("action_error_message = NULL"));
+        assertTrue(successSql.contains("action_finished_time = CURRENT_TIMESTAMP"));
+        assertTrue(successSql.contains("action_attempt_id = #{attemptId}"));
+    }
+
+    @Test
+    void replacementLocksCandidatesBeforeTerminalDuplicateSuppression() throws NoSuchMethodException {
+        Method method = ActionCandidateMapper.class.getMethod(
+                "selectByInboxItemIdForUpdate",
+                Long.class
+        );
+        String sql = method.getAnnotation(Select.class).value()[0];
+
+        assertTrue(sql.contains("inbox_item_id = #{inboxItemId}"));
+        assertTrue(sql.contains("FOR UPDATE"));
     }
 }

@@ -2,6 +2,7 @@ package com.lifeinbox.server.service;
 
 import com.lifeinbox.server.entity.ActionCandidate;
 import com.lifeinbox.server.entity.ActionCandidateType;
+import com.lifeinbox.server.entity.ActionProcessingStatus;
 import com.lifeinbox.server.mapper.ActionCandidateMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,13 +52,18 @@ class ActionCandidateTransactionProxyTests {
         SimpleTransactionStatus transactionStatus = new SimpleTransactionStatus();
         when(transactionManager.getTransaction(any(TransactionDefinition.class)))
                 .thenReturn(transactionStatus);
-        when(inboxItemMapper.selectActiveIdForUpdate(1L)).thenReturn(1L);
+        when(inboxItemMapper.selectCurrentActionAttemptForUpdate(
+                1L,
+                "attempt-1",
+                ActionProcessingStatus.PROCESSING
+        )).thenReturn(1L);
+        when(actionCandidateMapper.selectByInboxItemIdForUpdate(1L)).thenReturn(List.of());
         when(actionCandidateMapper.insert(any(ActionCandidate.class)))
                 .thenThrow(new IllegalStateException("mock insert failure"));
 
         assertThrows(
                 IllegalStateException.class,
-                () -> persistenceService.replacePending(1L, List.of(
+                () -> persistenceService.completeSuccess(1L, "attempt-1", List.of(
                         new ValidatedActionCandidate(
                                 ActionCandidateType.TODO,
                                 "整理资料",
@@ -69,6 +75,44 @@ class ActionCandidateTransactionProxyTests {
         );
 
         verify(actionCandidateMapper).deletePendingByInboxItemId(1L);
+        verify(transactionManager).rollback(transactionStatus);
+        verify(transactionManager, never()).commit(transactionStatus);
+    }
+
+    @Test
+    void successStatusFailureRollsBackInsertedCandidatesAndPendingDeleteTogether() {
+        SimpleTransactionStatus transactionStatus = new SimpleTransactionStatus();
+        when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(transactionStatus);
+        when(inboxItemMapper.selectCurrentActionAttemptForUpdate(
+                2L,
+                "attempt-2",
+                ActionProcessingStatus.PROCESSING
+        )).thenReturn(2L);
+        when(actionCandidateMapper.selectByInboxItemIdForUpdate(2L)).thenReturn(List.of());
+        when(actionCandidateMapper.insert(any(ActionCandidate.class))).thenReturn(1);
+        when(inboxItemMapper.markActionSuccess(
+                2L,
+                "attempt-2",
+                ActionProcessingStatus.PROCESSING,
+                ActionProcessingStatus.SUCCESS
+        )).thenReturn(0);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> persistenceService.completeSuccess(2L, "attempt-2", List.of(
+                        new ValidatedActionCandidate(
+                                ActionCandidateType.TODO,
+                                "整理资料",
+                                null,
+                                null,
+                                "整理资料"
+                        )
+                ))
+        );
+
+        verify(actionCandidateMapper).deletePendingByInboxItemId(2L);
+        verify(actionCandidateMapper).insert(any(ActionCandidate.class));
         verify(transactionManager).rollback(transactionStatus);
         verify(transactionManager, never()).commit(transactionStatus);
     }

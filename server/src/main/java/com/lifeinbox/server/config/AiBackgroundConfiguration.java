@@ -7,7 +7,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * 自动 Analyze 与 Vector 派生任务复用同一个有界线程池，避免再建队列或占用 Web 请求线程。
+ * 自动 Analyze、Action Extraction 与 Vector 派生任务复用同一个有界线程池，
+ * 避免再建队列或占用 Web 请求线程。
  */
 @Configuration
 public class AiBackgroundConfiguration {

@@ -26,6 +26,19 @@ public interface ActionCandidateMapper extends BaseMapper<ActionCandidate> {
             """)
     List<ActionCandidate> selectByInboxItemId(@Param("inboxItemId") Long inboxItemId);
 
+    /**
+     * 成功替换前锁定同一 Source 的全部 Candidate，避免并发 Accept/Dismiss 后又插入完全相同建议。
+     */
+    @Select("""
+            SELECT id, inbox_item_id, action_type, title, deadline_text, deadline_date,
+                   evidence, status, created_time, updated_time
+            FROM action_candidate
+            WHERE inbox_item_id = #{inboxItemId}
+            ORDER BY created_time ASC, id ASC
+            FOR UPDATE
+            """)
+    List<ActionCandidate> selectByInboxItemIdForUpdate(@Param("inboxItemId") Long inboxItemId);
+
     /** 用户决策必须先锁定 Candidate，串行化同一条建议的并发 Accept / Dismiss。 */
     @Select("""
             SELECT id, inbox_item_id, action_type, title, deadline_text, deadline_date,

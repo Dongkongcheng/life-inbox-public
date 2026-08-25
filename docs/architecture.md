@@ -940,7 +940,7 @@ Searchable Content
     ↓
 ┌───────────────┬────────────────┐
 ▼               ▼                ▼
-Keyword       Embedding       Future Action
+Keyword       Embedding       Action
 Search                         Extraction
 ```
 
@@ -1477,14 +1477,17 @@ InboxItem
     ▼
 Usable Content
     │
-    ▼
+    ▼  AFTER_COMMIT / bounded executor
+Claim Action Attempt
+    │
+    ▼  external call, no DB transaction
 Action Extraction
     │
     ▼
 Structured Action Candidate
     │
-    ▼
-Spring Boot Business Layer
+    ▼  ownership check + short transaction
+Replace PENDING + Mark SUCCESS
     │
     ▼
 User Confirmation / Ignore
@@ -1509,6 +1512,11 @@ Task 34 已在 Java / MySQL 建立独立 Todo 核心模型。Todo 只保存自�
 可选 due_date 与可空 Source 引用；Source 删除使用 `ON DELETE SET NULL`。Task 35 已在 Java 业务层实现
 `PENDING → ACCEPTED / DISMISSED`：Accept 在同一短事务中锁定 Candidate、创建唯一 Todo 并更新状态，Dismiss
 只记录用户决定。重复同向请求幂等，两个终态之间不能互转；整个确认过程不调用 Python 或 LLM。
+
+Task 37 在不建立第二套 Parser/OCR 的前提下复用可用正文：TEXT Capture 提交后登记 Action 事件，URL/FILE/IMAGE
+则在现有 `searchable_content` 成功写入后登记。监听器只在事务 `AFTER_COMMIT` 后向已有有界 AI Executor 投递，
+队列拒绝和 Provider 失败都不会传播回 Capture。Action 使用独立于 `ai_status` 的状态与 UUID Attempt Guard；迟到
+成功/失败都没有覆盖新 Attempt 的权限，成功时 Candidate Replacement 与 `action_status=SUCCESS` 原子提交。
 
 ---
 
