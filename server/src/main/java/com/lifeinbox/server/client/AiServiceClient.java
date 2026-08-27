@@ -22,6 +22,9 @@ import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
 import com.lifeinbox.server.dto.AiVectorIndexRequest;
 import com.lifeinbox.server.dto.AiVectorIndexResponse;
+import com.lifeinbox.server.dto.AiVectorNeighborCandidate;
+import com.lifeinbox.server.dto.AiVectorNeighborRequest;
+import com.lifeinbox.server.dto.AiVectorNeighborResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.ImageAnalyzeException;
@@ -56,6 +59,7 @@ public class AiServiceClient {
     private static final String EXPECTED_STATUS = "ok";
     private static final String EXPECTED_SERVICE = "life-inbox-ai";
     private static final Pattern SHA_256_HEX = Pattern.compile("[0-9a-f]{64}");
+    private static final int MAX_VECTOR_NEIGHBOR_RESPONSE_SIZE = 100;
 
     private final RestClient healthRestClient;
     private final RestClient analysisRestClient;
@@ -228,6 +232,31 @@ public class AiServiceClient {
         } catch (RestClientException exception) {
             // 不透传 Query、Vector、Provider 或 Qdrant 响应；Keyword Search 不经过此调用。
             throw new AiServiceUnavailableException("AI Semantic Search 服务暂不可用", exception);
+        }
+    }
+
+    /** 复用已有 Source Point Vector；Python 不为 Relation Candidate 重新调用 Embedding。 */
+    public AiVectorNeighborResponse findVectorNeighbors(Long inboxItemId, int limit) {
+        try {
+            AiVectorNeighborResponse response = analysisRestClient.post()
+                    .uri("/vector/neighbors")
+                    .body(new AiVectorNeighborRequest(inboxItemId, limit))
+                    .retrieve()
+                    .body(AiVectorNeighborResponse.class);
+            if (!isValidVectorNeighborResponse(response)) {
+                throw new AiServiceUnavailableException(
+                        "AI 服务返回了无效的 Vector Neighbor 结果"
+                );
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // 邻居只是候选信号；不透传 Qdrant 地址、响应正文或内部配置。
+            throw new AiServiceUnavailableException(
+                    "AI Vector Neighbor 服务暂不可用",
+                    exception
+            );
         }
     }
 
@@ -493,6 +522,31 @@ public class AiServiceClient {
                     || candidate.inboxItemId() <= 0
                     || candidate.score() == null
                     || !Double.isFinite(candidate.score())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isValidVectorNeighborResponse(AiVectorNeighborResponse response) {
+        if (response == null
+                || response.sourceIndexed() == null
+                || response.results() == null
+                || response.results().size() > MAX_VECTOR_NEIGHBOR_RESPONSE_SIZE) {
+            return false;
+        }
+        if (!response.sourceIndexed()) {
+            return response.results().isEmpty();
+        }
+
+        Set<Long> returnedIds = new HashSet<>();
+        for (AiVectorNeighborCandidate candidate : response.results()) {
+            if (candidate == null
+                    || candidate.inboxItemId() == null
+                    || candidate.inboxItemId() <= 0
+                    || candidate.score() == null
+                    || !Double.isFinite(candidate.score())
+                    || !returnedIds.add(candidate.inboxItemId())) {
                 return false;
             }
         }

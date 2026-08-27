@@ -12,6 +12,10 @@ from qdrant_client import QdrantClient, models
 from app.config import VectorStoreSettings
 from app.schemas.embedding import EmbeddingResult
 from app.schemas.semantic_search import SemanticSearchCandidate
+from app.schemas.vector_neighbor import (
+    VectorNeighborCandidate,
+    VectorNeighborResponse,
+)
 
 
 class VectorStoreError(RuntimeError):
@@ -197,6 +201,132 @@ class VectorStoreService:
         except Exception as exception:
             self._raise_controlled("Qdrant Search 失败", exception)
 
+    def find_neighbors(
+        self,
+        inbox_item_id: int,
+        embedding_model: str,
+        limit: int,
+    ) -> VectorNeighborResponse:
+        """读取已有 Source Vector 并交给 Qdrant 检索，不把全部向量加载到 Python。"""
+
+        settings = self._settings_loader()
+        if not settings.enabled:
+            raise VectorStoreDisabledError("Vector Store 未启用")
+
+        client = self._client(settings)
+        try:
+            managed_collection_names = self._managed_collection_names(
+                client,
+                settings.collection_prefix,
+            )
+            collection_names = self._current_model_collection_names(
+                managed_collection_names,
+                settings.collection_prefix,
+                embedding_model,
+            )
+            if not collection_names:
+                if managed_collection_names:
+                    raise VectorStoreCompatibilityError(
+                        "当前 Embedding Model 与已有 Vector Index 不兼容"
+                    )
+                raise VectorStoreCollectionMissingError(
+                    "当前 Embedding 尚无 Vector Collection"
+                )
+
+            source_locations: list[tuple[str, list[float]]] = []
+            for collection_name in collection_names:
+                dimension = self._collection_dimension(collection_name)
+                self._validate_collection(client, collection_name, dimension)
+                points = client.retrieve(
+                    collection_name=collection_name,
+                    ids=[inbox_item_id],
+                    with_payload=True,
+                    with_vectors=True,
+                )
+                if not isinstance(points, list) or len(points) > 1:
+                    raise VectorStoreInvalidResponseError(
+                        "Qdrant Source Point 结果无效"
+                    )
+                if not points:
+                    continue
+
+                source = points[0]
+                if getattr(source, "id", None) != inbox_item_id:
+                    raise VectorStoreInvalidResponseError(
+                        "Qdrant Source Point ID 无效"
+                    )
+                payload = getattr(source, "payload", None)
+                if (
+                    not isinstance(payload, dict)
+                    or payload.get("embeddingModel") != embedding_model
+                ):
+                    raise VectorStoreCompatibilityError(
+                        "Source Point 与当前 Embedding Model 不兼容"
+                    )
+                vector = self._validate_source_vector(
+                    getattr(source, "vector", None),
+                    dimension,
+                )
+                source_locations.append((collection_name, vector))
+
+            if not source_locations:
+                return VectorNeighborResponse(sourceIndexed=False, results=[])
+            if len(source_locations) > 1:
+                # 同一模型若残留多个维度版本，无法在不重算向量时猜测当前空间。
+                raise VectorStoreCompatibilityError(
+                    "Source Point 同时存在于多个 Embedding 维度"
+                )
+
+            collection_name, source_vector = source_locations[0]
+            internal_fetch_limit = min(limit * 3, 100)
+            response = client.query_points(
+                collection_name=collection_name,
+                query=source_vector,
+                limit=internal_fetch_limit,
+                with_payload=False,
+                with_vectors=False,
+            )
+            points = getattr(response, "points", None)
+            if not isinstance(points, list):
+                raise VectorStoreInvalidResponseError("Qdrant Neighbor 结果无效")
+
+            candidates: list[VectorNeighborCandidate] = []
+            seen_ids: set[int] = set()
+            for point in points:
+                point_id = getattr(point, "id", None)
+                raw_score = getattr(point, "score", None)
+                if (
+                    isinstance(point_id, bool)
+                    or not isinstance(point_id, int)
+                    or point_id <= 0
+                    or isinstance(raw_score, bool)
+                    or not isinstance(raw_score, (int, float))
+                    or not math.isfinite(float(raw_score))
+                ):
+                    raise VectorStoreInvalidResponseError(
+                        "Qdrant Neighbor ID 或 Score 无效"
+                    )
+                if point_id == inbox_item_id:
+                    continue
+                if point_id in seen_ids:
+                    raise VectorStoreInvalidResponseError(
+                        "Qdrant Neighbor ID 重复"
+                    )
+                seen_ids.add(point_id)
+                candidates.append(
+                    VectorNeighborCandidate(
+                        inboxItemId=point_id,
+                        score=float(raw_score),
+                    )
+                )
+
+            candidates.sort(key=lambda candidate: (-candidate.score, candidate.inbox_item_id))
+            return VectorNeighborResponse(sourceIndexed=True, results=candidates)
+        except VectorStoreError:
+            raise
+        except Exception as exception:
+            self._raise_controlled("Qdrant Neighbor Search 失败", exception)
+
     @staticmethod
     def collection_name(prefix: str, model: str, dimension: int) -> str:
         """模型完整 SHA-256 与维度共同隔离向量空间，避免同维模型被静默混用。"""
@@ -274,6 +404,48 @@ class VectorStoreService:
             if pattern.fullmatch(collection_name) is not None:
                 names.append(collection_name)
         return names
+
+    def _current_model_collection_names(
+        self,
+        managed_collection_names: list[str],
+        prefix: str,
+        embedding_model: str,
+    ) -> list[str]:
+        model_hash = hashlib.sha256(embedding_model.encode("utf-8")).hexdigest()
+        expected_prefix = f"{prefix}__m_{model_hash}__d_"
+        return sorted(
+            name
+            for name in managed_collection_names
+            if name.startswith(expected_prefix)
+        )
+
+    @staticmethod
+    def _collection_dimension(collection_name: str) -> int:
+        dimension_text = collection_name.rsplit("__d_", maxsplit=1)[-1]
+        try:
+            dimension = int(dimension_text)
+        except ValueError as exception:
+            raise VectorStoreInvalidResponseError(
+                "Qdrant Collection 维度标识无效"
+            ) from exception
+        if dimension <= 0:
+            raise VectorStoreInvalidResponseError("Qdrant Collection 维度标识无效")
+        return dimension
+
+    @staticmethod
+    def _validate_source_vector(vector: Any, dimension: int) -> list[float]:
+        if (
+            not isinstance(vector, list)
+            or len(vector) != dimension
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                for value in vector
+            )
+        ):
+            raise VectorStoreInvalidResponseError("Qdrant Source Vector 无效")
+        return [float(value) for value in vector]
 
     @staticmethod
     def _managed_collection_pattern(prefix: str) -> re.Pattern[str]:

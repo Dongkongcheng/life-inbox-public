@@ -11,6 +11,7 @@ import com.lifeinbox.server.dto.AiRerankResponse;
 import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
 import com.lifeinbox.server.dto.AiVectorIndexResponse;
+import com.lifeinbox.server.dto.AiVectorNeighborResponse;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import com.lifeinbox.server.exception.FileAnalyzeException;
 import com.lifeinbox.server.exception.ImageAnalyzeException;
@@ -961,6 +962,72 @@ class AiServiceClientTests {
             );
             assertEquals("AI Semantic Search 服务暂不可用", unavailable.getMessage());
             assertEquals(false, unavailable.getMessage().contains("secret qdrant response"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void vectorNeighborsPostsSourceIdAndParsesSourceIndexedContract() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/vector/neighbors", exchange -> {
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = """
+                    {"sourceIndexed":true,"results":[
+                      {"inboxItemId":456,"score":0.91},
+                      {"inboxItemId":789,"score":0.84}
+                    ]}
+                    """.strip().getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiVectorNeighborResponse response = clientFor(server).findVectorNeighbors(123L, 20);
+
+            assertEquals(true, response.sourceIndexed());
+            assertEquals(List.of(456L, 789L), response.results().stream()
+                    .map(candidate -> candidate.inboxItemId())
+                    .toList());
+            assertEquals("{\"inboxItemId\":123,\"limit\":20}", requestBody.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void vectorNeighborsAcceptsMissingSourceButRejectsInconsistentResponse() throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        String[] responses = {
+                "{\"sourceIndexed\":false,\"results\":[]}",
+                "{\"sourceIndexed\":false,\"results\":[{\"inboxItemId\":456,\"score\":0.9}]}"
+        };
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/vector/neighbors", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = responses[requestIndex.getAndIncrement()]
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            assertEquals(false, client.findVectorNeighbors(123L, 20).sourceIndexed());
+            assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.findVectorNeighbors(123L, 20)
+            );
         } finally {
             server.stop(0);
         }

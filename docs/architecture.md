@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 1 / Overall Task 41
-— Relation Core Model & Persistence Foundation
+V0.5 Task 2 / Overall Task 42
+— Bounded Relation Candidate Discovery
 ```
 
-V0.5 当前只完成 Relation 持久化基础；Relation Discovery、产品 API、前端和自动处理尚未实现。
+V0.5 当前已完成 Relation 持久化基础和有界运行时候选发现；AI Relation Judgment、候选转正式 Relation、产品 API、前端和自动处理尚未实现。
 
 ---
 
@@ -1935,8 +1935,31 @@ Persistence Owner = Java + MySQL
 或 Relation processing state。创建服务按 Canonical ID 顺序锁住两个 InboxItem，使创建与 Archive/Delete
 拥有明确顺序；数据库唯一约束是并发重复的最终防线。
 
-Task 41 未实现 AI Relation Discovery、Related Items API、前端或自动发现，也没有修改 V0.3 Search Pipeline。
-出现关系数据仍不等于需要 Neo4j；只有真实出现复杂图遍历、图原生查询或图算法需求时才重新评估。
+Task 42 在这个持久化基础旁增加了独立的运行时候选流：
+
+```text
+ACTIVE Source InboxItem (MySQL)
+        ↓
+Existing Qdrant Point + stored vector
+        ↓
+Bounded nearest-neighbor search (no re-embedding)
+        ↓
+Candidate IDs + transient semantic score
+        ↓
+Java batch resolution through MySQL
+        ↓
+Filter self / missing / non-ACTIVE / existing RELATED_TO
+        ↓
+Final bounded RelationDiscoveryCandidate list
+```
+
+Qdrant 仍只是可重建候选基础设施，不是 InboxItem 或 Relation 的事实来源。请求 `limit` 为 `1..20`；Python 使用
+`min(limit * 3, 100)` 的内部有界 over-fetch，Java 完成权威过滤后再应用最终 limit。Source Point 不存在返回
+`sourceIndexed=false + results=[]`；Vector Store 关闭、Collection 缺失/不兼容、超时或不可用仍是受控基础设施错误。
+
+Task 42 不调用 LLM，不把 `semanticScore` 写入数据库，不创建或确认 `content_relation`，也不增加产品 API、前端、自动发现或
+Relation processing state。它没有修改 V0.3 Search Pipeline。出现关系数据仍不等于需要 Neo4j；只有真实出现复杂图遍历、
+图原生查询或图算法需求时才重新评估。
 
 ---
 
