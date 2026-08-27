@@ -36,7 +36,7 @@ Roadmap 只描述方向；未标记完成的内容不是当前产品能力。
 
 V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、安全高亮、统一可搜正文、Embedding、条目级 Vector Index 生命周期、独立 Semantic Search、RRF Hybrid Search、可选 Rerank 与最终验收。RAG、Agent 和 Action Extractor 不属于本版本完成范围。
 
-## V0.4 — Action Extractor（In Progress）
+## V0.4 — Action Extractor ✅
 
 - ✅ Task 1 / Overall Task 31 — FastAPI Action Extraction Foundation（准备文本 → 有界、已验证的 Action 建议；不持久化）
 - ✅ Task 2 / Overall Task 32 — Action Candidate Persistence & Java Integration（手动提取、Java 校验、MySQL PENDING Candidate 原子替换与查询）
@@ -47,8 +47,11 @@ V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、�
 - ✅ Task 7 / Overall Task 37 — Automatic Action Extraction（可用正文 AFTER_COMMIT 自动触发、独立状态、Attempt Guard、失败降级与终态精确去重）
 - ✅ Task 8 / Overall Task 38 — Todo List & Todo Lifecycle（OPEN/COMPLETED 列表、幂等完成/重开与前端 Todo 体验）
 - ✅ Task 9 / Overall Task 39 — Source Traceability & Integration（按需只读来源上下文、有界预览、缺失降级与 Todo UI）
+- ✅ Task 10 / Overall Task 40 — V0.4 Final Acceptance（全量测试、Fresh/增量 Schema 等价性、真实 Provider E2E、故障降级与文档对齐）
 - Todo 编辑、删除、手动创建与 Reminder 等后续能力尚未实现
 - Reminder / Action Item 后续能力仍为 Planned
+
+V0.4 已完成 Action Extraction、确定性日期归一化、Candidate 决策、Todo 生命周期与来源追溯，并通过最终回归验收。V0.5 仍为 Planned，本次未开始 Relations 实现。
 
 ## V0.5 — Relations（Planned）
 

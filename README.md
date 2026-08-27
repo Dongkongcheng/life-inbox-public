@@ -54,21 +54,21 @@ LifeInbox 并不首先把自己定位成传统“知识库”。
 
 # Current Status
 
-LifeInbox is currently under active development.
+LifeInbox is currently under active development. The latest completed release scope is V0.4; V0.5 has not started.
 
 ```text
 V0.1 — Universal Inbox        ✅ Completed
 V0.2 — AI Organizer           ✅ Completed
 V0.3 — Smart Search           ✅ Completed
-V0.4 — Action Extractor       🚧 In Progress
+V0.4 — Action Extractor       ✅ Completed
 V0.5 — Relations              📋 Planned
 V1.0 — Personal AI            📋 Planned
 ```
 
-Current development focus:
+Current maintenance baseline:
 
 ```text
-V0.4 — Action Extractor
+V0.4 — Action Extractor (release-ready baseline)
 ```
 
 V0.4 的目标是：
@@ -78,10 +78,11 @@ V0.4 的目标是：
 例如：
 
 ```text
-Todo
-Deadline
-Future Reminder Candidate
+TODO Action Candidate
+DEADLINE Action Candidate
 ```
+
+Reminder 仍是后续计划，不属于已完成的 V0.4 能力。
 
 但 AI 产生的建议不会直接成为最终业务事实。
 
@@ -767,17 +768,19 @@ Action Extractor 可以进一步识别出类似：
 ```json
 {
   "hasAction": true,
-  "actionType": "DEADLINE",
-  "title": "提交软件工程课程设计报告",
-  "deadline": "2026-08-25"
+  "actions": [
+    {
+      "actionType": "DEADLINE",
+      "title": "提交软件工程课程设计报告",
+      "deadlineText": "8月25日前",
+      "deadline": null,
+      "evidence": "8月25日前交报告"
+    }
+  ]
 }
 ```
 
-注意：
-
-这只是概念示例。
-
-最终 Schema 由实际 V0.4 Task 和当前仓库实现决定。
+该结构与当前 FastAPI Action Extraction 协议一致；缺失年份时保留 `deadlineText`，不猜测具体日期。
 
 ---
 
@@ -1641,7 +1644,7 @@ Retrieve
 
 ---
 
-## V0.4 — Action Extractor 🚧
+## V0.4 — Action Extractor ✅
 
 Goal:
 
@@ -1649,7 +1652,7 @@ Goal:
 Information can become actionable.
 ```
 
-当前计划逐步实现：
+当前已实现：
 
 ```text
 Structured Action Candidate
