@@ -49,16 +49,18 @@ V1.0  Personal AI       → Personal AI / Agent
 V0.1 — Universal Inbox       ✅ Completed
 V0.2 — AI Organizer          ✅ Completed
 V0.3 — Smart Search          ✅ Completed
-V0.4 — Action Extractor      🚧 Current
+V0.4 — Action Extractor      ✅ Completed
 V0.5 — Relations             📋 Planned
 V1.0 — Personal AI           📋 Planned
 ```
 
-当前开发重点：
+当前稳定架构基线：
 
 ```text
-V0.4 — Action Extractor
+V0.4 — Action Extractor (release-ready baseline)
 ```
+
+V0.5 仍为 Planned，尚未进入实现。
 
 ---
 
@@ -1455,9 +1457,9 @@ MCP
 
 ---
 
-# 28. V0.4 Action Extractor — Current Architecture Direction
+# 28. V0.4 Action Extractor — Implemented Architecture
 
-V0.4 当前目标：
+V0.4 已实现的主链路：
 
 ```text
 Information
@@ -1548,7 +1550,7 @@ OCR Pipeline
 
 而应该优先复用已经存在的内容准备结果。
 
-候选输入可能来自：
+当前候选输入来自：
 
 ```text
 TEXT
@@ -1564,13 +1566,13 @@ IMAGE
 → OCR text
 ```
 
-以及当前已有：
+其中 URL / FILE / IMAGE 复用已持久化的：
 
 ```text
 Searchable Content
 ```
 
-具体最终输入策略应由 V0.4 当前 Task 根据仓库真实实现确定。
+当前 Java 使用现有 `InboxSearchableContentService` 准备文本，可选合并标题后作有界截断；Action 链路不重复 Fetch、Parse 或 OCR。
 
 原则：
 
@@ -1607,20 +1609,20 @@ Structured Action Suggestion
 
 ```json
 {
-  "has_action": true,
-  "action_type": "deadline",
-  "title": "提交软件工程课程设计报告",
-  "deadline": "2026-08-25"
+  "hasAction": true,
+  "actions": [
+    {
+      "actionType": "DEADLINE",
+      "title": "提交软件工程课程设计报告",
+      "deadlineText": "8月25日前",
+      "deadline": null,
+      "evidence": "8月25日前交报告"
+    }
+  ]
 }
 ```
 
-注意：
-
-这只是概念 Schema。
-
-最终字段名由 V0.4 当前实现决定。
-
-不要因为本架构文档示例而强制数据库采用完全相同字段名。
+这是当前 Python 内部协议。`hasAction` 由应用根据 `actions` 计算；Python 只返回建议，Java 校验后才持久化 Candidate。
 
 ---
 

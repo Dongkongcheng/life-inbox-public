@@ -76,10 +76,10 @@ LifeInbox Business Data
 V0.1 — Universal Inbox        ✅ Completed
 V0.2 — AI Organizer           ✅ Completed
 V0.3 — Smart Search           ✅ Completed
-V0.4 — Action Extractor       🚧 Current
+V0.4 — Action Extractor       ✅ Completed
 ```
 
-V0.4 Task 35 后，MySQL 当前仍使用 7 张业务表：
+V0.4 Task 40 最终验收后，MySQL 使用 7 张业务表：
 
 ```text
 inbox_item
@@ -96,9 +96,9 @@ todo
 ```text
 Current Schema
 =
-V0.4 Current Schema
+V0.4 Final Schema
 =
-V0.3 Final Schema + action_candidate + todo
+V0.3 Final Schema + action_candidate + todo + InboxItem Action Processing State
 ```
 
 Task 35 的 Candidate Decision 使用现有两张表完成，没有新增 Schema。仍未实现的是：
@@ -969,7 +969,7 @@ V0.4 — Action Extractor
 当前数据库已经是：
 
 ```text
-V0.4 Current Schema
+V0.4 Final Schema
 =
 V0.3 Final Schema + action_candidate + todo + InboxItem Action Processing State
 ```
@@ -2011,7 +2011,7 @@ Fresh Schema
 
 # 51. V0.4 Fresh Schema
 
-V0.4 当前 Fresh Schema 已建立：
+V0.4 Final Fresh Schema 已建立：
 
 ```text
 docs/sql/v0.4-schema.sql
@@ -2022,7 +2022,7 @@ docs/sql/v0.4-schema.sql
 ```text
 Fresh Install
 →
-Current V0.4 Database State
+Final V0.4 Database State
 ```
 
 它等价于 `v0.3-schema.sql` 依次应用 Task 32、Task 34 与 Task 37 增量 Migration，且没有覆盖历史文件：
@@ -2139,7 +2139,7 @@ Not Yet Implemented
 
 # 55. 当前数据库总结
 
-截至 V0.4 Task 35：
+截至 V0.4 Task 40：
 
 ```text
 MySQL
@@ -2165,7 +2165,7 @@ agent_memory
 
 这些表。
 
-当前正在进入：
+当前已完成：
 
 ```text
 V0.4 — Action Extractor
