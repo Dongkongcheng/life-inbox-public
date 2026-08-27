@@ -14,6 +14,10 @@ from app.schemas.analyze import AnalyzeRequest, AnalyzeResult, PreparedContent
 from app.schemas.action import ActionExtractionRequest, ActionExtractionResult
 from app.schemas.embedding import EmbeddingRequest, EmbeddingResult
 from app.schemas.rerank import RerankRequest, RerankResponse
+from app.schemas.relation_discovery import (
+    RelationDiscoveryRequest,
+    RelationDiscoveryResponse,
+)
 from app.schemas.semantic_search import SemanticSearchRequest, SemanticSearchResponse
 from app.schemas.summary import SummaryRequest, SummaryResponse
 from app.schemas.url_analyze import UrlAnalyzeRequest
@@ -52,6 +56,7 @@ from app.services.rerank_client import (
     RerankTimeoutError,
 )
 from app.services.rerank_service import RerankService
+from app.services.relation_discovery_service import RelationDiscoveryService
 from app.services.summary_service import SummaryService
 from app.services.semantic_search_service import SemanticSearchService
 from app.services.url_analyze_service import UrlAnalyzeService
@@ -81,6 +86,7 @@ app = FastAPI(title="LifeInbox AI Engine")
 llm_client = LlmClient()
 analyze_service = AnalyzeService(llm_client)
 action_extractor_service = ActionExtractorService(llm_client)
+relation_discovery_service = RelationDiscoveryService(llm_client)
 summary_service = SummaryService(analyze_service)
 url_content_extractor = UrlContentExtractor()
 url_analyze_service = UrlAnalyzeService(url_content_extractor, analyze_service)
@@ -108,6 +114,12 @@ def get_action_extractor_service() -> ActionExtractorService:
     """Action Extraction 复用通用 LLM，但保持独立能力与测试替换点。"""
 
     return action_extractor_service
+
+
+def get_relation_discovery_service() -> RelationDiscoveryService:
+    """Relation Discovery 复用通用 LLM，但保持独立的严格协议边界。"""
+
+    return relation_discovery_service
 
 
 def get_summary_service() -> SummaryService:
@@ -437,6 +449,16 @@ def extract_actions(
     """内部只返回 Action 建议，不持久化、确认或修改 Todo 业务状态。"""
 
     return service.extract(request)
+
+
+@app.post("/relation/discover", response_model=RelationDiscoveryResponse)
+def discover_relations(
+    request: RelationDiscoveryRequest,
+    service: RelationDiscoveryService = Depends(get_relation_discovery_service),
+) -> RelationDiscoveryResponse:
+    """内部只返回运行时 RELATED_TO 建议，不持久化任何 Relation。"""
+
+    return service.discover(request)
 
 
 @app.post("/embedding", response_model=EmbeddingResult)

@@ -107,7 +107,7 @@ The fact that V0.5 is now the active stage does **not** mean every Relations cap
 
 Each Relation capability is implemented task by task.
 
-The first two V0.5 implementation tasks are complete:
+The first three V0.5 implementation tasks are complete:
 
 ```text
 V0.5 Task 1
@@ -121,10 +121,17 @@ V0.5 Task 2
 Overall Task 42
 
 Bounded Relation Candidate Discovery
+
+V0.5 Task 3
+=
+Overall Task 43
+
+AI Relation Discovery Foundation
 ```
 
-Task 42 can retrieve bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filter them through Java/MySQL. AI Relation
-judgment, candidate-to-Relation persistence, product APIs, frontend Related Items, and automatic processing are not implemented yet.
+Task 42 retrieves bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filters them through Java/MySQL. Task 43 sends
+only the bounded Source/Candidate text to one LLM call and returns strictly validated runtime `RELATED_TO` suggestions. Candidate-to-Relation
+persistence, product APIs, frontend Related Items, and automatic processing are not implemented yet.
 
 ---
 
@@ -1280,7 +1287,7 @@ Automatically Confirmed Relations
 
 ---
 
-# Implemented V0.5 Foundation and Bounded Candidates
+# Implemented V0.5 Foundation, Bounded Candidates, and AI Judgment
 
 Task 41 established this concrete first-version contract:
 
@@ -1325,6 +1332,12 @@ The Source Vector is reused without another Embedding call. Qdrant over-fetch is
 limit after business filtering. Source Point missing is a normal `sourceIndexed=false` result, while Qdrant availability, Collection, model,
 dimension, and timeout failures remain controlled infrastructure errors. Candidates and `semanticScore` are not persisted, and no formal
 Relation is created by this flow.
+
+Task 43 consumes that bounded list without sending `semanticScore` to the LLM. Java rechecks ACTIVE state and existing relations, builds
+text only from title, summary, and already available content, and applies limits of 4,000 characters for the Source, 1,000 per Candidate,
+and 20 Candidates. Python evaluates the complete batch in one call with a precision-first Prompt and returns only
+`relatedTargetInboxItemIds`. Unknown, duplicate, Source, or out-of-set IDs invalidate the whole output. The validated result remains a
+runtime `RELATED_TO` suggestion: Task 43 does not call `ensureRelatedTo` or write `content_relation`.
 
 ---
 
@@ -1440,6 +1453,9 @@ Recent Relevant Items
 Task 42 now implements the first candidate strategy: semantic nearest neighbors from the Source InboxItem's existing Qdrant Point Vector.
 The requested limit is `1..20`; Python performs bounded over-fetch, and Java batch-resolves MySQL before final filtering. Other candidate
 signals remain future task scope.
+
+Task 43 implements the next bounded step: one LLM call judges the Source against those candidates. It does not perform all-pairs analysis,
+does not receive the Qdrant score, and does not persist its runtime suggestions.
 
 Existing retrieval infrastructure such as Qdrant may be reused when justified.
 
@@ -1559,7 +1575,7 @@ AI Output
 Authoritative Business State
 ```
 
-AI Relation output must be validated.
+Task 43 validates every AI Relation output as untrusted data.
 
 Where applicable this may include:
 
@@ -1572,8 +1588,6 @@ source != target
 
 supported Relation Type
 
-valid score if score exists
-
 bounded result count
 
 duplicate handling
@@ -1585,7 +1599,8 @@ current InboxItem existence
 deleted / archived state
 ```
 
-The exact validation rules depend on the concrete V0.5 Contract.
+The current output contains only `relatedTargetInboxItemIds`; any unknown, duplicate, Source, non-positive, or out-of-bounds ID invalidates
+the whole response. It contains no Relation score, confidence, reason, or evidence.
 
 The important principle is:
 
@@ -2524,10 +2539,13 @@ Completed:
 
 ✅ V0.5 Task 2 / Overall Task 42
 — Bounded Relation Candidate Discovery
+
+✅ V0.5 Task 3 / Overall Task 43
+— AI Relation Discovery Foundation
 ```
 
-AI Relation Discovery, candidate-to-Relation persistence, product APIs, frontend Related Items, automatic discovery,
-rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
+Candidate-to-Relation persistence, product APIs, frontend Related Items, automatic discovery, rediscovery/hardening, and final V0.5
+acceptance remain unimplemented future work.
 
 ---
 
@@ -3127,7 +3145,7 @@ Current intentional scope limitations include:
 * Calendar integration is not currently implemented.
 * Todo source traceability depends on available source data; deleted source content is not reconstructed from a snapshot.
 * Browser Extension Capture remains postponed.
-* V0.5 Relations is now the active development stage; Task 1 Relation persistence and Task 2 bounded runtime candidate discovery are implemented, while AI Relation judgment, candidate persistence, APIs, UI, automatic processing, and rediscovery are not.
+* V0.5 Relations is now the active development stage; Task 1 Relation persistence, Task 2 bounded runtime candidates, and Task 3 bounded AI Relation judgment are implemented, while candidate persistence, APIs, UI, automatic processing, and rediscovery are not.
 * `content_relation` exists in the V0.5 Task 1 migration and fresh schema; existing V0.4 databases must apply the incremental migration.
 * The first version intentionally has no `relation_candidate` model.
 * The first version intentionally persists no Relation score; Task 42's `semanticScore` is a runtime-only Qdrant ranking signal, not Relation truth.
@@ -3383,11 +3401,15 @@ Overall Task 41
 V0.5 Task 2
 =
 Overall Task 42
+
+V0.5 Task 3
+=
+Overall Task 43
 ```
 
 Task 41 established the first concrete Relation Contract and persistence foundation. Task 42 added bounded semantic neighbor candidates
-without converting them into business Relation state. AI Relation judgment, persistence integration, API, frontend, automatic processing,
-and hardening remain separate tasks.
+without converting them into business Relation state. Task 43 added one bounded, strict AI judgment step and still does not convert a
+suggestion into business Relation state. Persistence integration, API, frontend, automatic processing, and hardening remain separate tasks.
 
 ---
 

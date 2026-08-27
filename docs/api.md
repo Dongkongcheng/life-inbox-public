@@ -550,6 +550,38 @@ Source Point 尚未索引是正常状态：
 受控 Vector 错误协议。该接口只产生运行时候选，不执行 AI Relation Judgment、不写 `content_relation`，也不是浏览器
 可调用的产品 Relation API。
 
+### Relation Discovery 内部协议
+
+`POST /relation/discover` 只供 Java 的 Task 43 `RelationDiscoveryService` 调用。Java 先复用 Task 42 候选，再按 MySQL
+当前状态重新过滤非 ACTIVE、已删除和已经建立 `RELATED_TO` 的条目，最后发送一次有界批量请求：
+
+```json
+{
+  "source": {"inboxItemId": 123, "text": "标题：Spring 事务\n正文：事务失效排查"},
+  "candidates": [
+    {"inboxItemId": 456, "text": "标题：代理调用\n正文：同类问题记录"},
+    {"inboxItemId": 789, "text": "标题：Redis\n正文：缓存笔记"}
+  ]
+}
+```
+
+Source 文本最多 4,000 个字符，每个 Candidate 最多 1,000 个字符，Candidate 最多 20 条，因此正文总量最多约 24,000
+字符。文本只来自 title、summary 与既有可用正文：TEXT 使用 `content`，URL/FILE/IMAGE 使用 `searchable_content`；不会重新
+抓取 URL、解析文件、执行 OCR 或 Embedding。Task 42 的 `semanticScore` 不进入此请求。
+
+成功响应必须且只能包含：
+
+```json
+{"relatedTargetInboxItemIds": [456]}
+```
+
+`[]` 是“没有足够明确关系”的正常成功结果，空 Candidate 请求也直接返回空列表且不调用 LLM。返回 ID 必须为正整数、唯一、
+不等于 Source、数量有界且全部来自本次 Candidates；未知、重复、Source ID、多余字段或畸形 JSON 会使整次结果无效，而不是
+静默删除非法项。Provider 未配置/不可用返回 503，超时返回 504，非法结构化结果返回 502，响应不会泄露 Prompt、正文、密钥
+或 Provider 原始内容。
+
+该接口只产生运行时 `RELATED_TO` 建议，不写 `content_relation`，不是产品 API，也不代表用户已确认 Relation。
+
 ### Rerank 内部协议
 
 `POST /rerank` 只接收 Java 已完成业务过滤与 RRF 融合的有限候选：

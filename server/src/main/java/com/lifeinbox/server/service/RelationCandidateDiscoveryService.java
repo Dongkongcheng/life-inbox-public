@@ -29,8 +29,7 @@ import java.util.Set;
 public class RelationCandidateDiscoveryService {
 
     private static final String STATUS_ACTIVE = "ACTIVE";
-    private static final int DEFAULT_CANDIDATE_LIMIT = 20;
-    private static final int MAX_CANDIDATE_LIMIT = 20;
+    private static final int DEFAULT_CANDIDATE_LIMIT = RelationDiscoveryLimits.MAX_CANDIDATES;
 
     private final InboxItemMapper inboxItemMapper;
     private final ContentRelationService contentRelationService;
@@ -212,7 +211,7 @@ public class RelationCandidateDiscoveryService {
         if (limit == null) {
             return DEFAULT_CANDIDATE_LIMIT;
         }
-        if (limit < 1 || limit > MAX_CANDIDATE_LIMIT) {
+        if (limit < 1 || limit > RelationDiscoveryLimits.MAX_CANDIDATES) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "Relation Candidate limit 必须在 1 到 20 之间"

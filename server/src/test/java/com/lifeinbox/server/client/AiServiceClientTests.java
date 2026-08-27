@@ -6,6 +6,8 @@ import com.lifeinbox.server.dto.AiEntityResponse;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiHealthResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
+import com.lifeinbox.server.dto.AiRelationDiscoveryItem;
+import com.lifeinbox.server.dto.AiRelationDiscoveryResponse;
 import com.lifeinbox.server.dto.AiRerankDocument;
 import com.lifeinbox.server.dto.AiRerankResponse;
 import com.lifeinbox.server.dto.AiSemanticSearchResponse;
@@ -1028,6 +1030,105 @@ class AiServiceClientTests {
                     AiServiceUnavailableException.class,
                     () -> client.findVectorNeighbors(123L, 20)
             );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void relationDiscoveryPostsOneBatchWithoutSemanticScoreAndAcceptsEmptyResult()
+            throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        AtomicInteger requestCount = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/relation/discover", exchange -> {
+            requestCount.incrementAndGet();
+            requestBody.set(new String(
+                    exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8
+            ));
+            byte[] body = "{\"relatedTargetInboxItemIds\":[]}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiRelationDiscoveryResponse response = clientFor(server).discoverRelations(
+                    new AiRelationDiscoveryItem(123L, "标题：Source"),
+                    List.of(
+                            new AiRelationDiscoveryItem(456L, "标题：候选一"),
+                            new AiRelationDiscoveryItem(789L, "标题：候选二")
+                    )
+            );
+
+            assertEquals(List.of(), response.relatedTargetInboxItemIds());
+            assertEquals(1, requestCount.get());
+            assertEquals(
+                    "{\"source\":{\"inboxItemId\":123,\"text\":\"标题：Source\"},"
+                            + "\"candidates\":["
+                            + "{\"inboxItemId\":456,\"text\":\"标题：候选一\"},"
+                            + "{\"inboxItemId\":789,\"text\":\"标题：候选二\"}]}",
+                    requestBody.get()
+            );
+            assertEquals(false, requestBody.get().contains("semanticScore"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void relationDiscoveryRejectsUnknownDuplicateSourceAndUpstreamFailure()
+            throws IOException {
+        AtomicInteger requestIndex = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/relation/discover", exchange -> {
+            int index = requestIndex.getAndIncrement();
+            exchange.getRequestBody().readAllBytes();
+            String responseBody = switch (index) {
+                case 0 -> "{\"relatedTargetInboxItemIds\":[999]}";
+                case 1 -> "{\"relatedTargetInboxItemIds\":[456,456]}";
+                case 2 -> "{\"relatedTargetInboxItemIds\":[123]}";
+                default -> "{\"detail\":\"secret provider response\"}";
+            };
+            int status = index < 3 ? 200 : 503;
+            byte[] body = responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            AiServiceClient client = clientFor(server);
+            AiRelationDiscoveryItem source = new AiRelationDiscoveryItem(123L, "Source");
+            List<AiRelationDiscoveryItem> candidates = List.of(
+                    new AiRelationDiscoveryItem(456L, "Candidate")
+            );
+
+            for (int index = 0; index < 3; index++) {
+                AiServiceUnavailableException invalid = assertThrows(
+                        AiServiceUnavailableException.class,
+                        () -> client.discoverRelations(source, candidates)
+                );
+                assertEquals(
+                        "AI 服务返回了无效的 Relation Discovery 结果",
+                        invalid.getMessage()
+                );
+            }
+            AiServiceUnavailableException unavailable = assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> client.discoverRelations(source, candidates)
+            );
+            assertEquals(
+                    "AI Relation Discovery 服务暂不可用",
+                    unavailable.getMessage()
+            );
+            assertEquals(false, unavailable.getMessage().contains("secret provider response"));
         } finally {
             server.stop(0);
         }
