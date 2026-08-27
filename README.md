@@ -107,7 +107,7 @@ The fact that V0.5 is now the active stage does **not** mean every Relations cap
 
 Each Relation capability is implemented task by task.
 
-The first V0.5 implementation task is complete:
+The first two V0.5 implementation tasks are complete:
 
 ```text
 V0.5 Task 1
@@ -115,9 +115,16 @@ V0.5 Task 1
 Overall Task 41
 
 Relation Core Model & Persistence Foundation
+
+V0.5 Task 2
+=
+Overall Task 42
+
+Bounded Relation Candidate Discovery
 ```
 
-Relation Discovery, product APIs, frontend Related Items, and automatic processing are not implemented yet.
+Task 42 can retrieve bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filter them through Java/MySQL. AI Relation
+judgment, candidate-to-Relation persistence, product APIs, frontend Related Items, and automatic processing are not implemented yet.
 
 ---
 
@@ -1273,7 +1280,7 @@ Automatically Confirmed Relations
 
 ---
 
-# Implemented V0.5 Foundation
+# Implemented V0.5 Foundation and Bounded Candidates
 
 Task 41 established this concrete first-version contract:
 
@@ -1294,8 +1301,30 @@ The implementation provides a Java internal service for idempotent `ensureRelate
 the requested InboxItem is on either canonical side. Endpoint rows are locked in canonical ID order during creation so Archive/Delete and
 concurrent reverse-pair writes have deterministic database ordering.
 
-Task 41 intentionally contains no `RelationCandidate`, persisted score, evidence/reason, provider metadata, or Relation processing state.
-It also contains no AI discovery, REST API, frontend, or automatic trigger.
+Task 41 intentionally contains no persisted `RelationCandidate`, score, evidence/reason, provider metadata, or Relation processing state.
+
+Task 42 adds a separate runtime-only candidate flow:
+
+```text
+ACTIVE Source InboxItem
+        ↓
+Existing Qdrant Point Vector
+        ↓
+Bounded nearest-neighbor search
+        ↓
+Candidate IDs + transient semanticScore
+        ↓
+Java/MySQL ACTIVE resolution
+        ↓
+Filter self / stale / archived / already RELATED_TO
+        ↓
+Final candidates (limit <= 20)
+```
+
+The Source Vector is reused without another Embedding call. Qdrant over-fetch is bounded by `min(limit * 3, 100)`; Java applies the final
+limit after business filtering. Source Point missing is a normal `sourceIndexed=false` result, while Qdrant availability, Collection, model,
+dimension, and timeout failures remain controlled infrastructure errors. Candidates and `semanticScore` are not persisted, and no formal
+Relation is created by this flow.
 
 ---
 
@@ -1408,7 +1437,9 @@ Search Signals
 Recent Relevant Items
 ```
 
-but the exact candidate strategy belongs to the corresponding V0.5 task.
+Task 42 now implements the first candidate strategy: semantic nearest neighbors from the Source InboxItem's existing Qdrant Point Vector.
+The requested limit is `1..20`; Python performs bounded over-fetch, and Java batch-resolves MySQL before final filtering. Other candidate
+signals remain future task scope.
 
 Existing retrieval infrastructure such as Qdrant may be reused when justified.
 
@@ -2466,7 +2497,7 @@ Archive preserves Relation
 
 Delete cascades Relation
 
-No RelationCandidate / score / evidence
+No persisted RelationCandidate / Relation score / evidence
 ```
 
 V0.5 does not automatically imply:
@@ -2490,10 +2521,13 @@ Completed:
 ```text
 ✅ V0.5 Task 1 / Overall Task 41
 — Relation Core Model & Persistence Foundation
+
+✅ V0.5 Task 2 / Overall Task 42
+— Bounded Relation Candidate Discovery
 ```
 
-Relation Candidate Discovery, AI Relation Discovery, product APIs, frontend Related Items, automatic discovery, rediscovery/hardening,
-and final V0.5 acceptance remain unimplemented future work.
+AI Relation Discovery, candidate-to-Relation persistence, product APIs, frontend Related Items, automatic discovery,
+rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
 
 ---
 
@@ -3093,10 +3127,10 @@ Current intentional scope limitations include:
 * Calendar integration is not currently implemented.
 * Todo source traceability depends on available source data; deleted source content is not reconstructed from a snapshot.
 * Browser Extension Capture remains postponed.
-* V0.5 Relations is now the active development stage; Task 1 Relation persistence is implemented, while discovery, APIs, UI, automatic processing, and rediscovery are not.
+* V0.5 Relations is now the active development stage; Task 1 Relation persistence and Task 2 bounded runtime candidate discovery are implemented, while AI Relation judgment, candidate persistence, APIs, UI, automatic processing, and rediscovery are not.
 * `content_relation` exists in the V0.5 Task 1 migration and fresh schema; existing V0.4 databases must apply the incremental migration.
 * The first version intentionally has no `relation_candidate` model.
-* The first version intentionally persists no Relation score; score semantics remain undefined.
+* The first version intentionally persists no Relation score; Task 42's `semanticScore` is a runtime-only Qdrant ranking signal, not Relation truth.
 * Personal RAG is not implemented.
 * Personal Agent functionality is not implemented.
 * GraphRAG and Knowledge Graph infrastructure are not implemented.
@@ -3345,10 +3379,15 @@ Completed task:
 V0.5 Task 1
 =
 Overall Task 41
+
+V0.5 Task 2
+=
+Overall Task 42
 ```
 
-Task 41 established the first concrete Relation Contract and foundation without trying to implement the entire V0.5 version at once.
-Later discovery, API, frontend, automatic processing, and hardening remain separate tasks.
+Task 41 established the first concrete Relation Contract and persistence foundation. Task 42 added bounded semantic neighbor candidates
+without converting them into business Relation state. AI Relation judgment, persistence integration, API, frontend, automatic processing,
+and hardening remain separate tasks.
 
 ---
 

@@ -22,6 +22,7 @@ from app.schemas.vector_index import (
     VectorIndexRequest,
     VectorIndexResult,
 )
+from app.schemas.vector_neighbor import VectorNeighborRequest, VectorNeighborResponse
 from app.services.analyze_service import AnalyzeService
 from app.services.action_extractor_service import ActionExtractorService
 from app.services.document_text_extractor import (
@@ -56,6 +57,7 @@ from app.services.semantic_search_service import SemanticSearchService
 from app.services.url_analyze_service import UrlAnalyzeService
 from app.services.url_content_extractor import UrlContentError, UrlContentExtractor
 from app.services.vector_index_service import VectorIndexService
+from app.services.vector_neighbor_service import VectorNeighborService
 from app.services.vector_store_service import (
     VectorStoreCollectionMissingError,
     VectorStoreCompatibilityError,
@@ -91,6 +93,7 @@ embedding_service = EmbeddingService(embedding_client)
 vector_store_service = VectorStoreService()
 vector_index_service = VectorIndexService(embedding_service, vector_store_service)
 semantic_search_service = SemanticSearchService(embedding_service, vector_store_service)
+vector_neighbor_service = VectorNeighborService(vector_store_service)
 rerank_client = RerankClient()
 rerank_service = RerankService(rerank_client)
 
@@ -147,6 +150,12 @@ def get_semantic_search_service() -> SemanticSearchService:
     """Query Embedding 与文档索引复用同一模型配置和 Vector Store。"""
 
     return semantic_search_service
+
+
+def get_vector_neighbor_service() -> VectorNeighborService:
+    """Neighbor Discovery 只读取已有 Point Vector，不依赖一次新的 Embedding 调用。"""
+
+    return vector_neighbor_service
 
 
 def get_rerank_service() -> RerankService:
@@ -468,6 +477,16 @@ def search_vector(
     """内部只返回 Qdrant 候选；ACTIVE 与业务过滤必须由 Java/MySQL 最终确认。"""
 
     return service.search(request)
+
+
+@app.post("/vector/neighbors", response_model=VectorNeighborResponse)
+def find_vector_neighbors(
+    request: VectorNeighborRequest,
+    service: VectorNeighborService = Depends(get_vector_neighbor_service),
+) -> VectorNeighborResponse:
+    """返回有界向量邻居；不判断、持久化或确认正式 Relation。"""
+
+    return service.find_neighbors(request)
 
 
 @app.post("/rerank", response_model=RerankResponse)

@@ -1,6 +1,6 @@
 # LifeInbox AI Engine
 
-AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，为 V0.3 提供 Embedding Generation、Qdrant Vector Index、Semantic Candidate Retrieval 与可选 Rerank，并在 V0.4 Task 31 提供独立的 Action Extraction 能力。Python 不连接 MySQL；InboxItem、Searchable Content、Action/Todo 业务状态、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
+AI Engine 为 TEXT、URL、FILE、IMAGE 提供统一 Analyze，为 V0.3 提供 Embedding Generation、Qdrant Vector Index、Semantic Candidate Retrieval 与可选 Rerank，在 V0.4 Task 31 提供独立 Action Extraction，并在 V0.5 Task 42 复用已有 Source Point Vector 提供有界 Neighbor Candidate。Python 不连接 MySQL；InboxItem、Searchable Content、Action/Todo/Relation 业务状态、文件和业务生命周期仍由 Java/MySQL 管理，Qdrant 只是可以重建的派生检索索引。
 
 ## 安装依赖
 
@@ -354,6 +354,28 @@ Invoke-RestMethod -Method Post `
 - 本地若设置了 HTTP(S) 代理，应保留 `NO_PROXY=127.0.0.1,localhost`，否则 Python Client 可能无法访问已启动的 Qdrant；
 - 没有 Startup Backfill、Batch Reindex 或 Chunk；Hybrid Fusion 与 Rerank 降级由 Java 协调，Python 不增加
   反向调用 Java 的 Product Search API。
+
+## Vector Neighbor 候选
+
+`POST /vector/neighbors` 是 Java → Python 的 Task 42 内部能力：
+
+```json
+{"inboxItemId": 123, "limit": 20}
+```
+
+服务根据当前 `LIFEINBOX_EMBEDDING_MODEL` 定位现有模型/维度 Collection，使用 Point ID 读取已经保存的 Source
+Vector，再调用 Qdrant `query_points`。它不会调用 Embedding Provider，不创建 Relation 专属 Collection，也不会加载
+全部向量到 Python 计算。请求 limit 默认 20、最大 20；内部 over-fetch 为 `min(limit * 3, 100)`，Source 自身会被过滤。
+
+Source 已索引时只返回邻居 ID 和瞬时 Score：
+
+```json
+{"sourceIndexed": true, "results": [{"inboxItemId": 456, "score": 0.91}]}
+```
+
+Source Point 不存在时返回正常结果 `{"sourceIndexed": false, "results": []}`，不会自动 Re-index。Vector Store
+关闭、Collection 缺失/不兼容、超时或不可用继续按现有 Vector 错误模型返回受控错误。Python 不读取 MySQL，不判断
+`RELATED_TO`，不持久化 Candidate 或 Score；Java 负责 ACTIVE、stale Point 与已有 Relation 的最终过滤。
 
 ## Rerank 候选
 

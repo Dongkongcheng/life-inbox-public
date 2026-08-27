@@ -1829,7 +1829,9 @@ InboxItem 查询关系。
 两个外键的 `ON DELETE CASCADE` 清理失去意义的 Relation。这个生命周期与使用 `SET NULL` 保留独立 Todo 的规则不同。
 
 当前没有 `relation_candidate`，也不持久化 score、reason/evidence、origin/provider metadata 或 Relation processing state。
-AI Discovery、产品 API、前端和自动处理仍未实现。
+Task 42 的 `RelationDiscoveryCandidate` 只存在于一次 Java 调用的内存中，`semanticScore` 也是 Qdrant 返回的瞬时排序信号；
+候选发现不会 INSERT `content_relation`。因此 Task 42 没有数据库结构变化，也没有新增 Migration。AI Relation Judgment、
+候选转正式 Relation、产品 API、前端和自动处理仍未实现。
 
 ---
 
@@ -2175,7 +2177,7 @@ Not Yet Implemented
 
 # 57. 当前数据库总结
 
-截至 V0.5 Task 1 / Overall Task 41：
+截至 V0.5 Task 2 / Overall Task 42（数据库结构仍与 Task 41 相同）：
 
 ```text
 MySQL
@@ -2206,6 +2208,7 @@ agent_memory
 
 ```text
 V0.5 Task 1 — Relation Core Model & Persistence Foundation
+V0.5 Task 2 — Bounded Relation Candidate Discovery (runtime only, no schema change)
 ```
 
 当前已形成两个不同生命周期的数据方向：

@@ -64,11 +64,17 @@ class EmbeddingSettings:
     timeout_seconds: float
 
     @classmethod
+    def model_from_environment(cls) -> str:
+        """只解析当前模型标识，供已有向量定位使用，不要求调用 Embedding Provider。"""
+
+        return _required_embedding_environment_value("LIFEINBOX_EMBEDDING_MODEL")
+
+    @classmethod
     def from_environment(cls) -> "EmbeddingSettings":
         """Embedding Model 独立配置，Provider 地址、密钥和超时复用现有 AI 配置。"""
 
         api_key = _required_embedding_environment_value("LIFEINBOX_LLM_API_KEY")
-        model = _required_embedding_environment_value("LIFEINBOX_EMBEDDING_MODEL")
+        model = cls.model_from_environment()
         base_url = _required_embedding_environment_value(
             "LIFEINBOX_LLM_BASE_URL"
         ).rstrip("/")

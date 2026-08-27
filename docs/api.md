@@ -367,6 +367,7 @@ FastAPI、LLM 或 Qdrant。当前没有 Todo Edit、Delete、Manual Create、Rem
 | POST | `/vector/index` | JSON `{inboxItemId, text}` | 生成 Embedding 并按稳定 Point ID Upsert 到 Qdrant |
 | DELETE | `/vector/index/{inboxItemId}` | 路径 ID | 幂等删除该 Collection 前缀下的受管 Point |
 | POST | `/vector/search` | JSON `{query, limit?}` | Query Embedding + Qdrant Top K，返回 `{inboxItemId, score}` 候选 |
+| POST | `/vector/neighbors` | JSON `{inboxItemId, limit?}` | 复用已有 Source Point Vector，返回有界邻居 ID/Score |
 | POST | `/rerank` | JSON `{query, documents, topK}` | 一次批量重排已有 Candidate，返回 `{id, score}` 排名 |
 | POST | `/prepare/url` | JSON `{title?, url}` | `{title?, text}`；只复用安全网页提取，不调用 LLM |
 | POST | `/prepare/file` | multipart `file`, `title?` | `{title?, text}`；只复用文档提取，不调用 LLM |
@@ -511,6 +512,43 @@ Delete。Point 生命周期故障不会修改业务状态或破坏默认 Keyword
 
 Vector Store 关闭返回 503，Collection 不存在返回 404，模型/维度/距离不兼容返回 409，Qdrant 超时返回 504，
 其他安全封装的服务故障返回 502/503。Java 不向产品调用方透传 Python、Provider 或 Qdrant 的内部响应。
+
+### Vector Neighbor 内部协议
+
+`POST /vector/neighbors` 只供 Java 的 Task 42 Relation Candidate Discovery 调用。它接收已存在的 Source InboxItem ID：
+
+```json
+{"inboxItemId": 123, "limit": 20}
+```
+
+`inboxItemId` 必须为正整数；`limit` 默认 20、范围 `1..20`。服务根据当前 Embedding Model 定位已有模型/维度
+Collection，读取 Source Point 保存的 Vector，再交给 Qdrant 执行近邻搜索。它不会把 Source 正文塞入
+`/vector/search`，不会调用 Embedding Provider，也不会创建 Relation 专属 Collection。
+
+成功且 Source 已索引时返回 ID 与瞬时相似度：
+
+```json
+{
+  "sourceIndexed": true,
+  "results": [
+    {"inboxItemId": 456, "score": 0.91},
+    {"inboxItemId": 789, "score": 0.84}
+  ]
+}
+```
+
+Python 使用 `min(limit * 3, 100)` 作为内部 over-fetch 上限并过滤 Source 自身；Java 还会批量回查 MySQL，过滤
+失效/删除、非 ACTIVE、self 和已存在 `RELATED_TO` 的条目，再应用最终 limit。响应不含正文、Payload 或完整 Vector。
+
+Source Point 尚未索引是正常状态：
+
+```json
+{"sourceIndexed": false, "results": []}
+```
+
+这不等于基础设施故障。Vector Store 关闭、Collection 缺失、模型/维度不兼容、Qdrant 超时或不可用继续使用现有
+受控 Vector 错误协议。该接口只产生运行时候选，不执行 AI Relation Judgment、不写 `content_relation`，也不是浏览器
+可调用的产品 Relation API。
 
 ### Rerank 内部协议
 
