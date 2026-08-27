@@ -46,6 +46,8 @@ Qdrant 负责向量检索，但同样不是业务数据库。
            ▼                 ▼                 ▼
        InboxItem         AI Result      Action Candidate
            │
+           ├────────────── content_relation
+           │
            ▼
     Searchable Content
            │
@@ -77,9 +79,10 @@ V0.1 — Universal Inbox        ✅ Completed
 V0.2 — AI Organizer           ✅ Completed
 V0.3 — Smart Search           ✅ Completed
 V0.4 — Action Extractor       ✅ Completed
+V0.5 — Relations              🚧 Current
 ```
 
-V0.4 Task 40 最终验收后，MySQL 使用 7 张业务表：
+V0.5 Task 1 / Overall Task 41 后，MySQL 使用 8 张业务表：
 
 ```text
 inbox_item
@@ -89,6 +92,7 @@ inbox_keyword
 inbox_entity
 action_candidate
 todo
+content_relation
 ```
 
 因此当前必须明确区分：
@@ -96,9 +100,9 @@ todo
 ```text
 Current Schema
 =
-V0.4 Final Schema
+V0.5 Task 1 Schema
 =
-V0.3 Final Schema + action_candidate + todo + InboxItem Action Processing State
+V0.4 Final Schema + content_relation
 ```
 
 Task 35 的 Candidate Decision 使用现有两张表完成，没有新增 Schema。仍未实现的是：
@@ -116,15 +120,13 @@ Planned / Not Yet Implemented
 当前主要关系：
 
 ```text
-                        inbox_item
-                            │
-             ┌──────────────┼──────────────┬─────────────────┬──────────────┐
-             │              │              │                 │              │
-             ▼              ▼              ▼                 ▼              ▼
-         inbox_tag     inbox_keyword   inbox_entity   action_candidate     todo
-             │
-             ▼
-            tag
+inbox_item
+├── inbox_tag ── tag
+├── inbox_keyword
+├── inbox_entity
+├── action_candidate
+├── todo              (optional source reference)
+└── content_relation  (left/right endpoints both reference inbox_item)
 ```
 
 `todo` 的两个 Source 外键均可为空；它可以追溯 InboxItem / ActionCandidate，但来源删除时只清空引用，
@@ -1800,34 +1802,34 @@ sync_status
 
 ---
 
-# 44. Relations 暂不进入当前 Schema
+# 44. `content_relation` 当前结构
 
-V0.5 计划中的：
+V0.5 Task 1 已实现第一版 InboxItem Relation：
 
-```text
-content_relation
-```
+| 字段 | 类型 | 约束 / 语义 |
+| --- | --- | --- |
+| `id` | `BIGINT` | 自增主键 |
+| `left_inbox_item_id` | `BIGINT` | 非空，指向 `inbox_item.id` |
+| `right_inbox_item_id` | `BIGINT` | 非空，指向 `inbox_item.id` |
+| `relation_type` | `VARCHAR(32)` | 非空，第一版只允许 `RELATED_TO` |
+| `created_time` | `DATETIME` | 创建时间 |
+| `updated_time` | `DATETIME` | 更新时间 |
 
-目前仍属于：
-
-```text
-PLANNED
-```
-
-不是当前 Schema。
-
-未来可以优先从简单 MySQL 模型开始，例如概念：
+`RELATED_TO` 是对称关系。Java 所有写路径先规范化：
 
 ```text
-content_relation
-────────────────
-source_id
-target_id
-relation_type
-score
+left_inbox_item_id < right_inbox_item_id
 ```
 
-但不要为了 Roadmap 提前建表。
+因此 `A-B` 与 `B-A` 使用同一个 Canonical Pair；自关系由 Service 拒绝。数据库使用
+`UNIQUE(left_inbox_item_id, right_inbox_item_id, relation_type)` 作为并发重复的最终防线，左右端点索引支持按任一
+InboxItem 查询关系。
+
+新建关系要求两个端点当前都存在且为 `ACTIVE`。Archive 只改变 InboxItem 状态，不删除已有 Relation；真正删除任一端点时，
+两个外键的 `ON DELETE CASCADE` 清理失去意义的 Relation。这个生命周期与使用 `SET NULL` 保留独立 Todo 的规则不同。
+
+当前没有 `relation_candidate`，也不持久化 score、reason/evidence、origin/provider metadata 或 Relation processing state。
+AI Discovery、产品 API、前端和自动处理仍未实现。
 
 ---
 
@@ -1908,9 +1910,11 @@ Qdrant
 inbox_tag
 inbox_keyword
 inbox_entity
+content_relation
 ```
 
-可以继续按照现有合理 Foreign Key 规则清理。
+可以继续按照现有合理 Foreign Key 规则清理。`content_relation` 完全依赖两个 InboxItem 端点，删除任一端点均使用
+`ON DELETE CASCADE`；Archive 不是删除，不触发级联。
 
 但是未来：
 
@@ -2052,7 +2056,31 @@ Deadline 第一版继续使用 `todo.due_date`，Reminder 仍未建表。
 
 ---
 
-# 53. SQL 使用原则
+# 53. V0.5 Fresh Schema
+
+当前全新安装 Schema：
+
+```text
+docs/sql/v0.5-schema.sql
+```
+
+它保持 V0.4 全部表结构不变，并增加与 Task 1 增量 Migration 完全一致的 `content_relation`。
+
+---
+
+# 54. V0.5 Incremental Migration
+
+已有 V0.4 数据库进入当前 V0.5 Task 1：
+
+```text
+docs/sql/v0.5-task1-add-content-relation.sql
+```
+
+历史 `v0.4-schema.sql` 与 V0.4 增量 Migration 保持不可变。
+
+---
+
+# 55. SQL 使用原则
 
 ## 全新安装
 
@@ -2062,10 +2090,10 @@ Deadline 第一版继续使用 `todo.due_date`，Reminder 仍未建表。
 Fresh Schema
 ```
 
-当前 V0.4 全新环境：
+当前 V0.5 全新环境：
 
 ```text
-docs/sql/v0.4-schema.sql
+docs/sql/v0.5-schema.sql
 ```
 
 具体路径以仓库真实结构为准。
@@ -2096,6 +2124,14 @@ docs/sql/v0.4-task4-add-todo.sql
 docs/sql/v0.4-task7-add-action-processing-state.sql
 ```
 
+## 从 V0.4 进入当前 V0.5 Task 1
+
+执行：
+
+```text
+docs/sql/v0.5-task1-add-content-relation.sql
+```
+
 进入一个版本：
 
 ```text
@@ -2105,7 +2141,7 @@ docs/sql/v0.4-task7-add-action-processing-state.sql
 
 ---
 
-# 54. Current 与 Planned 必须分开
+# 56. Current 与 Planned 必须分开
 
 `database.md` 必须始终明确区分：
 
@@ -2137,9 +2173,9 @@ Not Yet Implemented
 
 ---
 
-# 55. 当前数据库总结
+# 57. 当前数据库总结
 
-截至 V0.4 Task 40：
+截至 V0.5 Task 1 / Overall Task 41：
 
 ```text
 MySQL
@@ -2150,7 +2186,8 @@ MySQL
 ├── inbox_keyword
 ├── inbox_entity
 ├── action_candidate
-└── todo
+├── todo
+└── content_relation
 ```
 
 当前没有：
@@ -2158,7 +2195,7 @@ MySQL
 ```text
 deadline
 reminder
-content_relation
+relation_candidate
 conversation
 agent_memory
 ```
@@ -2168,10 +2205,10 @@ agent_memory
 当前已完成：
 
 ```text
-V0.4 — Action Extractor
+V0.5 Task 1 — Relation Core Model & Persistence Foundation
 ```
 
-推荐逐步演进方向：
+当前已形成两个不同生命周期的数据方向：
 
 ```text
                      InboxItem
@@ -2185,6 +2222,12 @@ V0.4 — Action Extractor
                         Todo
                          │
                         └── optional due_date
+
+InboxItem A
+      ↕
+  RELATED_TO
+      ↕
+InboxItem B
 ```
 
 而不是一次性建立：
@@ -2202,7 +2245,7 @@ Agent
 
 ---
 
-# 56. 长期数据库原则
+# 58. 长期数据库原则
 
 LifeInbox 数据库模型继续遵循：
 
@@ -2218,6 +2261,8 @@ Retrieval
 Action Candidate
    ↓
 User-confirmed Business Action
+   ↓
+Persisted InboxItem Relations
 ```
 
 核心数据所有权：

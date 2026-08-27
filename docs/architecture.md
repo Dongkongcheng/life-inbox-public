@@ -30,6 +30,10 @@ Organize
 Retrieve
    ↓
 Action
+   ↓
+Relations
+   ↓
+Personal AI
 ```
 
 对应版本路线：
@@ -50,17 +54,18 @@ V0.1 — Universal Inbox       ✅ Completed
 V0.2 — AI Organizer          ✅ Completed
 V0.3 — Smart Search          ✅ Completed
 V0.4 — Action Extractor      ✅ Completed
-V0.5 — Relations             📋 Planned
+V0.5 — Relations             🚧 Current
 V1.0 — Personal AI           📋 Planned
 ```
 
 当前稳定架构基线：
 
 ```text
-V0.4 — Action Extractor (release-ready baseline)
+V0.5 Task 1 / Overall Task 41
+— Relation Core Model & Persistence Foundation
 ```
 
-V0.5 仍为 Planned，尚未进入实现。
+V0.5 当前只完成 Relation 持久化基础；Relation Discovery、产品 API、前端和自动处理尚未实现。
 
 ---
 
@@ -1902,48 +1907,36 @@ Execute
 
 # 38. V0.5 Relation Architecture
 
-V0.5 可能逐渐建立：
+Task 41 已实现第一版 Relation Foundation：
 
 ```text
-InboxItem
-   │
-   ├── RELATED_TO
-   ├── SAME_TOPIC
-   └── SUPPORTS
+InboxItem A
+      ↕
+  RELATED_TO
+      ↕
+InboxItem B
 ```
 
-初期优先：
+当前契约：
 
 ```text
-MySQL
+Endpoint          = InboxItem only
+Relation Type     = RELATED_TO only
+Directionality    = Symmetric
+Canonical Pair    = left_inbox_item_id < right_inbox_item_id
+Duplicate Guard   = UNIQUE(left, right, relation_type)
+New Creation      = both endpoints currently ACTIVE
+Archive           = relation row remains
+Delete            = either endpoint cascades relation row
+Persistence Owner = Java + MySQL
 ```
 
-可能的概念模型：
+`content_relation` 是持久化派生产品状态。第一版没有 `RelationCandidate`、score、evidence、provider metadata
+或 Relation processing state。创建服务按 Canonical ID 顺序锁住两个 InboxItem，使创建与 Archive/Delete
+拥有明确顺序；数据库唯一约束是并发重复的最终防线。
 
-```text
-content_relation
-────────────────
-source_id
-target_id
-relation_type
-score
-```
-
-不要因为出现关系数据就直接加入：
-
-```text
-Neo4j
-```
-
-只有真正需要：
-
-```text
-复杂 Graph Traversal
-复杂图查询
-大规模关系分析
-```
-
-时才重新评估 Graph Database。
+Task 41 未实现 AI Relation Discovery、Related Items API、前端或自动发现，也没有修改 V0.3 Search Pipeline。
+出现关系数据仍不等于需要 Neo4j；只有真实出现复杂图遍历、图原生查询或图算法需求时才重新评估。
 
 ---
 
@@ -2293,26 +2286,20 @@ Relations
 
 ```text
 V0.4 Action Extractor
-🚧 In Progress
+✅ Completed
 ```
 
-目前属于：
+已完成：
 
 ```text
-Architecture / Feature Development Stage
+Action Extraction
+Action Candidate Persistence
+Accept / Dismiss
+Todo OPEN / COMPLETED Lifecycle
+Source Traceability
 ```
 
-不能把以下能力提前描述为已完成：
-
-```text
-Todo Extraction
-Deadline Extraction
-Action Confirmation
-Reminder
-Calendar
-```
-
-具体完成状态必须随着 V0.4 Task 实际进度更新。
+Reminder 与 Calendar 仍未实现。
 
 ---
 
@@ -2321,8 +2308,11 @@ Calendar
 当前：
 
 ```text
-📋 Planned
+🚧 V0.5 Current
+✅ Task 1 Relation Persistence Foundation
 ```
+
+当前只有 Java/MySQL 核心模型、Canonical Pair、生命周期约束与最小内部查询；Discovery、API、UI 和自动处理仍未实现。
 
 ---
 
@@ -2445,7 +2435,7 @@ Action
 
 # 46. 当前架构结论
 
-截至 V0.3 完成后，
+截至 V0.4 完成并进入 V0.5 Task 1 后，
 
 LifeInbox 已经形成：
 
@@ -2467,7 +2457,7 @@ Rerank
 Reliable Retrieve
 ```
 
-当前 V0.4 将在此基础上继续：
+V0.4 已在此基础上完成：
 
 ```text
 Reliable Retrieve
@@ -2479,6 +2469,18 @@ Structured Action Candidate
 User Confirmation
        ↓
 Todo / Deadline
+```
+
+V0.5 Task 1 进一步建立：
+
+```text
+InboxItem
+   ↕
+RELATED_TO
+   ↕
+InboxItem
+   ↓
+Java / MySQL Persisted Relation State
 ```
 
 因此当前架构主线仍然没有偏离最初设计。
