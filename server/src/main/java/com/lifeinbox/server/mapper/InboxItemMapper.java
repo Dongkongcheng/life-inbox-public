@@ -128,6 +128,22 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
     );
 
     /**
+     * Relation 创建按规范化 ID 顺序锁定两个端点，使创建与 Archive/Delete 具有明确顺序，
+     * 也避免反向请求以不同锁顺序形成死锁。
+     */
+    @Select("""
+            SELECT id, status
+            FROM inbox_item
+            WHERE id IN (#{leftInboxItemId}, #{rightInboxItemId})
+            ORDER BY id ASC
+            FOR UPDATE
+            """)
+    List<InboxItem> selectRelationEndpointsForUpdate(
+            @Param("leftInboxItemId") Long leftInboxItemId,
+            @Param("rightInboxItemId") Long rightInboxItemId
+    );
+
+    /**
      * 内容准备在事务外完成；单条条件 UPDATE 只允许当前 PROCESSING Attempt 写入派生正文。
      */
     @Update("""

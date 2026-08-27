@@ -51,13 +51,13 @@ V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、�
 - Todo 编辑、删除、手动创建与 Reminder 等后续能力尚未实现
 - Reminder / Action Item 后续能力仍为 Planned
 
-V0.4 已完成 Action Extraction、确定性日期归一化、Candidate 决策、Todo 生命周期与来源追溯，并通过最终回归验收。V0.5 仍为 Planned，本次未开始 Relations 实现。
+V0.4 已完成 Action Extraction、确定性日期归一化、Candidate 决策、Todo 生命周期与来源追溯，并通过最终回归验收。
 
-## V0.5 — Relations（Planned）
+## V0.5 — Relations 🚧
 
-- 内容关系
-- 个人知识组织
+- ✅ Task 1 / Overall Task 41 — Relation Core Model & Persistence Foundation（`InboxItem ↔ InboxItem`、仅 `RELATED_TO`、对称 Canonical Pair、ACTIVE-only 创建、MySQL 唯一约束与 Delete Cascade）
+- Relation Candidate Discovery、AI Relation Discovery、产品 API、前端 Related Items、自动发现与重处理仍未实现
 
 ## V1.0 — Personal AI（Long-term）
 
-长期目标是让 LifeInbox 沿着 `Capture → Understand → Organize → Retrieve → Action` 形成个人信息系统。Agent、RAG、知识图谱等只有在前序产品能力和真实需求验证后再决定，不作为当前承诺。
+长期目标是让 LifeInbox 沿着 `Capture → Understand → Organize → Retrieve → Action → Relations → Personal AI` 形成个人信息系统。Agent、RAG、知识图谱等只有在前序产品能力和真实需求验证后再决定，不作为当前承诺。
