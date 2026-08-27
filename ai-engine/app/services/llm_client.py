@@ -8,8 +8,14 @@ from app.config import LlmSettings
 from app.prompts import (
     ACTION_EXTRACTION_SYSTEM_PROMPT,
     ANALYZE_SYSTEM_PROMPT,
+    RELATION_DISCOVERY_SYSTEM_PROMPT,
     build_action_extraction_user_prompt,
     build_analyze_user_prompt,
+    build_relation_discovery_user_prompt,
+)
+from app.schemas.relation_discovery import (
+    RelationDiscoveryCandidate,
+    RelationDiscoverySource,
 )
 
 
@@ -54,11 +60,23 @@ class LlmClient:
             build_action_extraction_user_prompt(text, reference_date),
         )
 
+    def generate_relation_discovery(
+        self,
+        source: RelationDiscoverySource,
+        candidates: list[RelationDiscoveryCandidate],
+    ) -> str:
+        """Relation 复用通用 Provider，并以一次请求批量判断全部候选。"""
+
+        return self._generate_json(
+            RELATION_DISCOVERY_SYSTEM_PROMPT,
+            build_relation_discovery_user_prompt(source, candidates),
+        )
+
     def _generate_json(self, system_prompt: str, user_prompt: str) -> str:
         settings = self._settings_loader()
         request_body: dict[str, Any] = {
             "model": settings.model,
-            # 当前两类能力都只做结构化抽取；关闭思考可减少等待和 Token 消耗。
+            # 当前能力都只做结构化抽取；关闭思考可减少等待和 Token 消耗。
             "enable_thinking": False,
             "messages": [
                 {"role": "system", "content": system_prompt},

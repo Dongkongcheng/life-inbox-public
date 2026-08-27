@@ -10,6 +10,9 @@ import com.lifeinbox.server.dto.AiEmbeddingRequest;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
 import com.lifeinbox.server.dto.AiFileErrorResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
+import com.lifeinbox.server.dto.AiRelationDiscoveryItem;
+import com.lifeinbox.server.dto.AiRelationDiscoveryRequest;
+import com.lifeinbox.server.dto.AiRelationDiscoveryResponse;
 import com.lifeinbox.server.dto.AiRerankCandidate;
 import com.lifeinbox.server.dto.AiRerankDocument;
 import com.lifeinbox.server.dto.AiRerankRequest;
@@ -255,6 +258,34 @@ public class AiServiceClient {
             // 邻居只是候选信号；不透传 Qdrant 地址、响应正文或内部配置。
             throw new AiServiceUnavailableException(
                     "AI Vector Neighbor 服务暂不可用",
+                    exception
+            );
+        }
+    }
+
+    /** 单次批量调用 Relation LLM；响应 ID 必须全部来自本次发送的候选。 */
+    public AiRelationDiscoveryResponse discoverRelations(
+            AiRelationDiscoveryItem source,
+            List<AiRelationDiscoveryItem> candidates
+    ) {
+        try {
+            AiRelationDiscoveryResponse response = analysisRestClient.post()
+                    .uri("/relation/discover")
+                    .body(new AiRelationDiscoveryRequest(source, candidates))
+                    .retrieve()
+                    .body(AiRelationDiscoveryResponse.class);
+            if (!isValidRelationDiscoveryResponse(source, candidates, response)) {
+                throw new AiServiceUnavailableException(
+                        "AI 服务返回了无效的 Relation Discovery 结果"
+                );
+            }
+            return response;
+        } catch (AiServiceUnavailableException exception) {
+            throw exception;
+        } catch (RestClientException exception) {
+            // 不透传候选正文、完整 Prompt 或 Provider 原始响应。
+            throw new AiServiceUnavailableException(
+                    "AI Relation Discovery 服务暂不可用",
                     exception
             );
         }
@@ -547,6 +578,49 @@ public class AiServiceClient {
                     || candidate.score() == null
                     || !Double.isFinite(candidate.score())
                     || !returnedIds.add(candidate.inboxItemId())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isValidRelationDiscoveryResponse(
+            AiRelationDiscoveryItem source,
+            List<AiRelationDiscoveryItem> candidates,
+            AiRelationDiscoveryResponse response
+    ) {
+        if (source == null
+                || source.inboxItemId() == null
+                || source.inboxItemId() <= 0
+                || source.text() == null
+                || source.text().isBlank()
+                || candidates == null
+                || response == null
+                || response.relatedTargetInboxItemIds() == null
+                || response.relatedTargetInboxItemIds().size() > candidates.size()) {
+            return false;
+        }
+
+        Set<Long> suppliedIds = new HashSet<>();
+        for (AiRelationDiscoveryItem candidate : candidates) {
+            if (candidate == null
+                    || candidate.inboxItemId() == null
+                    || candidate.inboxItemId() <= 0
+                    || candidate.text() == null
+                    || candidate.text().isBlank()
+                    || source.inboxItemId().equals(candidate.inboxItemId())
+                    || !suppliedIds.add(candidate.inboxItemId())) {
+                return false;
+            }
+        }
+
+        Set<Long> returnedIds = new HashSet<>();
+        for (Long returnedId : response.relatedTargetInboxItemIds()) {
+            if (returnedId == null
+                    || returnedId <= 0
+                    || source.inboxItemId().equals(returnedId)
+                    || !suppliedIds.contains(returnedId)
+                    || !returnedIds.add(returnedId)) {
                 return false;
             }
         }

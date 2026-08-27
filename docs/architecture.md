@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 2 / Overall Task 42
-— Bounded Relation Candidate Discovery
+V0.5 Task 3 / Overall Task 43
+— AI Relation Discovery Foundation
 ```
 
-V0.5 当前已完成 Relation 持久化基础和有界运行时候选发现；AI Relation Judgment、候选转正式 Relation、产品 API、前端和自动处理尚未实现。
+V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现和有界 AI Relation 判断；候选转正式 Relation、产品 API、前端和自动处理尚未实现。
 
 ---
 
@@ -1961,6 +1961,29 @@ Task 42 不调用 LLM，不把 `semanticScore` 写入数据库，不创建或确
 Relation processing state。它没有修改 V0.3 Search Pipeline。出现关系数据仍不等于需要 Neo4j；只有真实出现复杂图遍历、
 图原生查询或图算法需求时才重新评估。
 
+Task 43 在 Task 42 的有限候选之后增加独立判断层：
+
+```text
+Task 42 bounded candidates
+        ↓
+Java revalidates ACTIVE items + existing relations
+        ↓
+Title + Summary + existing usable content
+        ↓
+Source <= 4,000 chars; Candidate <= 1,000 chars; Count <= 20
+        ↓
+One batch LLM call (semanticScore excluded)
+        ↓
+Strict relatedTargetInboxItemIds validation
+        ↓
+Runtime RELATED_TO suggestions only
+```
+
+Java/MySQL 仍负责 Source 与 Candidate 的当前存在性、ACTIVE 状态和既有 Relation 竞态过滤。Python 将正文视为不可信数据，
+采用“精度优先、不确定则不关联”的 Prompt，只能从给定 Candidate ID 中返回结果。空列表是正常成功；未知、重复、Source ID、
+多余字段或越界数量使整次 LLM 输出失效。Task 43 不调用 `ensureRelatedTo`，不写 `content_relation`，不新增产品 Controller、
+前端、后台状态或 Migration；LLM 失败也不影响 Capture、Search、Todo 或既有 Relation。
+
 ---
 
 # 39. V1.0 Personal AI
@@ -2333,9 +2356,11 @@ Reminder 与 Calendar 仍未实现。
 ```text
 🚧 V0.5 Current
 ✅ Task 1 Relation Persistence Foundation
+✅ Task 2 Bounded Relation Candidate Discovery
+✅ Task 3 AI Relation Discovery Foundation
 ```
 
-当前只有 Java/MySQL 核心模型、Canonical Pair、生命周期约束与最小内部查询；Discovery、API、UI 和自动处理仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选和 Task 43 运行时 AI 判断；正式 Relation 转换、产品 API、UI 和自动处理仍未实现。
 
 ---
 
@@ -2458,7 +2483,7 @@ Action
 
 # 46. 当前架构结论
 
-截至 V0.4 完成并进入 V0.5 Task 1 后，
+截至 V0.4 完成并进入 V0.5 Task 3 后，
 
 LifeInbox 已经形成：
 
@@ -2494,7 +2519,7 @@ User Confirmation
 Todo / Deadline
 ```
 
-V0.5 Task 1 进一步建立：
+V0.5 Task 1 到 Task 3 进一步建立：
 
 ```text
 InboxItem
@@ -2504,6 +2529,10 @@ RELATED_TO
 InboxItem
    ↓
 Java / MySQL Persisted Relation State
+        +
+Bounded Candidate Discovery
+        +
+Runtime AI RELATED_TO Suggestions
 ```
 
 因此当前架构主线仍然没有偏离最初设计。
