@@ -19,9 +19,11 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,6 +63,44 @@ class ContentRelationTransactionProxyTests {
         assertSame(saved, service.ensureRelatedTo(20L, 10L));
 
         verify(transactionManager).commit(transaction);
+    }
+
+    @Test
+    void batchEnsureRunsThroughOneShortTransaction() {
+        SimpleTransactionStatus transaction = new SimpleTransactionStatus();
+        when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(transaction);
+        when(inboxItemMapper.selectRelationEndpointsForUpdateByIds(
+                List.of(10L, 20L, 30L)
+        )).thenReturn(List.of(item(10L), item(20L), item(30L)));
+        when(contentRelationMapper.selectByInboxItemId(20L)).thenReturn(List.of());
+        when(contentRelationMapper.insert(any(ContentRelation.class))).thenReturn(1);
+
+        service.ensureRelatedToBatch(20L, List.of(10L, 30L));
+
+        verify(transactionManager).commit(transaction);
+    }
+
+    @Test
+    void secondInsertFailureRollsBackTheWholeBatchTransaction() {
+        SimpleTransactionStatus transaction = new SimpleTransactionStatus();
+        when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(transaction);
+        when(inboxItemMapper.selectRelationEndpointsForUpdateByIds(
+                List.of(10L, 20L, 30L)
+        )).thenReturn(List.of(item(10L), item(20L), item(30L)));
+        when(contentRelationMapper.selectByInboxItemId(20L)).thenReturn(List.of());
+        when(contentRelationMapper.insert(any(ContentRelation.class)))
+                .thenReturn(1)
+                .thenThrow(new IllegalStateException("mock database failure"));
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.ensureRelatedToBatch(20L, List.of(10L, 30L))
+        );
+
+        verify(transactionManager).rollback(transaction);
+        verify(transactionManager, never()).commit(transaction);
     }
 
     private InboxItem item(Long id) {
