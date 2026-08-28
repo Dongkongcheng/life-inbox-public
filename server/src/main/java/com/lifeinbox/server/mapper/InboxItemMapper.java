@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.ActionProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.entity.RelationType;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -125,6 +126,41 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
             @Param("type") String type,
             @Param("category") String category,
             @Param("favorite") Integer favorite
+    );
+
+    /**
+     * Related Items 只读路径同时覆盖 Canonical Pair 两侧，并在数据库内过滤 ACTIVE 与应用最终 limit。
+     * UNION ALL 让左右端点分别使用现有索引；Product DTO 会在 Service 层防御性去重并隐藏存储方向。
+     */
+    @Select("""
+            SELECT i.*
+            FROM (
+                SELECT right_inbox_item_id AS related_inbox_item_id,
+                       created_time AS relation_created_time,
+                       id AS relation_id
+                FROM content_relation
+                WHERE left_inbox_item_id = #{sourceInboxItemId}
+                  AND relation_type = #{relationType}
+                UNION ALL
+                SELECT left_inbox_item_id AS related_inbox_item_id,
+                       created_time AS relation_created_time,
+                       id AS relation_id
+                FROM content_relation
+                WHERE right_inbox_item_id = #{sourceInboxItemId}
+                  AND relation_type = #{relationType}
+            ) relation_match
+            INNER JOIN inbox_item i
+                    ON i.id = relation_match.related_inbox_item_id
+                   AND i.status = 'ACTIVE'
+            ORDER BY relation_match.relation_created_time DESC,
+                     relation_match.relation_id DESC,
+                     i.id DESC
+            LIMIT #{limit}
+            """)
+    List<InboxItem> selectRelatedActiveItems(
+            @Param("sourceInboxItemId") Long sourceInboxItemId,
+            @Param("relationType") RelationType relationType,
+            @Param("limit") int limit
     );
 
     /**

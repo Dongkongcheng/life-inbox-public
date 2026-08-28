@@ -13,13 +13,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
-import java.util.Locale;
 
 /** 按需解析 Todo 的只读来源，不参与 Todo 列表和生命周期写入。 */
 @Service
 public class TodoSourceService {
 
-    static final int MAX_PREVIEW_CHARS = 300;
+    static final int MAX_PREVIEW_CHARS = InboxItemPreviewBuilder.MAX_PREVIEW_CHARS;
     private static final String FILE_URL_PREFIX = "/api/files/";
     private static final Logger LOGGER = LoggerFactory.getLogger(TodoSourceService.class);
 
@@ -92,7 +91,7 @@ public class TodoSourceService {
                 inboxItem.getId(),
                 inboxItem.getType(),
                 inboxItem.getTitle(),
-                previewFor(inboxItem),
+                InboxItemPreviewBuilder.build(inboxItem),
                 safeSourceUrl(inboxItem.getSourceUrl()),
                 safeManagedFileUrl(inboxItem.getFileUrl()),
                 inboxItem.getStatus(),
@@ -110,35 +109,6 @@ public class TodoSourceService {
                 candidate.getEvidence(),
                 candidate.getStatus()
         );
-    }
-
-    private String previewFor(InboxItem inboxItem) {
-        String type = inboxItem.getType() == null
-                ? ""
-                : inboxItem.getType().strip().toUpperCase(Locale.ROOT);
-        String source = "TEXT".equals(type)
-                ? firstPresent(inboxItem.getContent(), inboxItem.getTitle())
-                : firstPresent(inboxItem.getSearchableContent(), inboxItem.getTitle());
-        return truncate(normalizePlainText(source));
-    }
-
-    private String firstPresent(String primary, String fallback) {
-        return isBlank(primary) ? fallback : primary;
-    }
-
-    private String normalizePlainText(String value) {
-        if (isBlank(value)) {
-            return null;
-        }
-        return value.strip().replaceAll("\\s+", " ");
-    }
-
-    private String truncate(String value) {
-        if (value == null || value.codePointCount(0, value.length()) <= MAX_PREVIEW_CHARS) {
-            return value;
-        }
-        int end = value.offsetByCodePoints(0, MAX_PREVIEW_CHARS - 1);
-        return value.substring(0, end) + "…";
     }
 
     private String safeSourceUrl(String value) {
