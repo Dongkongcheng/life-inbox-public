@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 4 / Overall Task 44
-— Relation Persistence Integration
+V0.5 Task 5 / Overall Task 45
+— Related Items Product API
 ```
 
-V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现、有界 AI Relation 判断和建议到正式 Relation 的内部持久化；产品 API、前端和自动处理尚未实现。
+V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现、有界 AI Relation 判断、建议到正式 Relation 的内部持久化，以及只读 Related Items Product API；前端和自动处理尚未实现。
 
 ---
 
@@ -2007,6 +2007,28 @@ RelationPersistenceResult
 唯一约束共同保护并发。Task 44 从不根据空发现结果、Provider 失败或“本次未再次发现”删除旧 Relation，也不新增 Schema、产品 API、
 前端、自动触发、Relation processing state、score、evidence 或 provider metadata。
 
+Task 45 在写入链路之外建立独立产品读取路径：
+
+```text
+Persisted content_relation
+        ↓
+Validate ACTIVE Source in MySQL
+        ↓
+One bounded symmetric Relation JOIN
+        ↓
+ACTIVE related InboxItem filtering
+        ↓
+Stable relation recency ordering
+        ↓
+Minimal RelatedInboxItemResponse
+        ↓
+GET /api/inbox/{id}/related
+```
+
+读取查询用 `UNION ALL` 分别覆盖 Canonical Pair 的 left/right 索引方向，再 JOIN `inbox_item` 过滤 ACTIVE Target，并在数据库层应用
+`limit`。Service 防御性过滤异常、自关联和重复 Target，只构建最多 300 Unicode Code Point 的预览与最小产品字段。Relation Read 与
+Relation Discovery 是两条独立路径；普通 GET 不依赖 FastAPI、LLM、Embedding、Qdrant 或 Rerank，也不修改 `content_relation`。
+
 ---
 
 # 39. V1.0 Personal AI
@@ -2382,9 +2404,10 @@ Reminder 与 Calendar 仍未实现。
 ✅ Task 2 Bounded Relation Candidate Discovery
 ✅ Task 3 AI Relation Discovery Foundation
 ✅ Task 4 Relation Persistence Integration
+✅ Task 5 Related Items Product API
 ```
 
-当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断和 Task 44 非破坏性正式 Relation 转换；产品 API、UI 和自动处理仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换和 Task 45 只读 Product API；UI 和自动处理仍未实现。
 
 ---
 
@@ -2507,7 +2530,7 @@ Action
 
 # 46. 当前架构结论
 
-截至 V0.4 完成并进入 V0.5 Task 4 后，
+截至 V0.4 完成并进入 V0.5 Task 5 后，
 
 LifeInbox 已经形成：
 
@@ -2543,7 +2566,7 @@ User Confirmation
 Todo / Deadline
 ```
 
-V0.5 Task 1 到 Task 4 进一步建立：
+V0.5 Task 1 到 Task 5 进一步建立：
 
 ```text
 InboxItem
@@ -2559,6 +2582,8 @@ Bounded Candidate Discovery
 Runtime AI RELATED_TO Suggestions
         ↓
 Additive / Idempotent Persistence
+        ↓
+Bounded MySQL Related Items Product API
 ```
 
 因此当前架构主线仍然没有偏离最初设计。

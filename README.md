@@ -107,7 +107,7 @@ The fact that V0.5 is now the active stage does **not** mean every Relations cap
 
 Each Relation capability is implemented task by task.
 
-The first four V0.5 implementation tasks are complete:
+The first five V0.5 implementation tasks are complete:
 
 ```text
 V0.5 Task 1
@@ -133,12 +133,18 @@ V0.5 Task 4
 Overall Task 44
 
 Relation Persistence Integration
+
+V0.5 Task 5
+=
+Overall Task 45
+
+Related Items Product API
 ```
 
 Task 42 retrieves bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filters them through Java/MySQL. Task 43 sends
 only the bounded Source/Candidate text to one LLM call and returns strictly validated runtime `RELATED_TO` suggestions. Task 44 converts
-valid suggestions into canonical, additive, idempotent Relations after one short final-validation transaction. Product APIs, frontend Related
-Items, and automatic processing are not implemented yet.
+valid suggestions into canonical, additive, idempotent Relations after one short final-validation transaction. Task 45 exposes persisted
+Relations through a bounded, read-only MySQL Product API. Frontend Related Items and automatic processing are not implemented yet.
 
 ---
 
@@ -1351,6 +1357,10 @@ transaction begins. The short transaction batch-locks the Source and suggested T
 or archived, skips individually invalid Targets, queries existing Relations once, and inserts only missing canonical pairs. Existing pairs are
 idempotent success. Empty discovery, AI failure, and absence from a later discovery result never delete an existing Relation.
 
+Task 45 adds `GET /api/inbox/{id}/related?limit=10`. It validates an ACTIVE Source, reads both Canonical Pair directions, filters ACTIVE Targets,
+orders by persisted Relation recency, and returns a minimal bounded Product DTO. This normal read path uses only Java/MySQL: it never calls
+FastAPI, LLM, Embedding, Qdrant, Rerank, Relation Discovery, or Relation Persistence.
+
 ---
 
 # MySQL First for Relations
@@ -1468,7 +1478,8 @@ signals remain future task scope.
 
 Task 43 implements the next bounded step: one LLM call judges the Source against those candidates. It does not perform all-pairs analysis,
 does not receive the Qdrant score, and does not itself persist its runtime suggestions. Task 44 then provides an explicit internal conversion
-step whose persistence is additive and non-destructive; it is not an automatic trigger or product API.
+step whose persistence is additive and non-destructive. Task 45 provides a separate bounded read-only Product API; it is not an automatic
+discovery trigger.
 
 Existing retrieval infrastructure such as Qdrant may be reused when justified.
 
@@ -2558,9 +2569,12 @@ Completed:
 
 ✅ V0.5 Task 4 / Overall Task 44
 — Relation Persistence Integration
+
+✅ V0.5 Task 5 / Overall Task 45
+— Related Items Product API
 ```
 
-Product APIs, frontend Related Items, automatic discovery, rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
+Frontend Related Items, automatic discovery, rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
 
 ---
 
@@ -3160,7 +3174,7 @@ Current intentional scope limitations include:
 * Calendar integration is not currently implemented.
 * Todo source traceability depends on available source data; deleted source content is not reconstructed from a snapshot.
 * Browser Extension Capture remains postponed.
-* V0.5 Relations is now the active development stage; Task 1 Relation persistence, Task 2 bounded runtime candidates, Task 3 bounded AI Relation judgment, and Task 4 additive persistence integration are implemented, while APIs, UI, automatic processing, and rediscovery are not.
+* V0.5 Relations is now the active development stage; Task 1 Relation persistence, Task 2 bounded runtime candidates, Task 3 bounded AI Relation judgment, Task 4 additive persistence integration, and Task 5 bounded Related Items Product API are implemented, while UI, automatic processing, and rediscovery are not.
 * `content_relation` exists in the V0.5 Task 1 migration and fresh schema; existing V0.4 databases must apply the incremental migration.
 * The first version intentionally has no `relation_candidate` model.
 * The first version intentionally persists no Relation score; Task 42's `semanticScore` is a runtime-only Qdrant ranking signal, not Relation truth.
@@ -3424,12 +3438,16 @@ Overall Task 43
 V0.5 Task 4
 =
 Overall Task 44
+
+V0.5 Task 5
+=
+Overall Task 45
 ```
 
 Task 41 established the first concrete Relation Contract and persistence foundation. Task 42 added bounded semantic neighbor candidates
 without converting them into business Relation state. Task 43 added one bounded, strict AI judgment step. Task 44 added the explicit,
-non-destructive conversion of validated suggestions into business Relation state. API, frontend, automatic processing, and hardening remain
-separate tasks.
+non-destructive conversion of validated suggestions into business Relation state. Task 45 added the read-only MySQL Product API for bounded
+ACTIVE Related Items. Frontend, automatic processing, and hardening remain separate tasks.
 
 ---
 

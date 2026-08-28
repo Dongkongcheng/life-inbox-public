@@ -7,6 +7,7 @@
 | Method | Path | 说明 |
 | --- | --- | --- |
 | GET | `/api/inbox` | 查询 ACTIVE InboxItem，并聚合 AI 状态与五类结果 |
+| GET | `/api/inbox/{id}/related` | 只读查询已持久化的 ACTIVE Related InboxItems；不触发发现或 AI |
 | GET | `/api/search?q={query}` | 默认 Keyword Search；支持显式 `semantic` 与 `hybrid` 模式 |
 | POST | `/api/inbox` | JSON Capture；当前支持 TEXT、URL |
 | POST | `/api/inbox/file` | multipart FILE Capture |
@@ -111,6 +112,47 @@ Semantic Rank ─┘
 - 两边都正常但都没有候选时返回正常空数组；显式 `mode=semantic` 继续保持原来的受控失败，不自动降级；
 - 最终仍返回原有 `InboxItem[]`，最多 `limit` 条；产品响应不增加 Score 或匹配原因。RRF 负责召回融合，Reranker
   只负责有限候选的最终相关性排序，不使用 Chat LLM。
+
+### Related Items Product API
+
+`GET /api/inbox/{id}/related` 只读取 MySQL 中已经持久化的 `content_relation` 和 `inbox_item`：
+
+```http
+GET /api/inbox/123/related?limit=10
+```
+
+- Source 必须存在且为 `ACTIVE`；不存在或已归档都沿用 ACTIVE-only nested API 的 404；
+- `limit` 默认 10，允许 `1..20`，越界返回 400；
+- 查询同时覆盖 Source 位于 Canonical Pair 左侧或右侧的情况，只读取 `RELATED_TO`；
+- Target 必须当前为 `ACTIVE`；归档 Relation Row 继续保留，但普通 Related Items 不显示归档 Target；历史缺失 Target 被 JOIN 安全过滤；
+- 数据库按 `relation.created_time DESC, relation.id DESC, relatedInboxItem.id DESC` 稳定排序并直接应用 limit；
+- 整个读取使用一次 Source 校验和一次有界 JOIN，不为每个 Target 单独查询；
+- 空列表是正常 `200 []`，不会顺便触发 Relation Discovery；
+- 此 GET 不调用 FastAPI、LLM、Embedding、Qdrant 或 Rerank，也不 INSERT、UPDATE、DELETE Relation。
+
+成功响应示例：
+
+```json
+[
+  {
+    "relationType": "RELATED_TO",
+    "relatedInboxItem": {
+      "id": 456,
+      "type": "TEXT",
+      "title": "Redisson 分布式锁",
+      "summary": "介绍 Redisson 的分布式锁实现",
+      "category": "技术学习",
+      "preview": "Redisson 提供了...",
+      "favorite": false,
+      "createdTime": "2026-08-28T10:00:00"
+    }
+  }
+]
+```
+
+`preview` 最多 300 个 Unicode Code Point：TEXT 来自 `content`，URL/FILE/IMAGE 来自已经持久化的
+`searchable_content`，为空时回退 title。响应不包含完整正文、left/right Canonical Storage、Relation ID、Score、Evidence、
+Provider 信息、AI/Action Attempt 或其他内部处理状态。
 
 ### JSON Capture
 

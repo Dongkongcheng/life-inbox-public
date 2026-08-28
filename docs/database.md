@@ -1833,7 +1833,9 @@ Task 42 的 `RelationDiscoveryCandidate` 只存在于一次 Java 调用的内存
 候选发现不会 INSERT `content_relation`。Task 43 的 AI 判断同样只返回运行时 `RELATED_TO` 建议，不持久化建议、评分、证据或状态。
 Task 44 复用 Task 41 的同一张表，把通过最终业务校验的建议新增为正式 Relation，不新增 Schema 或 Migration。写入只做 Canonical、
 幂等的新增：Source 无效使整次事务失败，单个无效 Target 被跳过，空结果、Provider 失败或后续未再次发现都不会删除已有行。
-产品 API、前端和自动处理仍未实现。
+Task 45 同样不修改 Schema：Product Read 同时读取 Canonical Pair 两侧，JOIN `inbox_item` 过滤 ACTIVE Target，并按 Relation
+`created_time DESC, id DESC` 有界排序。Archive 仍保留 Relation Row，只是不再出现在普通 ACTIVE Related Items 中。
+前端和自动处理仍未实现。
 
 ---
 
@@ -2179,7 +2181,7 @@ Not Yet Implemented
 
 # 57. 当前数据库总结
 
-截至 V0.5 Task 4 / Overall Task 44（数据库结构仍与 Task 41 相同）：
+截至 V0.5 Task 5 / Overall Task 45（数据库结构仍与 Task 41 相同）：
 
 ```text
 MySQL
@@ -2213,6 +2215,7 @@ V0.5 Task 1 — Relation Core Model & Persistence Foundation
 V0.5 Task 2 — Bounded Relation Candidate Discovery (runtime only, no schema change)
 V0.5 Task 3 — AI Relation Discovery Foundation (runtime only, no schema change)
 V0.5 Task 4 — Relation Persistence Integration (additive/idempotent, no schema change)
+V0.5 Task 5 — Related Items Product API (bounded read-only query, no schema change)
 ```
 
 当前已形成两个不同生命周期的数据方向：
