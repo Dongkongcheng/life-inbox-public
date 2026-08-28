@@ -58,6 +58,19 @@ class ContentRelationMapperSqlTests {
     }
 
     @Test
+    void batchEndpointValidationUsesOneOrderedForUpdateQuery() throws Exception {
+        Method method = InboxItemMapper.class.getMethod(
+                "selectRelationEndpointsForUpdateByIds",
+                List.class
+        );
+        String sql = normalize(method.getAnnotation(Select.class).value());
+
+        assertTrue(sql.contains("<foreach collection=\"ids\""));
+        assertTrue(sql.contains("ORDER BY id ASC"));
+        assertTrue(sql.contains("FOR UPDATE"));
+    }
+
+    @Test
     void firstVersionExposesOnlyRelatedToAsAnEnum() throws Exception {
         assertEquals(List.of(RelationType.RELATED_TO), Arrays.asList(RelationType.values()));
         assertEquals(

@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 3 / Overall Task 43
-— AI Relation Discovery Foundation
+V0.5 Task 4 / Overall Task 44
+— Relation Persistence Integration
 ```
 
-V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现和有界 AI Relation 判断；候选转正式 Relation、产品 API、前端和自动处理尚未实现。
+V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现、有界 AI Relation 判断和建议到正式 Relation 的内部持久化；产品 API、前端和自动处理尚未实现。
 
 ---
 
@@ -1984,6 +1984,29 @@ Java/MySQL 仍负责 Source 与 Candidate 的当前存在性、ACTIVE 状态和�
 多余字段或越界数量使整次 LLM 输出失效。Task 43 不调用 `ensureRelatedTo`，不写 `content_relation`，不新增产品 Controller、
 前端、后台状态或 Migration；LLM 失败也不影响 Capture、Search、Todo 或既有 Relation。
 
+Task 44 在不改变 Task 43 职责的前提下增加独立持久化编排：
+
+```text
+Task 43 bounded AI discovery (outside transaction)
+        ↓
+Validated RELATED_TO suggestions
+        ↓
+One short Java/MySQL transaction
+        ↓
+Batch-lock Source + Targets in canonical ID order
+        ↓
+Abort for invalid Source; skip invalid Targets
+        ↓
+One existing-Relation query + additive canonical inserts
+        ↓
+RelationPersistenceResult
+```
+
+最终事务重新确认 Source 和 Target 的存在性与 `ACTIVE` 状态。Source 已删除或归档时整次持久化失败；单个 Target 已删除、归档、
+为 Source 自身、ID 无效或重复时只跳过该 Target。既有正向或反向 `RELATED_TO` 都视为幂等成功；Canonical Pair、顺序行锁和数据库
+唯一约束共同保护并发。Task 44 从不根据空发现结果、Provider 失败或“本次未再次发现”删除旧 Relation，也不新增 Schema、产品 API、
+前端、自动触发、Relation processing state、score、evidence 或 provider metadata。
+
 ---
 
 # 39. V1.0 Personal AI
@@ -2358,9 +2381,10 @@ Reminder 与 Calendar 仍未实现。
 ✅ Task 1 Relation Persistence Foundation
 ✅ Task 2 Bounded Relation Candidate Discovery
 ✅ Task 3 AI Relation Discovery Foundation
+✅ Task 4 Relation Persistence Integration
 ```
 
-当前已具备 Java/MySQL 核心模型、Task 42 有界候选和 Task 43 运行时 AI 判断；正式 Relation 转换、产品 API、UI 和自动处理仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断和 Task 44 非破坏性正式 Relation 转换；产品 API、UI 和自动处理仍未实现。
 
 ---
 
@@ -2483,7 +2507,7 @@ Action
 
 # 46. 当前架构结论
 
-截至 V0.4 完成并进入 V0.5 Task 3 后，
+截至 V0.4 完成并进入 V0.5 Task 4 后，
 
 LifeInbox 已经形成：
 
@@ -2519,7 +2543,7 @@ User Confirmation
 Todo / Deadline
 ```
 
-V0.5 Task 1 到 Task 3 进一步建立：
+V0.5 Task 1 到 Task 4 进一步建立：
 
 ```text
 InboxItem
@@ -2533,6 +2557,8 @@ Java / MySQL Persisted Relation State
 Bounded Candidate Discovery
         +
 Runtime AI RELATED_TO Suggestions
+        ↓
+Additive / Idempotent Persistence
 ```
 
 因此当前架构主线仍然没有偏离最初设计。

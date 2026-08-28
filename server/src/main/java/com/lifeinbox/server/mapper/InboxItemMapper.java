@@ -144,6 +144,25 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
     );
 
     /**
+     * Task 44 在一个短事务中按 ID 顺序锁定 Source 与全部 Target，避免逐目标回查和反向 Pair 锁顺序不一致。
+     */
+    @Select("""
+            <script>
+            SELECT id, status
+            FROM inbox_item
+            WHERE id IN
+            <foreach collection="ids" item="id" open="(" separator="," close=")">
+              #{id}
+            </foreach>
+            ORDER BY id ASC
+            FOR UPDATE
+            </script>
+            """)
+    List<InboxItem> selectRelationEndpointsForUpdateByIds(
+            @Param("ids") List<Long> ids
+    );
+
+    /**
      * 内容准备在事务外完成；单条条件 UPDATE 只允许当前 PROCESSING Attempt 写入派生正文。
      */
     @Update("""
