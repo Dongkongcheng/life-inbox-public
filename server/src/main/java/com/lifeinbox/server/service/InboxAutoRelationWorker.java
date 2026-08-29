@@ -24,4 +24,13 @@ public class InboxAutoRelationWorker {
             LOGGER.warn("InboxItem {} 的自动 Relation Discovery 失败", inboxItemId, exception);
         }
     }
+
+    /** Backfill 在 Web 线程完成 Claim 后，把明确 Attempt 交给同一个失败隔离 Worker。 */
+    public void discoverClaimed(Long inboxItemId, String attemptId) {
+        try {
+            relationProcessingService.processClaimed(inboxItemId, attemptId);
+        } catch (RuntimeException exception) {
+            LOGGER.warn("InboxItem {} 的 Backfill Relation Discovery 失败", inboxItemId, exception);
+        }
+    }
 }

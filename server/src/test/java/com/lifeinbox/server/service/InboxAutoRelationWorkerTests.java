@@ -19,4 +19,17 @@ class InboxAutoRelationWorkerTests {
 
         verify(service).processAutomatic(1L);
     }
+
+    @Test
+    void claimedBackfillAttemptIsConsumedWithoutEscapingFailures() {
+        RelationProcessingService service = mock(RelationProcessingService.class);
+        InboxAutoRelationWorker worker = new InboxAutoRelationWorker(service);
+        when(service.processClaimed(2L, "attempt-b")).thenThrow(
+                new IllegalStateException("provider down")
+        );
+
+        assertDoesNotThrow(() -> worker.discoverClaimed(2L, "attempt-b"));
+
+        verify(service).processClaimed(2L, "attempt-b");
+    }
 }

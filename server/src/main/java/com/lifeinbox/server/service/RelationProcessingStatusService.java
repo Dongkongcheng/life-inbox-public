@@ -99,6 +99,39 @@ public class RelationProcessingStatusService {
         throw new ResponseStatusException(HttpStatus.CONFLICT, "Relation Discovery 正在进行中");
     }
 
+    /**
+     * Rediscovery 是 SUCCESS 的显式刷新动作；新 UUID 继续让既有 Attempt Guard 拒绝迟到结果。
+     */
+    @Transactional
+    public String claimRediscovery(Long inboxItemId) {
+        String attemptId = UUID.randomUUID().toString();
+        int updatedRows = inboxItemMapper.markRelationRediscoveryProcessing(
+                inboxItemId,
+                RelationProcessingStatus.SUCCESS,
+                RelationProcessingStatus.PROCESSING,
+                attemptId,
+                LocalDateTime.now(clock)
+        );
+        if (updatedRows == 1) {
+            return attemptId;
+        }
+
+        InboxItem current = inboxItemMapper.selectById(inboxItemId);
+        if (current == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "InboxItem 不存在");
+        }
+        if (!STATUS_ACTIVE.equals(current.getStatus())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "只有 ACTIVE InboxItem 可以重新发现 Relation"
+            );
+        }
+        throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "只有已完成 Relation Discovery 的 InboxItem 可以重新发现"
+        );
+    }
+
     /** 失败不删除既有关系，只结束仍属于当前调用的 Attempt。 */
     @Transactional
     public boolean markFailed(Long inboxItemId, String attemptId, String errorMessage) {

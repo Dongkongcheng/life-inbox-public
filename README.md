@@ -151,15 +151,22 @@ V0.5 Task 7
 Overall Task 47
 
 Automatic Relation Discovery & Processing Lifecycle
+
+V0.5 Task 8
+=
+Overall Task 48
+
+Relation Rediscovery & Historical Backfill Foundation
 ```
 
 Task 42 retrieves bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filters them through Java/MySQL. Task 43 sends
 only the bounded Source/Candidate text to one LLM call and returns strictly validated runtime `RELATED_TO` suggestions. Task 44 converts
 valid suggestions into canonical, additive, idempotent Relations after one short final-validation transaction. Task 45 exposes persisted
 Relations through a bounded, read-only MySQL Product API. Task 46 adds a lazy, read-only Related Items section to existing Inbox cards so the
-user can rediscover and focus related saved information. Task 47 now runs one guarded automatic discovery only after a new Source Vector is
-actually indexed, and provides a synchronous manual retry endpoint. It does not backfill historical rows or automatically rediscover
-`FAILED`/`SUCCESS` items.
+user can rediscover and focus related saved information. Task 47 runs one guarded automatic discovery only after a new Source Vector is
+actually indexed and provides a synchronous manual retry endpoint. Task 48 adds an explicit synchronous rediscovery endpoint for `SUCCESS`
+items and an explicit, bounded historical Backfill for `ACTIVE + NOT_PROCESSED` items whose Source Vector already exists. Neither operation
+deletes old Relations; Backfill never generates a missing Vector and nothing runs on a startup or periodic schedule.
 
 ---
 
@@ -496,8 +503,8 @@ The same ownership principle is reused where later AI processing requires protec
 
 V0.4 already applies this principle to Action processing.
 
-V0.5 Task 47 applies this same ownership rule to Relation processing. Automatic first-pass discovery and manual retries receive independent
-Relation Attempt IDs; stale attempts cannot insert Relations or change terminal state.
+V0.5 Tasks 47–48 apply this same ownership rule to Relation processing. Automatic first-pass discovery, manual retries, explicit SUCCESS
+rediscovery, and historical Backfill all use independent Relation Attempt IDs; stale attempts cannot insert Relations or change terminal state.
 
 ---
 
@@ -1388,6 +1395,13 @@ transactions. The final short transaction revalidates the current Attempt before
 new Relations with `SUCCESS` atomically. `POST /api/inbox/{id}/relations/discover` retries `FAILED` or stale `PROCESSING`; fresh `PROCESSING` and
 `SUCCESS` are rejected. Failures preserve existing Relations, and there is no historical scan or automatic rediscovery.
 
+Task 48 adds two explicit entry points without changing the additive persistence model. `POST /api/inbox/{id}/relations/rediscover` only
+accepts an ACTIVE Source in `SUCCESS`, creates a new Attempt, and synchronously reuses Task 42–44 plus the Task 47 Guard. Empty output and
+failure preserve all earlier Relations. `POST /api/relations/backfill?limit=10` selects only historical `ACTIVE + NOT_PROCESSED` rows in
+`id ASC` order, scans at most `min(limit * 5, 100)`, skips missing Source Vectors without changing their state, claims at most `1..20` items,
+and schedules them on the existing bounded AI executor. There is still no scheduled rediscovery, startup Backfill, automatic FAILED retry,
+automatic Vector repair, or relation cleanup.
+
 ---
 
 # MySQL First for Relations
@@ -1697,15 +1711,16 @@ The existing product should remain useful even when Relation Discovery is unavai
 
 # Relation Reprocessing
 
-If V0.5 later supports:
+Current retry, automatic first-pass discovery, explicit rediscovery, and bounded historical Backfill all follow one rule:
 
 ```text
 Retry
 Re-discovery
 Automatic Relation Discovery
+Historical Backfill
 ```
 
-new processing must not blindly:
+processing must not blindly:
 
 ```text
 DELETE existing relations
@@ -1717,7 +1732,8 @@ AI fails
 all previous relation data lost
 ```
 
-Replacement behavior must be defined explicitly by the corresponding task.
+Task 48 therefore keeps Rediscovery and Backfill additive and non-destructive. “Not rediscovered,” empty output, or a failed latest Attempt
+is not a deletion signal; destructive replacement remains unimplemented.
 
 If future Relations contain user-confirmed state:
 
@@ -2605,9 +2621,13 @@ Completed:
 
 ✅ V0.5 Task 7 / Overall Task 47
 — Automatic Relation Discovery & Processing Lifecycle
+
+✅ V0.5 Task 8 / Overall Task 48
+— Relation Rediscovery & Historical Backfill Foundation
 ```
 
-Historical backfill, automatic rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
+Scheduled/automatic SUCCESS rediscovery, startup or unlimited Backfill, automatic Vector repair, Relation cleanup, final hardening, and final
+V0.5 acceptance remain unimplemented future work.
 
 ---
 
@@ -3207,7 +3227,7 @@ Current intentional scope limitations include:
 * Calendar integration is not currently implemented.
 * Todo source traceability depends on available source data; deleted source content is not reconstructed from a snapshot.
 * Browser Extension Capture remains postponed.
-* V0.5 Relations is now the active development stage; Tasks 1–6 provide Relation persistence, discovery, read API, and UI, while Task 7 adds Vector-ready automatic first-pass processing plus guarded manual retry. Historical backfill and automatic rediscovery are not implemented.
+* V0.5 Relations is now the active development stage; Tasks 1–6 provide Relation persistence, discovery, read API, and UI, Task 7 adds Vector-ready automatic first-pass processing plus guarded manual retry, and Task 8 adds explicit bounded historical Backfill plus explicit SUCCESS Rediscovery. Startup/unlimited Backfill and automatic/scheduled Rediscovery are not implemented.
 * `content_relation` exists in the V0.5 Task 1 migration and fresh schema; existing V0.4 databases must apply the incremental migration.
 * The first version intentionally has no `relation_candidate` model.
 * The first version intentionally persists no Relation score; Task 42's `semanticScore` is a runtime-only Qdrant ranking signal, not Relation truth.
@@ -3483,13 +3503,19 @@ Overall Task 46
 V0.5 Task 7
 =
 Overall Task 47
+
+V0.5 Task 8
+=
+Overall Task 48
 ```
 
 Task 41 established the first concrete Relation Contract and persistence foundation. Task 42 added bounded semantic neighbor candidates
 without converting them into business Relation state. Task 43 added one bounded, strict AI judgment step. Task 44 added the explicit,
 non-destructive conversion of validated suggestions into business Relation state. Task 45 added the read-only MySQL Product API for bounded
 ACTIVE Related Items. Task 46 added lazy frontend display and navigation through existing Inbox cards. Task 47 added Vector-ready automatic
-first-pass processing and guarded manual retry. Historical backfill, automatic rediscovery, and final hardening remain separate tasks.
+first-pass processing and guarded manual retry. Task 48 added explicit SUCCESS rediscovery and explicit bounded historical processing for
+already vector-ready `ACTIVE + NOT_PROCESSED` items. Scheduled rediscovery, startup/unlimited Backfill, automatic Vector repair, Relation
+cleanup, and final hardening remain separate tasks.
 
 ---
 

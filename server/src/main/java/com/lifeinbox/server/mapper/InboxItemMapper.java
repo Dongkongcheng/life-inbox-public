@@ -250,6 +250,42 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
             @Param("staleBefore") java.time.LocalDateTime staleBefore
     );
 
+    /** Rediscover 只从 SUCCESS 原子领取新 Attempt，避免并发刷新产生两个 Owner。 */
+    @Update("""
+            UPDATE inbox_item
+            SET relation_status = #{processingStatus},
+                relation_attempt_id = #{attemptId},
+                relation_error_message = NULL,
+                relation_started_time = #{startedTime},
+                relation_finished_time = NULL
+            WHERE id = #{id}
+              AND status = 'ACTIVE'
+              AND relation_status = #{successStatus}
+            """)
+    int markRelationRediscoveryProcessing(
+            @Param("id") Long id,
+            @Param("successStatus") RelationProcessingStatus successStatus,
+            @Param("processingStatus") RelationProcessingStatus processingStatus,
+            @Param("attemptId") String attemptId,
+            @Param("startedTime") java.time.LocalDateTime startedTime
+    );
+
+    /**
+     * 历史补处理只扫描有界的 ACTIVE + NOT_PROCESSED 集合；稳定 ID 顺序让多次小批执行可预测。
+     */
+    @Select("""
+            SELECT id, status, relation_status
+            FROM inbox_item
+            WHERE status = 'ACTIVE'
+              AND relation_status = #{notProcessedStatus}
+            ORDER BY id ASC
+            LIMIT #{scanLimit}
+            """)
+    List<InboxItem> selectRelationBackfillCandidates(
+            @Param("notProcessedStatus") RelationProcessingStatus notProcessedStatus,
+            @Param("scanLimit") int scanLimit
+    );
+
     /** 只允许当前 Relation Attempt 记录失败，迟到旧请求没有状态写权限。 */
     @Update("""
             UPDATE inbox_item

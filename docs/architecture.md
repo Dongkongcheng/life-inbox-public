@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 7 / Overall Task 47
-— Automatic Relation Discovery & Processing Lifecycle
+V0.5 Task 8 / Overall Task 48
+— Relation Rediscovery & Historical Backfill Foundation
 ```
 
-V0.5 当前已完成 Relation 持久化、候选与 AI 判断、只读 Product API、前端 Related Items，以及 Vector 成功后的自动首次处理和手动重试生命周期；历史回填和自动重新发现尚未实现。
+V0.5 当前已完成 Relation 持久化、候选与 AI 判断、只读 Product API、前端 Related Items、Vector 成功后的自动首次处理和手动重试生命周期，以及显式 SUCCESS Rediscovery 和显式有界历史 Backfill。定时重新发现、启动时回填和自动 Vector 修复尚未实现。
 
 ---
 
@@ -2084,6 +2084,36 @@ Qdrant 和 LLM 调用期间不持有数据库事务。最终事务在任何 INSE
 SUCCESS Guard 失败，当前事务内新增关系全部回滚。Archive/Delete 通过最终 ACTIVE/存在性校验阻断写入，失败收尾不删除任何
 已有 Relation。`relationStatus` 和派生 stale 值可随 InboxItem 返回，Attempt、错误详情与时间戳不向产品 API 暴露。
 
+Task 48 在同一所有权模型上增加两个显式入口：
+
+```text
+ACTIVE + SUCCESS
+        ↓ explicit POST /relations/rediscover
+new UUID Attempt (SUCCESS → PROCESSING)
+        ↓
+Task 42 + Task 43 + Task 44 + existing Attempt Guard
+        ↓
+additive SUCCESS / guarded FAILED
+
+Historical ACTIVE + NOT_PROCESSED
+        ↓ explicit POST /api/relations/backfill?limit=1..20
+bounded DB scan: id ASC, min(limit * 5, 100)
+        ↓
+existing Source Vector readiness probe
+        ↓
+shared atomic NOT_PROCESSED Claim
+        ↓
+existing bounded aiTaskExecutor + Task 47 Worker
+```
+
+Rediscovery 与原 `discover` 保持不同状态契约：`discover` 处理 NOT_PROCESSED、FAILED 和 stale PROCESSING，`rediscover` 只处理
+SUCCESS。两者都会生成新 Attempt，远程调用在事务外，最终写入前由同一 Attempt Guard 核对 Owner。Rediscovery 只新增关系；空结果、
+失败和“本次没有再次发现”都不会删除旧行。
+
+Backfill 只选 ACTIVE + NOT_PROCESSED，FAILED 继续走手动重试，SUCCESS 继续走显式 Rediscovery，PROCESSING 由当前 Owner 负责。
+Vector 缺失时只跳过并保持 NOT_PROCESSED；该入口不调用 Vector Index 或 Embedding。Backfill 没有持久任务、Cursor、启动扫描或定时器，
+队列拒绝会通过当前 Attempt 的失败收尾避免永久 PROCESSING。
+
 ---
 
 # 39. V1.0 Personal AI
@@ -2462,9 +2492,10 @@ Reminder 与 Calendar 仍未实现。
 ✅ Task 5 Related Items Product API
 ✅ Task 6 Frontend Related Items UI
 ✅ Task 7 Automatic Relation Discovery & Processing Lifecycle
+✅ Task 8 Relation Rediscovery & Historical Backfill Foundation
 ```
 
-当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API、Task 46 懒加载 UI，以及 Task 47 Vector-ready 自动首次处理与手动重试生命周期；历史回填和自动重新发现仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API、Task 46 懒加载 UI、Task 47 Vector-ready 自动首次处理与手动重试，以及 Task 48 显式 SUCCESS Rediscovery 与显式有界历史 Backfill；定时重新发现、启动/无限回填和自动 Vector 修复仍未实现。
 
 ---
 
