@@ -119,6 +119,27 @@ class RelationDiscoveryPersistenceServiceTests {
     }
 
     @Test
+    void invalidSelfOrDuplicateSuggestionTargetInvalidatesWholeResult() {
+        List<List<RelationDiscoverySuggestion>> invalidResults = List.of(
+                List.of(suggestion(123L, null)),
+                List.of(suggestion(123L, 0L)),
+                List.of(suggestion(123L, 123L)),
+                List.of(suggestion(123L, 456L), suggestion(123L, 456L))
+        );
+
+        for (List<RelationDiscoverySuggestion> invalidResult : invalidResults) {
+            when(relationDiscoveryService.discoverRelations(123L, 20)).thenReturn(
+                    invalidResult
+            );
+            assertThrows(
+                    AiServiceUnavailableException.class,
+                    () -> service.discoverAndPersistRelations(123L, 20)
+            );
+        }
+        verify(contentRelationService, never()).ensureRelatedToBatch(any(), any());
+    }
+
+    @Test
     void oversizedSuggestionResultInvalidatesWholeResult() {
         List<RelationDiscoverySuggestion> suggestions = new ArrayList<>();
         for (long targetId = 1L;
