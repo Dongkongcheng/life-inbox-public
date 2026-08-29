@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { requestJson } from '../apiClient.js'
 import {
   ACTION_CANDIDATE_STATUS,
   actionCandidateDeadline,
@@ -50,25 +51,6 @@ const finishCandidateOperation = (candidateId) => {
   const next = { ...candidateOperations.value }
   delete next[candidateId]
   candidateOperations.value = next
-}
-
-const parseResponseError = async (response, fallbackMessage) => {
-  let message = fallbackMessage
-  try {
-    const problem = await response.json()
-    message = problem.detail || problem.message || message
-  } catch {
-    // 产品错误不保证带 JSON，保留当前操作对应的安全提示。
-  }
-  const error = new Error(message)
-  error.status = response.status
-  return error
-}
-
-const requestJson = async (endpoint, options, fallbackMessage) => {
-  const response = await fetch(endpoint, options)
-  if (!response.ok) throw await parseResponseError(response, fallbackMessage)
-  return response.json()
 }
 
 const loadCandidates = async ({ preserveMessages = false } = {}) => {

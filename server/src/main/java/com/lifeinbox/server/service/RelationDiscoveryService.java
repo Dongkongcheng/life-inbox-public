@@ -5,7 +5,6 @@ import com.lifeinbox.server.dto.AiRelationDiscoveryItem;
 import com.lifeinbox.server.dto.AiRelationDiscoveryResponse;
 import com.lifeinbox.server.dto.RelationDiscoveryCandidate;
 import com.lifeinbox.server.dto.RelationDiscoverySuggestion;
-import com.lifeinbox.server.entity.ContentRelation;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.entity.RelationType;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
@@ -131,9 +130,8 @@ public class RelationDiscoveryService {
         }
 
         Map<Long, InboxItem> activeCandidates = activeItemsById(resolvedCandidates);
-        Set<Long> relatedIds = relatedInboxItemIds(
-                sourceInboxItemId,
-                contentRelationService.findByInboxItemId(sourceInboxItemId)
+        Set<Long> relatedIds = contentRelationService.findRelatedInboxItemIds(
+                sourceInboxItemId
         );
         List<AiRelationDiscoveryItem> aiCandidates = new ArrayList<>();
         for (Long candidateId : candidateIds) {
@@ -223,33 +221,6 @@ public class RelationDiscoveryService {
             activeItems.putIfAbsent(item.getId(), item);
         }
         return activeItems;
-    }
-
-    private Set<Long> relatedInboxItemIds(
-            Long sourceInboxItemId,
-            List<ContentRelation> relations
-    ) {
-        if (relations == null) {
-            throw new ResponseStatusException(
-                    HttpStatus.INTERNAL_SERVER_ERROR,
-                    "Relation 查询失败"
-            );
-        }
-
-        Set<Long> relatedIds = new HashSet<>();
-        for (ContentRelation relation : relations) {
-            if (relation == null || relation.getRelationType() != RelationType.RELATED_TO) {
-                continue;
-            }
-            if (sourceInboxItemId.equals(relation.getLeftInboxItemId())) {
-                relatedIds.add(relation.getRightInboxItemId());
-            } else if (sourceInboxItemId.equals(relation.getRightInboxItemId())) {
-                relatedIds.add(relation.getLeftInboxItemId());
-            }
-        }
-        relatedIds.remove(null);
-        relatedIds.remove(sourceInboxItemId);
-        return relatedIds;
     }
 
     private List<Long> validateReturnedIds(

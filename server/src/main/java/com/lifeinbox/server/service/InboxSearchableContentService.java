@@ -95,6 +95,61 @@ public class InboxSearchableContentService {
         return normalize(source);
     }
 
+    /**
+     * Relation 与 Rerank 共享同一份条目级文本语义，只由调用方决定各自的字符上限。
+     * 截断仅作用于本次请求表示，不修改原始内容或已持久化的 Searchable Content。
+     */
+    String buildBoundedRetrievalText(InboxItem inboxItem, int maxChars) {
+        if (inboxItem == null) {
+            return null;
+        }
+        if (maxChars <= 0) {
+            throw new IllegalArgumentException("maxChars 必须大于 0");
+        }
+
+        StringBuilder text = new StringBuilder(maxChars);
+        appendSection(text, "标题", normalize(inboxItem.getTitle()), maxChars);
+        appendSection(text, "摘要", normalize(inboxItem.getSummary()), maxChars);
+        appendSection(text, "正文", resolveForRetrieval(inboxItem), maxChars);
+        return text.isEmpty() ? null : text.toString();
+    }
+
+    private void appendSection(
+            StringBuilder target,
+            String label,
+            String value,
+            int maxChars
+    ) {
+        if (value == null || target.length() >= maxChars) {
+            return;
+        }
+
+        String prefix = (target.isEmpty() ? "" : "\n") + label + "：";
+        int remaining = maxChars - target.length();
+        if (remaining <= prefix.length()) {
+            return;
+        }
+        String truncatedValue = truncateWithoutSplittingSurrogate(
+                value,
+                remaining - prefix.length()
+        );
+        if (!truncatedValue.isEmpty()) {
+            target.append(prefix).append(truncatedValue);
+        }
+    }
+
+    private String truncateWithoutSplittingSurrogate(String value, int maxChars) {
+        if (value.length() <= maxChars) {
+            return value;
+        }
+        int endIndex = maxChars;
+        if (Character.isHighSurrogate(value.charAt(endIndex - 1))
+                && Character.isLowSurrogate(value.charAt(endIndex))) {
+            endIndex--;
+        }
+        return value.substring(0, endIndex);
+    }
+
     String normalize(String content) {
         if (content == null) {
             return null;

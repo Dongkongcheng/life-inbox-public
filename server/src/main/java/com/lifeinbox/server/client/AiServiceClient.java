@@ -1,14 +1,12 @@
 package com.lifeinbox.server.client;
 
 import com.lifeinbox.server.dto.AiHealthResponse;
-import com.lifeinbox.server.dto.AiImageErrorResponse;
 import com.lifeinbox.server.dto.AiActionExtractionRequest;
 import com.lifeinbox.server.dto.AiActionExtractionResponse;
 import com.lifeinbox.server.dto.AiAnalyzeRequest;
 import com.lifeinbox.server.dto.AiAnalyzeResponse;
 import com.lifeinbox.server.dto.AiEmbeddingRequest;
 import com.lifeinbox.server.dto.AiEmbeddingResponse;
-import com.lifeinbox.server.dto.AiFileErrorResponse;
 import com.lifeinbox.server.dto.AiPreparedContentResponse;
 import com.lifeinbox.server.dto.AiRelationDiscoveryItem;
 import com.lifeinbox.server.dto.AiRelationDiscoveryRequest;
@@ -21,7 +19,6 @@ import com.lifeinbox.server.dto.AiSemanticSearchCandidate;
 import com.lifeinbox.server.dto.AiSemanticSearchRequest;
 import com.lifeinbox.server.dto.AiSemanticSearchResponse;
 import com.lifeinbox.server.dto.AiUrlAnalyzeRequest;
-import com.lifeinbox.server.dto.AiUrlErrorResponse;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
 import com.lifeinbox.server.dto.AiVectorIndexRequest;
 import com.lifeinbox.server.dto.AiVectorIndexResponse;
@@ -663,7 +660,9 @@ public class AiServiceClient {
 
     private UrlAnalyzeException parseKnownUrlFailure(RestClientResponseException exception) {
         try {
-            AiUrlErrorResponse errorResponse = exception.getResponseBodyAs(AiUrlErrorResponse.class);
+            AiContentErrorResponse errorResponse = exception.getResponseBodyAs(
+                    AiContentErrorResponse.class
+            );
             if (errorResponse == null) {
                 return null;
             }
@@ -678,7 +677,9 @@ public class AiServiceClient {
 
     private FileAnalyzeException parseKnownFileFailure(RestClientResponseException exception) {
         try {
-            AiFileErrorResponse errorResponse = exception.getResponseBodyAs(AiFileErrorResponse.class);
+            AiContentErrorResponse errorResponse = exception.getResponseBodyAs(
+                    AiContentErrorResponse.class
+            );
             if (errorResponse == null) {
                 return null;
             }
@@ -693,8 +694,8 @@ public class AiServiceClient {
 
     private ImageAnalyzeException parseKnownImageFailure(RestClientResponseException exception) {
         try {
-            AiImageErrorResponse errorResponse = exception.getResponseBodyAs(
-                    AiImageErrorResponse.class
+            AiContentErrorResponse errorResponse = exception.getResponseBodyAs(
+                    AiContentErrorResponse.class
             );
             if (errorResponse == null) {
                 return null;
@@ -706,5 +707,9 @@ public class AiServiceClient {
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    /** 三类内容提取错误共享同一上游 JSON 结构，但该结构只属于本 HTTP Client。 */
+    private record AiContentErrorResponse(String code, String detail) {
     }
 }

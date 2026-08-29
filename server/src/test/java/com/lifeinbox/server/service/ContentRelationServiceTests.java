@@ -18,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -153,6 +154,23 @@ class ContentRelationServiceTests {
 
         verify(contentRelationMapper).selectByInboxItemId(20L);
         verify(inboxItemMapper, never()).selectById(20L);
+    }
+
+    @Test
+    void relatedIdsHideCanonicalStorageDirectionAndIgnoreMalformedRows() {
+        ContentRelation leftSource = relation(6L, 10L, 20L);
+        ContentRelation rightSource = relation(7L, 5L, 10L);
+        ContentRelation unrelated = relation(8L, 30L, 40L);
+        ContentRelation wrongType = relation(9L, 10L, 50L);
+        wrongType.setRelationType(null);
+        when(contentRelationMapper.selectByInboxItemId(10L)).thenReturn(List.of(
+                leftSource,
+                rightSource,
+                unrelated,
+                wrongType
+        ));
+
+        assertEquals(Set.of(5L, 20L), service.findRelatedInboxItemIds(10L));
     }
 
     @ParameterizedTest
