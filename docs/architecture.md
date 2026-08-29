@@ -54,18 +54,18 @@ V0.1 — Universal Inbox       ✅ Completed
 V0.2 — AI Organizer          ✅ Completed
 V0.3 — Smart Search          ✅ Completed
 V0.4 — Action Extractor      ✅ Completed
-V0.5 — Relations             🚧 Current
+V0.5 — Relations             ✅ Completed
 V1.0 — Personal AI           📋 Planned
 ```
 
 当前稳定架构基线：
 
 ```text
-V0.5 Task 9 / Overall Task 49
-— Relations Hardening / Integration / Full Regression
+V0.5 Task 10 / Overall Task 50
+— V0.5 Final Acceptance / Cleanup / Release Preparation
 ```
 
-V0.5 当前已完成 Relation 持久化、候选与 AI 判断、只读 Product API、前端 Related Items、Vector 成功后的自动首次处理和手动重试生命周期，以及显式 SUCCESS Rediscovery 和显式有界历史 Backfill。Task 49 已完成整体边界、并发、事务、降级和回归加固；定时重新发现、启动时回填、自动 Vector 修复和最终版本验收尚未实现。
+V0.5 已完成 Relation 持久化、候选与 AI 判断、只读 Product API、前端 Related Items、Vector 成功后的自动首次处理和手动重试生命周期，以及显式 SUCCESS Rediscovery 和显式有界历史 Backfill。Task 49 完成整体边界、并发、事务、降级和回归加固，Task 50 完成最终验收、清理和发布准备。定时重新发现、启动时回填、自动 Vector 修复和 V1.0 不属于已完成的 V0.5 范围。
 
 ---
 
@@ -2484,7 +2484,7 @@ Reminder 与 Calendar 仍未实现。
 当前：
 
 ```text
-🚧 V0.5 Current
+✅ V0.5 Completed
 ✅ Task 1 Relation Persistence Foundation
 ✅ Task 2 Bounded Relation Candidate Discovery
 ✅ Task 3 AI Relation Discovery Foundation
@@ -2494,9 +2494,10 @@ Reminder 与 Calendar 仍未实现。
 ✅ Task 7 Automatic Relation Discovery & Processing Lifecycle
 ✅ Task 8 Relation Rediscovery & Historical Backfill Foundation
 ✅ Task 9 Relations Hardening / Integration / Full Regression
+✅ Task 10 V0.5 Final Acceptance / Cleanup / Release Preparation
 ```
 
-当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API、Task 46 懒加载 UI、Task 47 Vector-ready 自动首次处理与手动重试，以及 Task 48 显式 SUCCESS Rediscovery 与显式有界历史 Backfill；Task 49 已完成集成加固和完整回归，定时重新发现、启动/无限回填、自动 Vector 修复和最终 V0.5 验收仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API、Task 46 懒加载 UI、Task 47 Vector-ready 自动首次处理与手动重试，以及 Task 48 显式 SUCCESS Rediscovery 与显式有界历史 Backfill；Task 49 已完成集成加固和完整回归，Task 50 已完成最终验收和发布准备。定时重新发现、启动/无限回填和自动 Vector 修复仍不属于 V0.5 完成范围。
 
 ---
 
@@ -2619,7 +2620,7 @@ Action
 
 # 46. 当前架构结论
 
-截至 V0.4 完成并进入 V0.5 Task 5 后，
+截至 V0.5 Task 10 最终验收完成后，
 
 LifeInbox 已经形成：
 
@@ -2655,7 +2656,7 @@ User Confirmation
 Todo / Deadline
 ```
 
-V0.5 Task 1 到 Task 7 进一步建立：
+V0.5 Task 1 到 Task 10 进一步建立：
 
 ```text
 InboxItem
@@ -2679,9 +2680,15 @@ Lazy Vue Related Items Section
 Vector-ready Automatic First-pass Processing
         +
 Attempt-guarded Manual Retry
+        +
+Explicit SUCCESS Rediscovery
+        +
+Bounded Historical Backfill
         ↓
 User Rediscovery
 ```
+
+Task 49 对上述集成生命周期完成加固和完整回归，Task 50 完成最终验收、文档清理和发布准备，没有引入新的 Relation 产品能力或数据库结构。
 
 因此当前架构主线仍然没有偏离最初设计。
 
