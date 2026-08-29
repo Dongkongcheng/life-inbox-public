@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ContentRelationMigrationTests {
 
     private static final List<String> V04_TABLES = List.of(
-            "inbox_item",
             "tag",
             "inbox_tag",
             "inbox_keyword",
@@ -24,7 +23,7 @@ class ContentRelationMigrationTests {
     );
 
     @Test
-    void freshV05SchemaEqualsV04SchemaPlusTask1RelationTable() throws IOException {
+    void freshV05SchemaPreservesV04ProductTablesAndTask1RelationTable() throws IOException {
         String v04 = Files.readString(sqlPath("v0.4-schema.sql"));
         String incremental = Files.readString(sqlPath("v0.5-task1-add-content-relation.sql"));
         String fresh = Files.readString(sqlPath("v0.5-schema.sql"));

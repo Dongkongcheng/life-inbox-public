@@ -52,6 +52,9 @@ class InboxServiceTests {
     private final ActionProcessingStatusService actionStatusService = mock(
             ActionProcessingStatusService.class
     );
+    private final RelationProcessingStatusService relationStatusService = mock(
+            RelationProcessingStatusService.class
+    );
     private final InboxCapturePersistenceService capturePersistenceService = mock(
             InboxCapturePersistenceService.class
     );
@@ -71,6 +74,7 @@ class InboxServiceTests {
             fileStorageService,
             analysisStatusService,
             actionStatusService,
+            relationStatusService,
             capturePersistenceService,
             vectorIndexScheduler,
             aiServiceClient,
@@ -92,6 +96,7 @@ class InboxServiceTests {
         ));
         when(analysisStatusService.isProcessingStale(item)).thenReturn(true);
         when(actionStatusService.isProcessingStale(item)).thenReturn(true);
+        when(relationStatusService.isProcessingStale(item)).thenReturn(true);
 
         List<InboxItem> result = inboxService.list();
 
@@ -103,6 +108,7 @@ class InboxServiceTests {
         ), result.getFirst().getEntities());
         assertTrue(result.getFirst().isAiProcessingStale());
         assertTrue(result.getFirst().isActionProcessingStale());
+        assertTrue(result.getFirst().isRelationProcessingStale());
         verify(inboxTagMapper).selectTagNamesByInboxItemId(1L);
         verify(inboxKeywordMapper).selectKeywordsByInboxItemId(1L);
         verify(inboxEntityMapper).selectEntitiesByInboxItemId(1L);
@@ -1056,6 +1062,7 @@ class InboxServiceTests {
                 fileStorageService,
                 analysisStatusService,
                 actionStatusService,
+                relationStatusService,
                 capturePersistenceService,
                 vectorIndexScheduler,
                 aiServiceClient,

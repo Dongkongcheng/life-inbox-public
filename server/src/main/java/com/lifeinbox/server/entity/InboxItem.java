@@ -78,6 +78,27 @@ public class InboxItem {
     @TableField(exist = false)
     private boolean actionProcessingStale;
 
+    /** Relation Discovery 与其他 AI 生命周期独立，状态可供产品 UI 判断是否可重试。 */
+    private RelationProcessingStatus relationStatus = RelationProcessingStatus.NOT_PROCESSED;
+
+    /** 当前 Relation Attempt 的内部所有权标识，不向产品 API 暴露。 */
+    @JsonIgnore
+    private String relationAttemptId;
+
+    /** 只保存安全简短诊断，避免泄露正文、Provider 响应或异常栈。 */
+    @JsonIgnore
+    private String relationErrorMessage;
+
+    @JsonIgnore
+    private LocalDateTime relationStartedTime;
+
+    @JsonIgnore
+    private LocalDateTime relationFinishedTime;
+
+    /** stale 是运行时判断，不新增第五种 Relation 数据库状态。 */
+    @TableField(exist = false)
+    private boolean relationProcessingStale;
+
     /** 标签存放在关系表中，这个字段只用于 API 返回，不映射 inbox_item 列。 */
     @TableField(exist = false)
     private List<String> tags = List.of();
@@ -264,6 +285,54 @@ public class InboxItem {
 
     public void setActionProcessingStale(boolean actionProcessingStale) {
         this.actionProcessingStale = actionProcessingStale;
+    }
+
+    public RelationProcessingStatus getRelationStatus() {
+        return relationStatus;
+    }
+
+    public void setRelationStatus(RelationProcessingStatus relationStatus) {
+        this.relationStatus = relationStatus;
+    }
+
+    public String getRelationAttemptId() {
+        return relationAttemptId;
+    }
+
+    public void setRelationAttemptId(String relationAttemptId) {
+        this.relationAttemptId = relationAttemptId;
+    }
+
+    public String getRelationErrorMessage() {
+        return relationErrorMessage;
+    }
+
+    public void setRelationErrorMessage(String relationErrorMessage) {
+        this.relationErrorMessage = relationErrorMessage;
+    }
+
+    public LocalDateTime getRelationStartedTime() {
+        return relationStartedTime;
+    }
+
+    public void setRelationStartedTime(LocalDateTime relationStartedTime) {
+        this.relationStartedTime = relationStartedTime;
+    }
+
+    public LocalDateTime getRelationFinishedTime() {
+        return relationFinishedTime;
+    }
+
+    public void setRelationFinishedTime(LocalDateTime relationFinishedTime) {
+        this.relationFinishedTime = relationFinishedTime;
+    }
+
+    public boolean isRelationProcessingStale() {
+        return relationProcessingStale;
+    }
+
+    public void setRelationProcessingStale(boolean relationProcessingStale) {
+        this.relationProcessingStale = relationProcessingStale;
     }
 
     public List<String> getTags() {

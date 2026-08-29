@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.entity.ContentRelation;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.entity.RelationType;
+import com.lifeinbox.server.entity.RelationProcessingStatus;
 import com.lifeinbox.server.mapper.ContentRelationMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,6 +98,38 @@ class ContentRelationTransactionProxyTests {
         assertThrows(
                 IllegalStateException.class,
                 () -> service.ensureRelatedToBatch(20L, List.of(10L, 30L))
+        );
+
+        verify(transactionManager).rollback(transaction);
+        verify(transactionManager, never()).commit(transaction);
+    }
+
+    @Test
+    void lostAttemptAtSuccessRollsBackRelationsWrittenByTheSameTransaction() {
+        SimpleTransactionStatus transaction = new SimpleTransactionStatus();
+        when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(transaction);
+        InboxItem source = item(20L);
+        source.setRelationStatus(RelationProcessingStatus.PROCESSING);
+        source.setRelationAttemptId("attempt-a");
+        when(inboxItemMapper.selectRelationEndpointsForUpdateByIds(List.of(10L, 20L)))
+                .thenReturn(List.of(item(10L), source));
+        when(contentRelationMapper.selectByInboxItemId(20L)).thenReturn(List.of());
+        when(contentRelationMapper.insert(any(ContentRelation.class))).thenReturn(1);
+        when(inboxItemMapper.markRelationSuccess(
+                20L,
+                "attempt-a",
+                RelationProcessingStatus.PROCESSING,
+                RelationProcessingStatus.SUCCESS
+        )).thenReturn(0);
+
+        assertThrows(
+                RuntimeException.class,
+                () -> service.ensureRelatedToBatchForAttempt(
+                        20L,
+                        "attempt-a",
+                        List.of(10L)
+                )
         );
 
         verify(transactionManager).rollback(transaction);

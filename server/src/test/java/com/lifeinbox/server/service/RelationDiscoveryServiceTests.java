@@ -104,6 +104,24 @@ class RelationDiscoveryServiceTests {
     }
 
     @Test
+    void lifecycleDiscoveryRejectsVectorNotReadyButAcceptsIndexedZeroCandidates() {
+        when(inboxItemMapper.selectById(123L)).thenReturn(source());
+        when(candidateDiscoveryService.discoverCandidatesWithReadiness(123L, 20))
+                .thenReturn(new RelationCandidateDiscoveryResult(false, List.of()));
+
+        ResponseStatusException notReady = assertThrows(
+                ResponseStatusException.class,
+                () -> service.discoverRelationsForProcessing(123L, null)
+        );
+
+        assertEquals(HttpStatus.CONFLICT, notReady.getStatusCode());
+        when(candidateDiscoveryService.discoverCandidatesWithReadiness(123L, 20))
+                .thenReturn(new RelationCandidateDiscoveryResult(true, List.of()));
+        assertEquals(List.of(), service.discoverRelationsForProcessing(123L, null));
+        verify(aiServiceClient, never()).discoverRelations(any(), any());
+    }
+
+    @Test
     void noLlmRelationsIsAValidEmptyResult() {
         stubDiscovery(
                 List.of(new RelationDiscoveryCandidate(456L, 0.9)),

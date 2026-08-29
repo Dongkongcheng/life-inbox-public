@@ -1828,14 +1828,29 @@ InboxItem 查询关系。
 新建关系要求两个端点当前都存在且为 `ACTIVE`。Archive 只改变 InboxItem 状态，不删除已有 Relation；真正删除任一端点时，
 两个外键的 `ON DELETE CASCADE` 清理失去意义的 Relation。这个生命周期与使用 `SET NULL` 保留独立 Todo 的规则不同。
 
-当前没有 `relation_candidate`，也不持久化 score、reason/evidence、origin/provider metadata 或 Relation processing state。
+当前没有 `relation_candidate`，也不持久化 score、reason/evidence 或 origin/provider metadata。
 Task 42 的 `RelationDiscoveryCandidate` 只存在于一次 Java 调用的内存中，`semanticScore` 也是 Qdrant 返回的瞬时排序信号；
 候选发现不会 INSERT `content_relation`。Task 43 的 AI 判断同样只返回运行时 `RELATED_TO` 建议，不持久化建议、评分、证据或状态。
 Task 44 复用 Task 41 的同一张表，把通过最终业务校验的建议新增为正式 Relation，不新增 Schema 或 Migration。写入只做 Canonical、
 幂等的新增：Source 无效使整次事务失败，单个无效 Target 被跳过，空结果、Provider 失败或后续未再次发现都不会删除已有行。
 Task 45 同样不修改 Schema：Product Read 同时读取 Canonical Pair 两侧，JOIN `inbox_item` 过滤 ACTIVE Target，并按 Relation
 `created_time DESC, id DESC` 有界排序。Archive 仍保留 Relation Row，只是不再出现在普通 ACTIVE Related Items 中。
-前端和自动处理仍未实现。
+Task 46 前端只读取这张表。Task 47 自动/手动处理仍只做新增，不会因失败、空结果或重试删除已有行。
+
+## Relation Processing Metadata
+
+Task 47 在 `inbox_item` 增加独立生命周期列：
+
+| 字段 | 类型 | 约束 / 语义 |
+| --- | --- | --- |
+| `relation_status` | `VARCHAR(32)` | 非空，默认 `NOT_PROCESSED`；允许 `PROCESSING / SUCCESS / FAILED` |
+| `relation_attempt_id` | `VARCHAR(36)` | 当前内部 UUID Attempt，不向产品 JSON 暴露 |
+| `relation_error_message` | `VARCHAR(255)` | 安全、截断后的内部失败摘要 |
+| `relation_started_time` | `DATETIME` | 当前 Attempt 开始时间，用于 stale 接管 |
+| `relation_finished_time` | `DATETIME` | SUCCESS/FAILED 结束时间 |
+
+这些字段与 `ai_*`、`action_*` 独立。stale 是 Java 运行时派生值，不存第五种状态。历史数据升级后默认
+`NOT_PROCESSED`，但 Task 47 不扫描或自动回填；只有新的成功 Vector 事件或用户手动 POST 才会领取处理。
 
 ---
 
@@ -2070,19 +2085,20 @@ Deadline 第一版继续使用 `todo.due_date`，Reminder 仍未建表。
 docs/sql/v0.5-schema.sql
 ```
 
-它保持 V0.4 全部表结构不变，并增加与 Task 1 增量 Migration 完全一致的 `content_relation`。
+它保留 V0.4 产品表，增加与 Task 1 Migration 一致的 `content_relation`，并包含 Task 7 的 InboxItem Relation Processing Metadata。
 
 ---
 
 # 54. V0.5 Incremental Migration
 
-已有 V0.4 数据库进入当前 V0.5 Task 1：
+已有 V0.4 数据库进入当前 V0.5 Task 7，按顺序执行：
 
 ```text
 docs/sql/v0.5-task1-add-content-relation.sql
+docs/sql/v0.5-task7-add-relation-processing-state.sql
 ```
 
-历史 `v0.4-schema.sql` 与 V0.4 增量 Migration 保持不可变。
+Task 7 Migration 只 `ALTER inbox_item`，不更新历史行、不创建 Candidate 表。历史 Schema 与历史增量 Migration 保持不可变。
 
 ---
 
@@ -2130,12 +2146,13 @@ docs/sql/v0.4-task4-add-todo.sql
 docs/sql/v0.4-task7-add-action-processing-state.sql
 ```
 
-## 从 V0.4 进入当前 V0.5 Task 1
+## 从 V0.4 进入当前 V0.5 Task 7
 
 执行：
 
 ```text
 docs/sql/v0.5-task1-add-content-relation.sql
+docs/sql/v0.5-task7-add-relation-processing-state.sql
 ```
 
 进入一个版本：
@@ -2181,7 +2198,7 @@ Not Yet Implemented
 
 # 57. 当前数据库总结
 
-截至 V0.5 Task 5 / Overall Task 45（数据库结构仍与 Task 41 相同）：
+截至 V0.5 Task 7 / Overall Task 47（业务表数量不变，InboxItem 新增 Relation Processing Metadata）：
 
 ```text
 MySQL
@@ -2216,6 +2233,8 @@ V0.5 Task 2 — Bounded Relation Candidate Discovery (runtime only, no schema ch
 V0.5 Task 3 — AI Relation Discovery Foundation (runtime only, no schema change)
 V0.5 Task 4 — Relation Persistence Integration (additive/idempotent, no schema change)
 V0.5 Task 5 — Related Items Product API (bounded read-only query, no schema change)
+V0.5 Task 6 — Frontend Related Items UI (no schema change)
+V0.5 Task 7 — Automatic Relation Discovery & Processing Lifecycle (inbox_item lifecycle columns)
 ```
 
 当前已形成两个不同生命周期的数据方向：

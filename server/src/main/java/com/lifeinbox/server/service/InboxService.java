@@ -73,6 +73,7 @@ public class InboxService {
     private final FileStorageService fileStorageService;
     private final InboxAnalysisStatusService analysisStatusService;
     private final ActionProcessingStatusService actionStatusService;
+    private final RelationProcessingStatusService relationStatusService;
     private final InboxCapturePersistenceService capturePersistenceService;
     private final InboxVectorIndexScheduler vectorIndexScheduler;
     private final AiServiceClient aiServiceClient;
@@ -88,6 +89,7 @@ public class InboxService {
             FileStorageService fileStorageService,
             InboxAnalysisStatusService analysisStatusService,
             ActionProcessingStatusService actionStatusService,
+            RelationProcessingStatusService relationStatusService,
             InboxCapturePersistenceService capturePersistenceService,
             InboxVectorIndexScheduler vectorIndexScheduler,
             AiServiceClient aiServiceClient,
@@ -102,6 +104,7 @@ public class InboxService {
         this.fileStorageService = fileStorageService;
         this.analysisStatusService = analysisStatusService;
         this.actionStatusService = actionStatusService;
+        this.relationStatusService = relationStatusService;
         this.capturePersistenceService = capturePersistenceService;
         this.vectorIndexScheduler = vectorIndexScheduler;
         this.aiServiceClient = aiServiceClient;
@@ -549,6 +552,7 @@ public class InboxService {
             );
             item.setAiProcessingStale(analysisStatusService.isProcessingStale(item));
             item.setActionProcessingStale(actionStatusService.isProcessingStale(item));
+            item.setRelationProcessingStale(relationStatusService.isProcessingStale(item));
         }
         return items;
     }

@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.dto.RelationPersistenceResult;
 import com.lifeinbox.server.entity.ContentRelation;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.entity.RelationProcessingStatus;
 import com.lifeinbox.server.entity.RelationType;
 import com.lifeinbox.server.mapper.ContentRelationMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
@@ -88,6 +89,30 @@ public class ContentRelationService {
             Long sourceInboxItemId,
             List<Long> suggestedTargetIds
     ) {
+        return ensureRelatedToBatchInternal(sourceInboxItemId, null, suggestedTargetIds);
+    }
+
+    /** 当前 Attempt 的增量 Relation 写入与 SUCCESS 在同一短事务原子提交。 */
+    @Transactional
+    public RelationPersistenceResult ensureRelatedToBatchForAttempt(
+            Long sourceInboxItemId,
+            String attemptId,
+            List<Long> suggestedTargetIds
+    ) {
+        if (attemptId == null || attemptId.isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Relation Attempt ID 不能为空"
+            );
+        }
+        return ensureRelatedToBatchInternal(sourceInboxItemId, attemptId, suggestedTargetIds);
+    }
+
+    private RelationPersistenceResult ensureRelatedToBatchInternal(
+            Long sourceInboxItemId,
+            String attemptId,
+            List<Long> suggestedTargetIds
+    ) {
         requirePositiveId(sourceInboxItemId);
         if (suggestedTargetIds == null) {
             throw new ResponseStatusException(
@@ -112,7 +137,9 @@ public class ContentRelationService {
             throw persistenceFailure(null);
         }
         Map<Long, InboxItem> endpointById = endpointsById(lockedEndpoints);
-        requireActiveSource(sourceInboxItemId, endpointById.get(sourceInboxItemId));
+        InboxItem source = endpointById.get(sourceInboxItemId);
+        requireActiveSource(sourceInboxItemId, source);
+        requireCurrentRelationAttempt(source, attemptId);
 
         int skippedInvalidCount = normalizedTargets.skippedInvalidCount();
         List<Long> activeTargetIds = new ArrayList<>();
@@ -127,14 +154,14 @@ public class ContentRelationService {
         }
 
         if (activeTargetIds.isEmpty()) {
-            return new RelationPersistenceResult(
+            return finishRelationAttempt(new RelationPersistenceResult(
                     sourceInboxItemId,
                     discoveredCount,
                     0,
                     0,
                     skippedInvalidCount,
                     List.of()
-            );
+            ), attemptId);
         }
 
         List<ContentRelation> currentRelations = contentRelationMapper.selectByInboxItemId(
@@ -171,14 +198,14 @@ public class ContentRelationService {
             }
         }
 
-        return new RelationPersistenceResult(
+        return finishRelationAttempt(new RelationPersistenceResult(
                 sourceInboxItemId,
                 discoveredCount,
                 persistedNewCount,
                 alreadyExistingCount,
                 skippedInvalidCount,
                 ensuredRelations
-        );
+        ), attemptId);
     }
 
     /** 查询不要求端点仍为 ACTIVE；Archive 保留既有 Relation，Delete 由外键级联清理。 */
@@ -285,6 +312,43 @@ public class ContentRelationService {
         if (!sourceInboxItemId.equals(source.getId())) {
             throw persistenceFailure(null);
         }
+    }
+
+    private void requireCurrentRelationAttempt(InboxItem source, String attemptId) {
+        if (attemptId == null) {
+            return;
+        }
+        if (source.getRelationStatus() != RelationProcessingStatus.PROCESSING
+                || !attemptId.equals(source.getRelationAttemptId())) {
+            // 检查发生在任何 Relation INSERT 之前，旧 Attempt 不能留下部分业务状态。
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Relation Attempt 已失效"
+            );
+        }
+    }
+
+    private RelationPersistenceResult finishRelationAttempt(
+            RelationPersistenceResult result,
+            String attemptId
+    ) {
+        if (attemptId == null) {
+            return result;
+        }
+        int updatedRows = inboxItemMapper.markRelationSuccess(
+                result.sourceInboxItemId(),
+                attemptId,
+                RelationProcessingStatus.PROCESSING,
+                RelationProcessingStatus.SUCCESS
+        );
+        if (updatedRows != 1) {
+            // Spring 会回滚本事务内此前的 INSERT，状态与关系不会出现半成功。
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Relation Attempt 已失效"
+            );
+        }
+        return result;
     }
 
     private Map<Long, ContentRelation> existingRelationsByTargetId(

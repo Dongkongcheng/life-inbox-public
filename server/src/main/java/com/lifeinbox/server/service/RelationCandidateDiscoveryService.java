@@ -49,6 +49,13 @@ public class RelationCandidateDiscoveryService {
             Long sourceInboxItemId,
             Integer limit
     ) {
+        return discoverCandidatesWithReadiness(sourceInboxItemId, limit).candidates();
+    }
+
+    public RelationCandidateDiscoveryResult discoverCandidatesWithReadiness(
+            Long sourceInboxItemId,
+            Integer limit
+    ) {
         requirePositiveId(sourceInboxItemId);
         int normalizedLimit = normalizeLimit(limit);
 
@@ -68,7 +75,7 @@ public class RelationCandidateDiscoveryService {
                 normalizedLimit
         );
         if (!Boolean.TRUE.equals(response.sourceIndexed())) {
-            return List.of();
+            return new RelationCandidateDiscoveryResult(false, List.of());
         }
 
         List<RankedNeighbor> rankedNeighbors = normalizeNeighbors(
@@ -76,7 +83,7 @@ public class RelationCandidateDiscoveryService {
                 response.results()
         );
         if (rankedNeighbors.isEmpty()) {
-            return List.of();
+            return new RelationCandidateDiscoveryResult(true, List.of());
         }
 
         List<Long> candidateIds = rankedNeighbors.stream()
@@ -115,7 +122,7 @@ public class RelationCandidateDiscoveryService {
                 break;
             }
         }
-        return List.copyOf(candidates);
+        return new RelationCandidateDiscoveryResult(true, candidates);
     }
 
     private List<RankedNeighbor> normalizeNeighbors(

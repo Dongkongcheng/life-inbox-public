@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.lifeinbox.server.entity.AiProcessingStatus;
 import com.lifeinbox.server.entity.ActionProcessingStatus;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.entity.RelationProcessingStatus;
 import com.lifeinbox.server.entity.RelationType;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -184,7 +185,7 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
      */
     @Select("""
             <script>
-            SELECT id, status
+            SELECT id, status, relation_status, relation_attempt_id
             FROM inbox_item
             WHERE id IN
             <foreach collection="ids" item="id" open="(" separator="," close=")">
@@ -196,6 +197,111 @@ public interface InboxItemMapper extends BaseMapper<InboxItem> {
             """)
     List<InboxItem> selectRelationEndpointsForUpdateByIds(
             @Param("ids") List<Long> ids
+    );
+
+    /** 自动入口只领取新 Vector 对应的 NOT_PROCESSED，FAILED/SUCCESS 不会静默重跑。 */
+    @Update("""
+            UPDATE inbox_item
+            SET relation_status = #{processingStatus},
+                relation_attempt_id = #{attemptId},
+                relation_error_message = NULL,
+                relation_started_time = #{startedTime},
+                relation_finished_time = NULL
+            WHERE id = #{id}
+              AND status = 'ACTIVE'
+              AND relation_status = #{notProcessedStatus}
+            """)
+    int markRelationAutomaticProcessing(
+            @Param("id") Long id,
+            @Param("notProcessedStatus") RelationProcessingStatus notProcessedStatus,
+            @Param("processingStatus") RelationProcessingStatus processingStatus,
+            @Param("attemptId") String attemptId,
+            @Param("startedTime") java.time.LocalDateTime startedTime
+    );
+
+    /** 手动入口允许首次执行、FAILED 重试和 stale PROCESSING 接管，但拒绝 fresh 与 SUCCESS。 */
+    @Update("""
+            UPDATE inbox_item
+            SET relation_status = #{processingStatus},
+                relation_attempt_id = #{attemptId},
+                relation_error_message = NULL,
+                relation_started_time = #{startedTime},
+                relation_finished_time = NULL
+            WHERE id = #{id}
+              AND status = 'ACTIVE'
+              AND (
+                    relation_status IN (#{notProcessedStatus}, #{failedStatus})
+                    OR (
+                        relation_status = #{processingStatus}
+                        AND (
+                            relation_started_time IS NULL
+                            OR relation_started_time <= #{staleBefore}
+                        )
+                    )
+              )
+            """)
+    int markRelationManualProcessing(
+            @Param("id") Long id,
+            @Param("notProcessedStatus") RelationProcessingStatus notProcessedStatus,
+            @Param("processingStatus") RelationProcessingStatus processingStatus,
+            @Param("failedStatus") RelationProcessingStatus failedStatus,
+            @Param("attemptId") String attemptId,
+            @Param("startedTime") java.time.LocalDateTime startedTime,
+            @Param("staleBefore") java.time.LocalDateTime staleBefore
+    );
+
+    /** 只允许当前 Relation Attempt 记录失败，迟到旧请求没有状态写权限。 */
+    @Update("""
+            UPDATE inbox_item
+            SET relation_status = #{failedStatus},
+                relation_error_message = #{errorMessage},
+                relation_finished_time = CURRENT_TIMESTAMP
+            WHERE id = #{id}
+              AND relation_status = #{processingStatus}
+              AND relation_attempt_id = #{attemptId}
+            """)
+    int markRelationFailed(
+            @Param("id") Long id,
+            @Param("attemptId") String attemptId,
+            @Param("processingStatus") RelationProcessingStatus processingStatus,
+            @Param("failedStatus") RelationProcessingStatus failedStatus,
+            @Param("errorMessage") String errorMessage
+    );
+
+    /** 关系增量写入后最后设置 SUCCESS；调用方必须让二者处于同一短事务。 */
+    @Update("""
+            UPDATE inbox_item
+            SET relation_status = #{successStatus},
+                relation_error_message = NULL,
+                relation_finished_time = CURRENT_TIMESTAMP
+            WHERE id = #{id}
+              AND status = 'ACTIVE'
+              AND relation_status = #{processingStatus}
+              AND relation_attempt_id = #{attemptId}
+            """)
+    int markRelationSuccess(
+            @Param("id") Long id,
+            @Param("attemptId") String attemptId,
+            @Param("processingStatus") RelationProcessingStatus processingStatus,
+            @Param("successStatus") RelationProcessingStatus successStatus
+    );
+
+    /** 队列拒绝发生在 Claim 前，只把仍未处理的 ACTIVE Source 标为可手动重试失败。 */
+    @Update("""
+            UPDATE inbox_item
+            SET relation_status = #{failedStatus},
+                relation_error_message = #{errorMessage},
+                relation_started_time = NULL,
+                relation_finished_time = CURRENT_TIMESTAMP
+            WHERE id = #{id}
+              AND status = 'ACTIVE'
+              AND relation_status = #{notProcessedStatus}
+            """)
+    int markRelationAutoSchedulingFailed(
+            @Param("id") Long id,
+            @Param("notProcessedStatus") RelationProcessingStatus notProcessedStatus,
+            @Param("failedStatus") RelationProcessingStatus failedStatus,
+            @Param("errorMessage") String errorMessage
     );
 
     /**
