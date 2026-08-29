@@ -107,7 +107,7 @@ The fact that V0.5 is now the active stage does **not** mean every Relations cap
 
 Each Relation capability is implemented task by task.
 
-The first five V0.5 implementation tasks are complete:
+The first six V0.5 implementation tasks are complete:
 
 ```text
 V0.5 Task 1
@@ -139,12 +139,19 @@ V0.5 Task 5
 Overall Task 45
 
 Related Items Product API
+
+V0.5 Task 6
+=
+Overall Task 46
+
+Frontend Related Items UI
 ```
 
 Task 42 retrieves bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filters them through Java/MySQL. Task 43 sends
 only the bounded Source/Candidate text to one LLM call and returns strictly validated runtime `RELATED_TO` suggestions. Task 44 converts
 valid suggestions into canonical, additive, idempotent Relations after one short final-validation transaction. Task 45 exposes persisted
-Relations through a bounded, read-only MySQL Product API. Frontend Related Items and automatic processing are not implemented yet.
+Relations through a bounded, read-only MySQL Product API. Task 46 adds a lazy, read-only Related Items section to existing Inbox cards so the
+user can rediscover and focus related saved information. Automatic Relation processing is not implemented yet.
 
 ---
 
@@ -1361,6 +1368,10 @@ Task 45 adds `GET /api/inbox/{id}/related?limit=10`. It validates an ACTIVE Sour
 orders by persisted Relation recency, and returns a minimal bounded Product DTO. This normal read path uses only Java/MySQL: it never calls
 FastAPI, LLM, Embedding, Qdrant, Rerank, Relation Discovery, or Relation Persistence.
 
+Task 46 consumes that Product API only after the user expands “相关内容” on one Inbox card. It renders compact bounded previews with isolated
+loading, empty, and retryable error states. Clicking a related row focuses the existing full Inbox card and replaces the active Related panel,
+so chained navigation does not build nested detail surfaces. Opening or viewing an item never triggers Relation Discovery.
+
 ---
 
 # MySQL First for Relations
@@ -2572,9 +2583,12 @@ Completed:
 
 ✅ V0.5 Task 5 / Overall Task 45
 — Related Items Product API
+
+✅ V0.5 Task 6 / Overall Task 46
+— Frontend Related Items UI
 ```
 
-Frontend Related Items, automatic discovery, rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
+Automatic discovery, rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
 
 ---
 
@@ -3174,7 +3188,7 @@ Current intentional scope limitations include:
 * Calendar integration is not currently implemented.
 * Todo source traceability depends on available source data; deleted source content is not reconstructed from a snapshot.
 * Browser Extension Capture remains postponed.
-* V0.5 Relations is now the active development stage; Task 1 Relation persistence, Task 2 bounded runtime candidates, Task 3 bounded AI Relation judgment, Task 4 additive persistence integration, and Task 5 bounded Related Items Product API are implemented, while UI, automatic processing, and rediscovery are not.
+* V0.5 Relations is now the active development stage; Task 1 Relation persistence, Task 2 bounded runtime candidates, Task 3 bounded AI Relation judgment, Task 4 additive persistence integration, Task 5 bounded Related Items Product API, and Task 6 lazy frontend Related Items are implemented, while automatic processing and rediscovery are not.
 * `content_relation` exists in the V0.5 Task 1 migration and fresh schema; existing V0.4 databases must apply the incremental migration.
 * The first version intentionally has no `relation_candidate` model.
 * The first version intentionally persists no Relation score; Task 42's `semanticScore` is a runtime-only Qdrant ranking signal, not Relation truth.
@@ -3442,12 +3456,17 @@ Overall Task 44
 V0.5 Task 5
 =
 Overall Task 45
+
+V0.5 Task 6
+=
+Overall Task 46
 ```
 
 Task 41 established the first concrete Relation Contract and persistence foundation. Task 42 added bounded semantic neighbor candidates
 without converting them into business Relation state. Task 43 added one bounded, strict AI judgment step. Task 44 added the explicit,
 non-destructive conversion of validated suggestions into business Relation state. Task 45 added the read-only MySQL Product API for bounded
-ACTIVE Related Items. Frontend, automatic processing, and hardening remain separate tasks.
+ACTIVE Related Items. Task 46 added lazy frontend display and navigation through existing Inbox cards. Automatic processing and hardening
+remain separate tasks.
 
 ---
 

@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 5 / Overall Task 45
-— Related Items Product API
+V0.5 Task 6 / Overall Task 46
+— Frontend Related Items UI
 ```
 
-V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现、有界 AI Relation 判断、建议到正式 Relation 的内部持久化，以及只读 Related Items Product API；前端和自动处理尚未实现。
+V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现、有界 AI Relation 判断、建议到正式 Relation 的内部持久化、只读 Related Items Product API，以及前端 Related Items 体验；自动处理尚未实现。
 
 ---
 
@@ -2029,6 +2029,34 @@ GET /api/inbox/{id}/related
 `limit`。Service 防御性过滤异常、自关联和重复 Target，只构建最多 300 Unicode Code Point 的预览与最小产品字段。Relation Read 与
 Relation Discovery 是两条独立路径；普通 GET 不依赖 FastAPI、LLM、Embedding、Qdrant 或 Rerank，也不修改 `content_relation`。
 
+Task 46 只在现有 Inbox 卡片上增加读取体验：
+
+```text
+User expands one InboxItem
+        ↓
+Lazy GET /api/inbox/{id}/related?limit=10
+        ↓
+Loading / Empty / Isolated Error / Success
+        ↓
+Compact Related Item rows
+        ↓
+Focus existing InboxItem card
+        ↓
+User Rediscovery
+```
+
+折叠的主 Inbox 列表不会为每条数据预取 Relation。任一时刻只展开一个 Related 面板；点击 Related Item 会聚焦当前已有的完整
+Inbox 卡片，而不是嵌套新的详情视图。每个面板用请求序号丢弃关闭、重开或切换条目后的迟到响应。Related 文本使用 Vue 文本插值，
+不使用 `v-html`，也不展示内部 Relation 方向、语义 Score、置信度或证据。
+
+```text
+UI Read
+≠
+AI Relation Discovery
+```
+
+浏览器只调用 Java Product API。展开、空结果和重试都不会调用 FastAPI、LLM、Embedding、Qdrant 或 Relation Discovery。
+
 ---
 
 # 39. V1.0 Personal AI
@@ -2405,9 +2433,10 @@ Reminder 与 Calendar 仍未实现。
 ✅ Task 3 AI Relation Discovery Foundation
 ✅ Task 4 Relation Persistence Integration
 ✅ Task 5 Related Items Product API
+✅ Task 6 Frontend Related Items UI
 ```
 
-当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换和 Task 45 只读 Product API；UI 和自动处理仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API，以及 Task 46 懒加载 Related Items UI；自动处理仍未实现。
 
 ---
 
@@ -2584,6 +2613,10 @@ Runtime AI RELATED_TO Suggestions
 Additive / Idempotent Persistence
         ↓
 Bounded MySQL Related Items Product API
+        ↓
+Lazy Vue Related Items Section
+        ↓
+User Rediscovery
 ```
 
 因此当前架构主线仍然没有偏离最初设计。
