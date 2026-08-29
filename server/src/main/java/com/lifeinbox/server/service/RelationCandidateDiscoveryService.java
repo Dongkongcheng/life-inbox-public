@@ -125,6 +125,22 @@ public class RelationCandidateDiscoveryService {
         return new RelationCandidateDiscoveryResult(true, candidates);
     }
 
+    /** Backfill 只探测已有 Point，不生成 Embedding，也不创建缺失 Vector。 */
+    public boolean isSourceVectorReady(Long sourceInboxItemId) {
+        requirePositiveId(sourceInboxItemId);
+        AiVectorNeighborResponse response = aiServiceClient.findVectorNeighbors(
+                sourceInboxItemId,
+                1
+        );
+        if (response == null || response.sourceIndexed() == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Vector Neighbor 响应无效"
+            );
+        }
+        return response.sourceIndexed();
+    }
+
     private List<RankedNeighbor> normalizeNeighbors(
             Long sourceInboxItemId,
             List<AiVectorNeighborCandidate> rawCandidates

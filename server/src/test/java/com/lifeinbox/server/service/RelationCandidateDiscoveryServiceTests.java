@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class RelationCandidateDiscoveryServiceTests {
@@ -288,6 +289,19 @@ class RelationCandidateDiscoveryServiceTests {
         service.discoverCandidates(123L, 20);
 
         verify(contentRelationService, never()).ensureRelatedTo(any(), any());
+    }
+
+    @Test
+    void backfillReadinessProbeOnlyReadsExistingVectorState() {
+        when(aiServiceClient.findVectorNeighbors(321L, 1)).thenReturn(
+                new AiVectorNeighborResponse(true, List.of())
+        );
+
+        assertEquals(true, service.isSourceVectorReady(321L));
+
+        verify(aiServiceClient).findVectorNeighbors(321L, 1);
+        verify(aiServiceClient, never()).indexVector(any(), any());
+        verifyNoInteractions(inboxItemMapper, contentRelationService);
     }
 
     private void stubActiveSource(Long sourceInboxItemId) {

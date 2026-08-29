@@ -150,6 +150,102 @@ class RelationProcessingStatusServiceTests {
         assertFalse(service.markFailed(4L, "attempt-old", null));
     }
 
+    @Test
+    void rediscoveryClaimsOnlySuccessWithANewAttempt() {
+        when(mapper.markRelationRediscoveryProcessing(
+                org.mockito.ArgumentMatchers.eq(5L),
+                org.mockito.ArgumentMatchers.eq(RelationProcessingStatus.SUCCESS),
+                org.mockito.ArgumentMatchers.eq(RelationProcessingStatus.PROCESSING),
+                anyString(),
+                org.mockito.ArgumentMatchers.eq(NOW)
+        )).thenReturn(1);
+
+        String attemptId = service.claimRediscovery(5L);
+
+        assertFalse(attemptId.isBlank());
+        assertFalse("attempt-old".equals(attemptId));
+        verify(mapper).markRelationRediscoveryProcessing(
+                org.mockito.ArgumentMatchers.eq(5L),
+                org.mockito.ArgumentMatchers.eq(RelationProcessingStatus.SUCCESS),
+                org.mockito.ArgumentMatchers.eq(RelationProcessingStatus.PROCESSING),
+                org.mockito.ArgumentMatchers.eq(attemptId),
+                org.mockito.ArgumentMatchers.eq(NOW)
+        );
+    }
+
+    @Test
+    void rediscoveryRejectsNonSuccessAndArchivedSources() {
+        InboxItem failed = new InboxItem();
+        failed.setStatus("ACTIVE");
+        failed.setRelationStatus(RelationProcessingStatus.FAILED);
+        InboxItem archived = new InboxItem();
+        archived.setStatus("ARCHIVED");
+        archived.setRelationStatus(RelationProcessingStatus.SUCCESS);
+        when(mapper.markRelationRediscoveryProcessing(
+                org.mockito.ArgumentMatchers.anyLong(),
+                any(),
+                any(),
+                anyString(),
+                any()
+        )).thenReturn(0);
+        when(mapper.selectById(6L)).thenReturn(failed);
+        when(mapper.selectById(7L)).thenReturn(archived);
+
+        ResponseStatusException failedException = assertThrows(
+                ResponseStatusException.class,
+                () -> service.claimRediscovery(6L)
+        );
+        ResponseStatusException archivedException = assertThrows(
+                ResponseStatusException.class,
+                () -> service.claimRediscovery(7L)
+        );
+
+        assertEquals(HttpStatus.CONFLICT, failedException.getStatusCode());
+        assertEquals(HttpStatus.CONFLICT, archivedException.getStatusCode());
+    }
+
+    @Test
+    void rediscoveryMissingSourceUsesCurrentNotFoundConvention() {
+        when(mapper.markRelationRediscoveryProcessing(
+                org.mockito.ArgumentMatchers.eq(9L),
+                any(),
+                any(),
+                anyString(),
+                any()
+        )).thenReturn(0);
+        when(mapper.selectById(9L)).thenReturn(null);
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.claimRediscovery(9L)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, exception.getStatusCode());
+    }
+
+    @Test
+    void concurrentRediscoveryHasOnlyOneAttemptOwner() {
+        when(mapper.markRelationRediscoveryProcessing(
+                org.mockito.ArgumentMatchers.eq(8L),
+                any(),
+                any(),
+                anyString(),
+                any()
+        )).thenReturn(1, 0);
+        InboxItem processing = new InboxItem();
+        processing.setStatus("ACTIVE");
+        processing.setRelationStatus(RelationProcessingStatus.PROCESSING);
+        when(mapper.selectById(8L)).thenReturn(processing);
+
+        assertFalse(service.claimRediscovery(8L).isBlank());
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.claimRediscovery(8L)
+        );
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
+    }
+
     private InboxItem processingItem(LocalDateTime startedTime) {
         InboxItem item = new InboxItem();
         item.setRelationStatus(RelationProcessingStatus.PROCESSING);

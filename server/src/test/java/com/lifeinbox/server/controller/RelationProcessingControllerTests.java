@@ -59,4 +59,28 @@ class RelationProcessingControllerTests {
         mockMvc.perform(post("/api/inbox/101/relations/discover"))
                 .andExpect(status().isConflict());
     }
+
+    @Test
+    void rediscoverEndpointIsSeparateAndReturnsTheSameBoundedProductResponse() throws Exception {
+        RelationProcessingService service = mock(RelationProcessingService.class);
+        when(service.processRediscovery(102L)).thenReturn(new RelationProcessingResponse(
+                RelationProcessingStatus.SUCCESS,
+                1,
+                1,
+                0,
+                0
+        ));
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(
+                new RelationProcessingController(service)
+        ).build();
+
+        mockMvc.perform(post("/api/inbox/102/relations/rediscover"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.relationStatus").value("SUCCESS"))
+                .andExpect(jsonPath("$.persistedNewCount").value(1))
+                .andExpect(jsonPath("$.attemptId").doesNotExist())
+                .andExpect(jsonPath("$.vector").doesNotExist());
+
+        verify(service).processRediscovery(102L);
+    }
 }

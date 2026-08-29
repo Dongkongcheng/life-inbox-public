@@ -5,6 +5,8 @@ import com.lifeinbox.server.dto.RelationProcessingResponse;
 import com.lifeinbox.server.entity.RelationProcessingStatus;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
@@ -99,5 +101,90 @@ class RelationProcessingServiceTests {
         assertThrows(IllegalStateException.class, () -> service.processManual(4L));
 
         verify(statusService).markFailed(4L, "attempt-c", "Relation 结果保存失败");
+    }
+
+    @Test
+    void rediscoveryUsesNewClaimAndKeepsTheAdditiveAttemptPipeline() {
+        when(statusService.claimRediscovery(5L)).thenReturn("attempt-new");
+        when(persistenceService.discoverTargetIdsForProcessing(5L, null)).thenReturn(
+                List.of(8L)
+        );
+        when(persistenceService.completeAttempt(5L, "attempt-new", List.of(8L)))
+                .thenReturn(new RelationPersistenceResult(5L, 1, 1, 0, 0, List.of()));
+
+        RelationProcessingResponse response = service.processRediscovery(5L);
+
+        assertEquals(RelationProcessingStatus.SUCCESS, response.relationStatus());
+        assertEquals(1, response.persistedNewCount());
+        verify(statusService).claimRediscovery(5L);
+    }
+
+    @Test
+    void emptyRediscoveryStillCompletesSuccessWithoutDeletingExistingRelations() {
+        when(statusService.claimRediscovery(6L)).thenReturn("attempt-empty");
+        when(persistenceService.discoverTargetIdsForProcessing(6L, null)).thenReturn(List.of());
+        when(persistenceService.completeAttempt(6L, "attempt-empty", List.of()))
+                .thenReturn(new RelationPersistenceResult(6L, 0, 0, 0, 0, List.of()));
+
+        RelationProcessingResponse response = service.processRediscovery(6L);
+
+        assertEquals(RelationProcessingStatus.SUCCESS, response.relationStatus());
+        verify(persistenceService).completeAttempt(6L, "attempt-empty", List.of());
+    }
+
+    @Test
+    void failedRediscoveryOnlyMarksItsNewAttemptFailed() {
+        when(statusService.claimRediscovery(7L)).thenReturn("attempt-refresh");
+        when(persistenceService.discoverTargetIdsForProcessing(7L, null)).thenThrow(
+                new AiServiceUnavailableException("provider unavailable")
+        );
+
+        assertThrows(
+                AiServiceUnavailableException.class,
+                () -> service.processRediscovery(7L)
+        );
+
+        verify(statusService).markFailed(
+                7L,
+                "attempt-refresh",
+                "Relation AI 服务暂时不可用"
+        );
+        verify(persistenceService, never()).completeAttempt(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void rediscoveryWithMissingVectorReturnsConflictAndNeverMarksSuccess() {
+        when(statusService.claimRediscovery(9L)).thenReturn("attempt-vector");
+        when(persistenceService.discoverTargetIdsForProcessing(9L, null)).thenThrow(
+                new ResponseStatusException(HttpStatus.CONFLICT, "Source Vector 尚未就绪")
+        );
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.processRediscovery(9L)
+        );
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
+        verify(statusService).markFailed(9L, "attempt-vector", "Source Vector 尚未就绪");
+        verify(persistenceService, never()).completeAttempt(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()
+        );
+    }
+
+    @Test
+    void preclaimedBackfillAttemptDoesNotClaimAgain() {
+        when(persistenceService.discoverTargetIdsForProcessing(8L, null)).thenReturn(List.of());
+        when(persistenceService.completeAttempt(8L, "attempt-backfill", List.of()))
+                .thenReturn(new RelationPersistenceResult(8L, 0, 0, 0, 0, List.of()));
+
+        service.processClaimed(8L, "attempt-backfill");
+
+        verifyNoInteractions(statusService);
     }
 }

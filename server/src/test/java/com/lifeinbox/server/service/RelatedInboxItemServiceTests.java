@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.dto.RelatedInboxItemResponse;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.entity.RelationType;
+import com.lifeinbox.server.entity.RelationProcessingStatus;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -102,6 +103,20 @@ class RelatedInboxItemServiceTests {
                 10
         );
         verifyNoMoreInteractions(inboxItemMapper);
+    }
+
+    @Test
+    void failedRediscoveryStatusDoesNotHidePreviouslyPersistedRelatedItems() {
+        InboxItem source = item(100L, "TEXT", "Source", "ACTIVE");
+        source.setRelationStatus(RelationProcessingStatus.FAILED);
+        InboxItem related = item(200L, "TEXT", "Existing relation", "ACTIVE");
+        stub(source, 10, List.of(related));
+
+        List<RelatedInboxItemResponse> result = service.listRelated(100L, null);
+
+        assertEquals(List.of(200L), result.stream()
+                .map(response -> response.relatedInboxItem().id())
+                .toList());
     }
 
     @Test

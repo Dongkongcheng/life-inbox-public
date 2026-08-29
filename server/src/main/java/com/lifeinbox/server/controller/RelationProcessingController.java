@@ -22,4 +22,9 @@ public class RelationProcessingController {
     public RelationProcessingResponse discover(@PathVariable Long inboxItemId) {
         return relationProcessingService.processManual(inboxItemId);
     }
+
+    @PostMapping("/{inboxItemId}/relations/rediscover")
+    public RelationProcessingResponse rediscover(@PathVariable Long inboxItemId) {
+        return relationProcessingService.processRediscovery(inboxItemId);
+    }
 }

@@ -9,6 +9,8 @@
 | GET | `/api/inbox` | 查询 ACTIVE InboxItem，并聚合 AI 状态与五类结果 |
 | GET | `/api/inbox/{id}/related` | 只读查询已持久化的 ACTIVE Related InboxItems；不触发发现或 AI |
 | POST | `/api/inbox/{id}/relations/discover` | 同步手动执行或重试 Relation Discovery；受独立 Attempt Guard 保护 |
+| POST | `/api/inbox/{id}/relations/rediscover` | 仅对 ACTIVE + SUCCESS Source 同步重新发现；新 Attempt、增量且不删除旧关系 |
+| POST | `/api/relations/backfill?limit=10` | 显式调度有界历史 ACTIVE + NOT_PROCESSED Relation 处理 |
 | GET | `/api/search?q={query}` | 默认 Keyword Search；支持显式 `semantic` 与 `hybrid` 模式 |
 | POST | `/api/inbox` | JSON Capture；当前支持 TEXT、URL |
 | POST | `/api/inbox/file` | multipart FILE Capture |
@@ -183,8 +185,47 @@ POST /api/inbox/123/relations/discover
 }
 ```
 
+`POST /api/inbox/{id}/relations/rediscover` 是独立的同步重新发现入口：
+
+```http
+POST /api/inbox/123/relations/rediscover
+```
+
+- Source 必须存在、为 `ACTIVE`，并且当前 `relation_status=SUCCESS`；NOT_PROCESSED/FAILED/PROCESSING 返回 409，继续使用原 discover/retry/recovery 入口；
+- Rediscover 原子执行 `SUCCESS → PROCESSING` 并创建新的 UUID Attempt，并发请求只有一个能取得 Owner；
+- Source Vector 必须已经存在。缺失时不生成 Embedding、不重建 Vector、不标记 SUCCESS，而是返回现有受控 409 并让当前 Attempt 进入 FAILED；
+- 后续同步复用 Task 42 候选、Task 43 AI 判断、Task 44 增量持久化和 Task 47 Attempt Guard；
+- 空结果是 SUCCESS；Provider/Qdrant/持久化失败是 guarded FAILED；两者都不删除已有 `content_relation`；
+- “本次未再次发现某个旧关系”不是删除信号，响应结构与 discover 相同且不包含 Attempt、Vector、Score 或 Provider 信息。
+
+`POST /api/relations/backfill` 是显式、有界的历史调度入口：
+
+```http
+POST /api/relations/backfill?limit=10
+```
+
+- `limit` 默认 10，只允许 `1..20`，越界或非整数返回 400；
+- 数据库只选择 `ACTIVE + NOT_PROCESSED`，按 `id ASC` 稳定排序，一次最多扫描 `min(limit * 5, 100)` 条；
+- 每个候选只通过现有 `/vector/neighbors` 读取 Source Point 就绪状态；Vector 缺失就跳过并保持 NOT_PROCESSED，不调用 Embedding 或 Vector Index；
+- Vector 已就绪后复用 Task 47 的原子 NOT_PROCESSED Claim，再投递现有有界 `aiTaskExecutor`；自动触发、手动请求或重复 Backfill 先取得 Owner 时，本批只记录 Claim 冲突；
+- Endpoint 返回调度摘要，不等待所有 LLM 调用完成。队列拒绝会按当前 Attempt 安全结束为 FAILED，不会永久停在 PROCESSING；
+- 不处理 FAILED、PROCESSING、SUCCESS 或 ARCHIVED，不自动重试，不删除既有 Relation。
+
+调度响应示例：
+
+```json
+{
+  "requestedLimit": 10,
+  "scannedCount": 18,
+  "scheduledCount": 8,
+  "skippedNotReadyCount": 7,
+  "claimConflictCount": 3
+}
+```
+
 自动入口没有额外 HTTP API：只有 Qdrant 索引明确返回 `indexed=true` 才投递后台首次发现，且自动 Claim 仅允许
-`NOT_PROCESSED`。系统不会扫描历史数据、自动重试 FAILED 或重新处理 SUCCESS。普通
+`NOT_PROCESSED`。系统不会在启动时或定时扫描历史数据、自动重试 FAILED 或自动重新处理 SUCCESS；Task 48 的 Backfill 和 Rediscover
+都必须显式调用。普通
 `GET /api/inbox/{id}/related` 与前端展开/读取仍不会触发发现。
 
 ### JSON Capture

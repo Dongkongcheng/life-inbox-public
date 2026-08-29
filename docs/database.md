@@ -1835,11 +1835,12 @@ Task 44 复用 Task 41 的同一张表，把通过最终业务校验的建议新
 幂等的新增：Source 无效使整次事务失败，单个无效 Target 被跳过，空结果、Provider 失败或后续未再次发现都不会删除已有行。
 Task 45 同样不修改 Schema：Product Read 同时读取 Canonical Pair 两侧，JOIN `inbox_item` 过滤 ACTIVE Target，并按 Relation
 `created_time DESC, id DESC` 有界排序。Archive 仍保留 Relation Row，只是不再出现在普通 ACTIVE Related Items 中。
-Task 46 前端只读取这张表。Task 47 自动/手动处理仍只做新增，不会因失败、空结果或重试删除已有行。
+Task 46 前端只读取这张表。Task 47 自动/手动处理与 Task 48 Rediscovery/Backfill 仍只做新增，不会因失败、空结果、重试或
+“本次没有再次发现”删除已有行。
 
 ## Relation Processing Metadata
 
-Task 47 在 `inbox_item` 增加独立生命周期列：
+Task 47 在 `inbox_item` 增加独立生命周期列，Task 48 直接复用这些列且没有新增 Schema：
 
 | 字段 | 类型 | 约束 / 语义 |
 | --- | --- | --- |
@@ -1849,8 +1850,12 @@ Task 47 在 `inbox_item` 增加独立生命周期列：
 | `relation_started_time` | `DATETIME` | 当前 Attempt 开始时间，用于 stale 接管 |
 | `relation_finished_time` | `DATETIME` | SUCCESS/FAILED 结束时间 |
 
-这些字段与 `ai_*`、`action_*` 独立。stale 是 Java 运行时派生值，不存第五种状态。历史数据升级后默认
-`NOT_PROCESSED`，但 Task 47 不扫描或自动回填；只有新的成功 Vector 事件或用户手动 POST 才会领取处理。
+这些字段与 `ai_*`、`action_*` 独立。stale 是 Java 运行时派生值，不存第五种状态。Task 48 的显式 Rediscovery 从 SUCCESS
+原子写入新的 PROCESSING + UUID Attempt；失败只说明最新 Attempt 失败，旧 `content_relation` 继续保留。显式 Backfill 使用有界
+`ACTIVE + NOT_PROCESSED ORDER BY id ASC LIMIT ...` 查询，再复用同一个 NOT_PROCESSED Claim；Vector 缺失时不写状态。
+
+历史数据升级后默认 `NOT_PROCESSED`。当前没有 Backfill Job/Cursor/History 表，没有 Rediscovery 统计列，也没有新的 Migration；
+启动和定时任务不会扫描历史数据，缺失 Vector 也不会由 Relation Backfill 自动补建。
 
 ---
 
@@ -2198,7 +2203,7 @@ Not Yet Implemented
 
 # 57. 当前数据库总结
 
-截至 V0.5 Task 7 / Overall Task 47（业务表数量不变，InboxItem 新增 Relation Processing Metadata）：
+截至 V0.5 Task 8 / Overall Task 48（Task 48 复用 Relation Processing Metadata，没有 Schema 变化）：
 
 ```text
 MySQL

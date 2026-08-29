@@ -65,6 +65,32 @@ class RelationProcessingMapperSqlTests {
         assertTrue(successSql.contains("relation_attempt_id = #{attemptId}"));
     }
 
+    @Test
+    void rediscoveryClaimAndHistoricalSelectionStayStateBounded() throws Exception {
+        Method rediscovery = InboxItemMapper.class.getMethod(
+                "markRelationRediscoveryProcessing",
+                Long.class,
+                RelationProcessingStatus.class,
+                RelationProcessingStatus.class,
+                String.class,
+                LocalDateTime.class
+        );
+        String rediscoverySql = normalize(rediscovery.getAnnotation(Update.class).value());
+        Method backfill = InboxItemMapper.class.getMethod(
+                "selectRelationBackfillCandidates",
+                RelationProcessingStatus.class,
+                int.class
+        );
+        String backfillSql = normalize(backfill.getAnnotation(Select.class).value());
+
+        assertTrue(rediscoverySql.contains("relation_status = #{successStatus}"));
+        assertTrue(rediscoverySql.contains("status = 'ACTIVE'"));
+        assertTrue(backfillSql.contains("status = 'ACTIVE'"));
+        assertTrue(backfillSql.contains("relation_status = #{notProcessedStatus}"));
+        assertTrue(backfillSql.contains("ORDER BY id ASC"));
+        assertTrue(backfillSql.contains("LIMIT #{scanLimit}"));
+    }
+
     private String normalize(String[] lines) {
         return String.join(" ", lines).replaceAll("\\s+", " ").trim();
     }

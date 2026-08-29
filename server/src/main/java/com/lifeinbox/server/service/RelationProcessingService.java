@@ -34,12 +34,22 @@ public class RelationProcessingService {
         return execute(inboxItemId, attemptId);
     }
 
+    public RelationProcessingResponse processRediscovery(Long inboxItemId) {
+        String attemptId = statusService.claimRediscovery(inboxItemId);
+        return execute(inboxItemId, attemptId);
+    }
+
     public Optional<RelationProcessingResponse> processAutomatic(Long inboxItemId) {
         Optional<String> attemptId = statusService.claimAutomatic(inboxItemId);
         if (attemptId.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(execute(inboxItemId, attemptId.get()));
+    }
+
+    /** Backfill 已经原子 Claim；后台只消费该 Attempt，不能再次领取或改写 Owner。 */
+    RelationProcessingResponse processClaimed(Long inboxItemId, String attemptId) {
+        return execute(inboxItemId, attemptId);
     }
 
     private RelationProcessingResponse execute(Long inboxItemId, String attemptId) {
