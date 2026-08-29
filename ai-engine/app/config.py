@@ -32,21 +32,31 @@ class LlmSettings:
     def from_environment(cls) -> "LlmSettings":
         """按调用时读取配置，让缺少 Key 时健康检查仍能独立工作。"""
 
-        api_key = _required_environment_value("LIFEINBOX_LLM_API_KEY")
-        model = _required_environment_value("LIFEINBOX_LLM_MODEL")
-        base_url = _required_environment_value("LIFEINBOX_LLM_BASE_URL").rstrip("/")
-
-        parsed_url = urlparse(base_url)
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise LlmConfigurationError("LIFEINBOX_LLM_BASE_URL 必须是合法的 HTTP(S) 地址")
-
-        timeout_text = os.getenv("LIFEINBOX_LLM_TIMEOUT_SECONDS", "20").strip()
-        try:
-            timeout_seconds = float(timeout_text)
-        except ValueError as exception:
-            raise LlmConfigurationError("LIFEINBOX_LLM_TIMEOUT_SECONDS 必须是数字") from exception
-        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 300:
-            raise LlmConfigurationError("LIFEINBOX_LLM_TIMEOUT_SECONDS 必须在 0 到 300 秒之间")
+        api_key = _required_environment_value(
+            "LIFEINBOX_LLM_API_KEY",
+            LlmConfigurationError,
+            "LLM",
+        )
+        model = _required_environment_value(
+            "LIFEINBOX_LLM_MODEL",
+            LlmConfigurationError,
+            "LLM",
+        )
+        base_url = _http_url_environment_value(
+            "LIFEINBOX_LLM_BASE_URL",
+            _required_environment_value(
+                "LIFEINBOX_LLM_BASE_URL",
+                LlmConfigurationError,
+                "LLM",
+            ),
+            LlmConfigurationError,
+        )
+        timeout_seconds = _timeout_environment_value(
+            "LIFEINBOX_LLM_TIMEOUT_SECONDS",
+            "20",
+            300,
+            LlmConfigurationError,
+        )
 
         return cls(
             api_key=api_key,
@@ -67,35 +77,37 @@ class EmbeddingSettings:
     def model_from_environment(cls) -> str:
         """只解析当前模型标识，供已有向量定位使用，不要求调用 Embedding Provider。"""
 
-        return _required_embedding_environment_value("LIFEINBOX_EMBEDDING_MODEL")
+        return _required_environment_value(
+            "LIFEINBOX_EMBEDDING_MODEL",
+            EmbeddingConfigurationError,
+            "Embedding",
+        )
 
     @classmethod
     def from_environment(cls) -> "EmbeddingSettings":
         """Embedding Model 独立配置，Provider 地址、密钥和超时复用现有 AI 配置。"""
 
-        api_key = _required_embedding_environment_value("LIFEINBOX_LLM_API_KEY")
+        api_key = _required_environment_value(
+            "LIFEINBOX_LLM_API_KEY",
+            EmbeddingConfigurationError,
+            "Embedding",
+        )
         model = cls.model_from_environment()
-        base_url = _required_embedding_environment_value(
-            "LIFEINBOX_LLM_BASE_URL"
-        ).rstrip("/")
-
-        parsed_url = urlparse(base_url)
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise EmbeddingConfigurationError(
-                "LIFEINBOX_LLM_BASE_URL 必须是合法的 HTTP(S) 地址"
-            )
-
-        timeout_text = os.getenv("LIFEINBOX_LLM_TIMEOUT_SECONDS", "20").strip()
-        try:
-            timeout_seconds = float(timeout_text)
-        except ValueError as exception:
-            raise EmbeddingConfigurationError(
-                "LIFEINBOX_LLM_TIMEOUT_SECONDS 必须是数字"
-            ) from exception
-        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 300:
-            raise EmbeddingConfigurationError(
-                "LIFEINBOX_LLM_TIMEOUT_SECONDS 必须在 0 到 300 秒之间"
-            )
+        base_url = _http_url_environment_value(
+            "LIFEINBOX_LLM_BASE_URL",
+            _required_environment_value(
+                "LIFEINBOX_LLM_BASE_URL",
+                EmbeddingConfigurationError,
+                "Embedding",
+            ),
+            EmbeddingConfigurationError,
+        )
+        timeout_seconds = _timeout_environment_value(
+            "LIFEINBOX_LLM_TIMEOUT_SECONDS",
+            "20",
+            300,
+            EmbeddingConfigurationError,
+        )
 
         return cls(
             api_key=api_key,
@@ -116,29 +128,31 @@ class RerankSettings:
     def from_environment(cls) -> "RerankSettings":
         """Rerank 使用独立 Provider 地址，并安全复用当前 Workspace 密钥。"""
 
-        api_key = _required_rerank_environment_value("LIFEINBOX_LLM_API_KEY")
-        model = _required_rerank_environment_value("LIFEINBOX_RERANK_MODEL")
-        base_url = _required_rerank_environment_value(
-            "LIFEINBOX_RERANK_BASE_URL"
-        ).rstrip("/")
-
-        parsed_url = urlparse(base_url)
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise RerankConfigurationError(
-                "LIFEINBOX_RERANK_BASE_URL 必须是合法的 HTTP(S) 地址"
-            )
-
-        timeout_text = os.getenv("LIFEINBOX_RERANK_TIMEOUT_SECONDS", "8").strip()
-        try:
-            timeout_seconds = float(timeout_text)
-        except ValueError as exception:
-            raise RerankConfigurationError(
-                "LIFEINBOX_RERANK_TIMEOUT_SECONDS 必须是数字"
-            ) from exception
-        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 60:
-            raise RerankConfigurationError(
-                "LIFEINBOX_RERANK_TIMEOUT_SECONDS 必须在 0 到 60 秒之间"
-            )
+        api_key = _required_environment_value(
+            "LIFEINBOX_LLM_API_KEY",
+            RerankConfigurationError,
+            "Rerank",
+        )
+        model = _required_environment_value(
+            "LIFEINBOX_RERANK_MODEL",
+            RerankConfigurationError,
+            "Rerank",
+        )
+        base_url = _http_url_environment_value(
+            "LIFEINBOX_RERANK_BASE_URL",
+            _required_environment_value(
+                "LIFEINBOX_RERANK_BASE_URL",
+                RerankConfigurationError,
+                "Rerank",
+            ),
+            RerankConfigurationError,
+        )
+        timeout_seconds = _timeout_environment_value(
+            "LIFEINBOX_RERANK_TIMEOUT_SECONDS",
+            "8",
+            60,
+            RerankConfigurationError,
+        )
 
         return cls(
             api_key=api_key,
@@ -180,12 +194,11 @@ class VectorStoreSettings:
                 timeout_seconds=5,
             )
 
-        url = os.getenv("LIFEINBOX_QDRANT_URL", "http://127.0.0.1:6333").strip().rstrip("/")
-        parsed_url = urlparse(url)
-        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-            raise VectorStoreConfigurationError(
-                "LIFEINBOX_QDRANT_URL 必须是合法的 HTTP(S) 地址"
-            )
+        url = _http_url_environment_value(
+            "LIFEINBOX_QDRANT_URL",
+            os.getenv("LIFEINBOX_QDRANT_URL", "http://127.0.0.1:6333").strip(),
+            VectorStoreConfigurationError,
+        )
 
         collection_prefix = os.getenv(
             "LIFEINBOX_QDRANT_COLLECTION", "lifeinbox_items"
@@ -195,17 +208,12 @@ class VectorStoreSettings:
                 "LIFEINBOX_QDRANT_COLLECTION 只能包含字母、数字、下划线或连字符"
             )
 
-        timeout_text = os.getenv("LIFEINBOX_QDRANT_TIMEOUT_SECONDS", "5").strip()
-        try:
-            timeout_seconds = float(timeout_text)
-        except ValueError as exception:
-            raise VectorStoreConfigurationError(
-                "LIFEINBOX_QDRANT_TIMEOUT_SECONDS 必须是数字"
-            ) from exception
-        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 300:
-            raise VectorStoreConfigurationError(
-                "LIFEINBOX_QDRANT_TIMEOUT_SECONDS 必须在 0 到 300 秒之间"
-            )
+        timeout_seconds = _timeout_environment_value(
+            "LIFEINBOX_QDRANT_TIMEOUT_SECONDS",
+            "5",
+            300,
+            VectorStoreConfigurationError,
+        )
 
         api_key = os.getenv("LIFEINBOX_QDRANT_API_KEY", "").strip() or None
         return cls(
@@ -217,25 +225,45 @@ class VectorStoreSettings:
         )
 
 
-def _required_environment_value(name: str) -> str:
+def _required_environment_value(
+    name: str,
+    error_type: type[RuntimeError],
+    capability: str,
+) -> str:
     value = os.getenv(name, "").strip()
     if not value:
         # API Key 只从运行环境读取，错误中不包含任何配置值。
-        raise LlmConfigurationError(f"缺少 LLM 环境变量：{name}")
+        raise error_type(f"缺少 {capability} 环境变量：{name}")
     return value
 
 
-def _required_embedding_environment_value(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        # 错误只包含变量名，绝不回显密钥或其他配置值。
-        raise EmbeddingConfigurationError(f"缺少 Embedding 环境变量：{name}")
-    return value
+def _http_url_environment_value(
+    name: str,
+    value: str,
+    error_type: type[RuntimeError],
+) -> str:
+    normalized = value.rstrip("/")
+    parsed_url = urlparse(normalized)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise error_type(f"{name} 必须是合法的 HTTP(S) 地址")
+    return normalized
 
 
-def _required_rerank_environment_value(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if not value:
-        # Rerank 失败信息只说明缺少哪个配置项，不回显任何凭据值。
-        raise RerankConfigurationError(f"缺少 Rerank 环境变量：{name}")
-    return value
+def _timeout_environment_value(
+    name: str,
+    default: str,
+    max_seconds: int,
+    error_type: type[RuntimeError],
+) -> float:
+    timeout_text = os.getenv(name, default).strip()
+    try:
+        timeout_seconds = float(timeout_text)
+    except ValueError as exception:
+        raise error_type(f"{name} 必须是数字") from exception
+    if (
+        not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+        or timeout_seconds > max_seconds
+    ):
+        raise error_type(f"{name} 必须在 0 到 {max_seconds} 秒之间")
+    return timeout_seconds

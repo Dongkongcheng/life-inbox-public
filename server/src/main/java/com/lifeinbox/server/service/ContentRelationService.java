@@ -221,6 +221,18 @@ public class ContentRelationService {
         return List.copyOf(relations);
     }
 
+    /** 对称 Relation 的存储方向只在本 Owner 内解释，调用方只消费“另一端”业务 ID。 */
+    public Set<Long> findRelatedInboxItemIds(Long inboxItemId) {
+        Set<Long> relatedIds = new LinkedHashSet<>();
+        for (ContentRelation relation : findByInboxItemId(inboxItemId)) {
+            Long relatedId = relatedInboxItemId(inboxItemId, relation);
+            if (relatedId != null && !inboxItemId.equals(relatedId)) {
+                relatedIds.add(relatedId);
+            }
+        }
+        return Set.copyOf(relatedIds);
+    }
+
     private CanonicalPair canonicalize(Long firstInboxItemId, Long secondInboxItemId) {
         requirePositiveId(firstInboxItemId);
         requirePositiveId(secondInboxItemId);
@@ -357,20 +369,25 @@ public class ContentRelationService {
     ) {
         Map<Long, ContentRelation> existingByTargetId = new HashMap<>();
         for (ContentRelation relation : relations) {
-            if (relation == null || relation.getRelationType() != RelationType.RELATED_TO) {
-                continue;
-            }
-            Long targetId = null;
-            if (sourceInboxItemId.equals(relation.getLeftInboxItemId())) {
-                targetId = relation.getRightInboxItemId();
-            } else if (sourceInboxItemId.equals(relation.getRightInboxItemId())) {
-                targetId = relation.getLeftInboxItemId();
-            }
+            Long targetId = relatedInboxItemId(sourceInboxItemId, relation);
             if (targetId != null && !sourceInboxItemId.equals(targetId)) {
                 existingByTargetId.putIfAbsent(targetId, relation);
             }
         }
         return existingByTargetId;
+    }
+
+    private Long relatedInboxItemId(Long sourceInboxItemId, ContentRelation relation) {
+        if (relation == null || relation.getRelationType() != RelationType.RELATED_TO) {
+            return null;
+        }
+        if (sourceInboxItemId.equals(relation.getLeftInboxItemId())) {
+            return relation.getRightInboxItemId();
+        }
+        if (sourceInboxItemId.equals(relation.getRightInboxItemId())) {
+            return relation.getLeftInboxItemId();
+        }
+        return null;
     }
 
     private EnsureOutcome insertOrReuseCanonicalPair(CanonicalPair pair) {

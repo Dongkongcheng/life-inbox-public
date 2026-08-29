@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -286,7 +287,7 @@ class RelationDiscoveryServiceTests {
         when(inboxItemMapper.selectActiveByIdsAndFilters(
                 List.of(456L), null, null, null
         )).thenReturn(List.of(textItem(456L, "候选", "正文")));
-        when(contentRelationService.findByInboxItemId(123L)).thenReturn(List.of());
+        when(contentRelationService.findRelatedInboxItemIds(123L)).thenReturn(Set.of());
     }
 
     private void stubDiscovery(
@@ -302,7 +303,12 @@ class RelationDiscoveryServiceTests {
                 null,
                 null
         )).thenReturn(resolvedCandidates);
-        when(contentRelationService.findByInboxItemId(123L)).thenReturn(currentRelations);
+        Set<Long> relatedIds = currentRelations.stream()
+                .map(relation -> 123L == relation.getLeftInboxItemId()
+                        ? relation.getRightInboxItemId()
+                        : relation.getLeftInboxItemId())
+                .collect(java.util.stream.Collectors.toSet());
+        when(contentRelationService.findRelatedInboxItemIds(123L)).thenReturn(relatedIds);
     }
 
     private InboxItem source() {

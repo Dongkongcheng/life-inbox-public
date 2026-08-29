@@ -136,6 +136,19 @@ class InboxSearchableContentServiceTests {
     }
 
     @Test
+    void boundedRetrievalTextOwnsSharedTitleSummaryAndBodyRepresentation() {
+        InboxItem item = item("TEXT", "正文".repeat(20) + "🙂");
+        item.setTitle("标题");
+        item.setSummary("摘要");
+
+        String text = service.buildBoundedRetrievalText(item, 20);
+
+        assertEquals(20, text.length());
+        assertEquals("标题：标题\n摘要：摘要\n正文：", text.substring(0, 15));
+        assertEquals(false, Character.isHighSurrogate(text.charAt(text.length() - 1)));
+    }
+
+    @Test
     void textOverUnifiedLimitIsRejected() {
         ResponseStatusException exception = assertThrows(
                 ResponseStatusException.class,

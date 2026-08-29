@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -48,7 +49,7 @@ class RelationCandidateDiscoveryServiceTests {
         when(inboxItemMapper.selectActiveByIdsAndFilters(
                 List.of(456L, 789L), null, null, null
         )).thenReturn(List.of(item(789L, "ACTIVE"), item(456L, "ACTIVE")));
-        when(contentRelationService.findByInboxItemId(123L)).thenReturn(List.of());
+        when(contentRelationService.findRelatedInboxItemIds(123L)).thenReturn(Set.of());
 
         assertEquals(
                 List.of(
@@ -97,7 +98,7 @@ class RelationCandidateDiscoveryServiceTests {
         verify(inboxItemMapper, never()).selectActiveByIdsAndFilters(
                 any(), any(), any(), any()
         );
-        verify(contentRelationService, never()).findByInboxItemId(123L);
+        verify(contentRelationService, never()).findRelatedInboxItemIds(123L);
     }
 
     @Test
@@ -136,7 +137,7 @@ class RelationCandidateDiscoveryServiceTests {
         when(inboxItemMapper.selectActiveByIdsAndFilters(
                 List.of(456L), null, null, null
         )).thenReturn(List.of(item(456L, "ACTIVE")));
-        when(contentRelationService.findByInboxItemId(123L)).thenReturn(List.of());
+        when(contentRelationService.findRelatedInboxItemIds(123L)).thenReturn(Set.of());
 
         assertEquals(
                 List.of(new RelationDiscoveryCandidate(456L, 0.9)),
@@ -162,7 +163,7 @@ class RelationCandidateDiscoveryServiceTests {
                 List.of(new RelationDiscoveryCandidate(789L, 0.8)),
                 service.discoverCandidates(123L, 20)
         );
-        verify(contentRelationService).findByInboxItemId(123L);
+        verify(contentRelationService).findRelatedInboxItemIds(123L);
     }
 
     @Test
@@ -335,7 +336,12 @@ class RelationCandidateDiscoveryServiceTests {
         when(inboxItemMapper.selectActiveByIdsAndFilters(
                 orderedIds, null, null, null
         )).thenReturn(resolvedItems);
-        when(contentRelationService.findByInboxItemId(sourceInboxItemId)).thenReturn(relations);
+        Set<Long> relatedIds = relations.stream()
+                .map(relation -> sourceInboxItemId.equals(relation.getLeftInboxItemId())
+                        ? relation.getRightInboxItemId()
+                        : relation.getLeftInboxItemId())
+                .collect(java.util.stream.Collectors.toSet());
+        when(contentRelationService.findRelatedInboxItemIds(sourceInboxItemId)).thenReturn(relatedIds);
     }
 
     private AiVectorNeighborResponse neighbors(AiVectorNeighborCandidate... candidates) {

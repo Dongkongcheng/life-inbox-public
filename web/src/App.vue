@@ -4,6 +4,7 @@ import ActionCandidatePanel from './components/ActionCandidatePanel.vue'
 import HighlightedText from './components/HighlightedText.vue'
 import RelatedItemsPanel from './components/RelatedItemsPanel.vue'
 import TodoPanel from './components/TodoPanel.vue'
+import { requestJson } from './apiClient.js'
 import { createLatestRequestGuard } from './searchRequestGuard.js'
 
 // Capture 表单状态由四种类型共用，切换类型时只展示该类型需要的字段。
@@ -163,20 +164,13 @@ const refreshCurrentView = async ({ background = false } = {}) => {
       if (activeSearchFavorite.value) params.set('favorite', activeSearchFavorite.value)
       endpoint = `/api/search?${params.toString()}`
     }
-    const response = await fetch(endpoint)
-    if (!response.ok) {
-      let message = searching
+    const nextItems = await requestJson(
+      endpoint,
+      undefined,
+      searching
         ? searchFailureMessage(activeSearchMode.value)
         : '加载 Inbox 失败，请稍后重试。'
-      try {
-        const problem = await response.json()
-        message = problem.detail || problem.message || message
-      } catch {
-        // 搜索与列表错误不保证带 JSON 正文，保留安全的用户提示。
-      }
-      throw new Error(message)
-    }
-    const nextItems = await response.json()
+    )
     // 搜索、清除和轮询可能并发返回；旧请求不得覆盖用户最后选择的视图。
     if (!inboxRequestGuard.isLatest(requestId) || pageUnmounted) return
     inboxItems.value = nextItems
@@ -439,20 +433,11 @@ const analyzeItem = async (item) => {
   analysisErrorMessage.value = ''
 
   try {
-    const response = await fetch(`/api/inbox/${item.id}/ai/analyze`, {
-      method: 'POST'
-    })
-
-    if (!response.ok) {
-      let message = 'AI 分析失败，请稍后重试。'
-      try {
-        const problem = await response.json()
-        message = problem.detail || problem.message || message
-      } catch {
-        // 上游异常不一定包含 JSON；保留对用户安全的通用提示。
-      }
-      throw new Error(message)
-    }
+    await requestJson(
+      `/api/inbox/${item.id}/ai/analyze`,
+      { method: 'POST' },
+      'AI 分析失败，请稍后重试。'
+    )
 
     // 成功后重新读取 Java 持久化的数据，确保五类分析结果作为一组展示。
     await refreshCurrentView()
