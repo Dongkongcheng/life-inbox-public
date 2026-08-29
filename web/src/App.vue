@@ -1,7 +1,8 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import ActionCandidatePanel from './components/ActionCandidatePanel.vue'
 import HighlightedText from './components/HighlightedText.vue'
+import RelatedItemsPanel from './components/RelatedItemsPanel.vue'
 import TodoPanel from './components/TodoPanel.vue'
 import { createLatestRequestGuard } from './searchRequestGuard.js'
 
@@ -35,6 +36,7 @@ const analysisErrorItemId = ref(null)
 const analysisErrorMessage = ref('')
 const errorMessage = ref('')
 const activeView = ref('inbox')
+const expandedRelatedItemId = ref(null)
 
 const AI_STATUS_POLL_INTERVAL_MS = 1500
 const CAPTURE_STATUS_DISCOVERY_REFRESHES = 3
@@ -211,6 +213,7 @@ const searchInbox = async () => {
   activeSearchType.value = searchType.value
   activeSearchCategory.value = searchCategory.value.trim()
   activeSearchFavorite.value = searchFavorite.value
+  expandedRelatedItemId.value = null
   await refreshCurrentView()
 }
 
@@ -226,7 +229,42 @@ const clearSearch = async () => {
   activeSearchCategory.value = ''
   activeSearchFavorite.value = ''
   searchErrorMessage.value = ''
+  expandedRelatedItemId.value = null
   await refreshCurrentView()
+}
+
+const toggleRelatedItems = (inboxItemId) => {
+  expandedRelatedItemId.value = expandedRelatedItemId.value === inboxItemId
+    ? null
+    : inboxItemId
+}
+
+const focusInboxItem = async (inboxItemId) => {
+  await nextTick()
+  const target = document.getElementById(`inbox-item-${inboxItemId}`)
+  if (!target) return
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  target.focus({ preventScroll: true })
+}
+
+const openRelatedInboxItem = async (relatedItem) => {
+  const inboxItemId = relatedItem?.id
+  if (!Number.isInteger(inboxItemId) || inboxItemId <= 0) return
+
+  activeView.value = 'inbox'
+  // 先收起 Source 面板并作废其在途请求，导航等待列表刷新期间也不会串入旧结果。
+  expandedRelatedItemId.value = null
+  const targetAlreadyVisible = inboxItems.value.some((item) => item.id === inboxItemId)
+  if (!targetAlreadyVisible && activeSearchQuery.value) {
+    // Related DTO 只提供有界预览；先回到权威 Inbox 列表，再复用现有完整卡片查看目标。
+    await clearSearch()
+  } else if (!targetAlreadyVisible) {
+    await refreshCurrentView()
+  }
+
+  // 同一时刻只展开目标卡片，A → B → C 不会形成嵌套详情栈。
+  expandedRelatedItemId.value = inboxItemId
+  await focusInboxItem(inboxItemId)
 }
 
 const saveItem = async () => {
@@ -713,7 +751,10 @@ onBeforeUnmount(() => {
         <article
           v-for="item in inboxItems"
           :key="item.id"
+          :id="`inbox-item-${item.id}`"
           class="inbox-item"
+          :class="{ 'is-related-target': expandedRelatedItemId === item.id }"
+          tabindex="-1"
           :aria-busy="isFreshProcessing(item)"
         >
           <div class="item-top">
@@ -892,6 +933,12 @@ onBeforeUnmount(() => {
             v-if="isAnalyzableItem(item)"
             :inbox-item-id="item.id"
             :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || analyzingId === item.id"
+          />
+          <RelatedItemsPanel
+            :inbox-item-id="item.id"
+            :expanded="expandedRelatedItemId === item.id"
+            @toggle="toggleRelatedItems"
+            @open-inbox-item="openRelatedInboxItem"
           />
         </article>
       </div>
