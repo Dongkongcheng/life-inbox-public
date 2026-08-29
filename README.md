@@ -76,17 +76,17 @@ V0.1 — Universal Inbox        ✅ Completed
 V0.2 — AI Organizer           ✅ Completed
 V0.3 — Smart Search           ✅ Completed
 V0.4 — Action Extractor       ✅ Completed
-V0.5 — Relations              🚧 Current
+V0.5 — Relations              ✅ Completed
 V1.0 — Personal AI            📋 Planned
 ```
 
 Latest completed release baseline:
 
 ```text
-V0.4 — Action Extractor
+V0.5 — Relations
 ```
 
-Current development stage:
+Latest completed development stage:
 
 ```text
 V0.5 — Relations
@@ -94,20 +94,16 @@ V0.5 — Relations
 
 V0.4 established the complete path from captured information to user-confirmed Todo state.
 
-V0.5 now asks the next question:
+V0.5 answered the next question:
 
 ```text
 “Which pieces of information
 I have saved are meaningfully related?”
 ```
 
-Current V0.5 work begins incrementally.
+V0.5 was implemented incrementally. Its completed release scope remains intentionally narrower than every possible Relations capability.
 
-The fact that V0.5 is now the active stage does **not** mean every Relations capability already exists.
-
-Each Relation capability is implemented task by task.
-
-The first nine V0.5 implementation tasks are complete:
+All ten V0.5 implementation and acceptance tasks are complete:
 
 ```text
 V0.5 Task 1
@@ -163,6 +159,12 @@ V0.5 Task 9
 Overall Task 49
 
 Relations Hardening / Integration / Full Regression
+
+V0.5 Task 10
+=
+Overall Task 50
+
+V0.5 Final Acceptance / Cleanup / Release Preparation
 ```
 
 Task 42 retrieves bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filters them through Java/MySQL. Task 43 sends
@@ -174,7 +176,8 @@ actually indexed and provides a synchronous manual retry endpoint. Task 48 adds 
 items and an explicit, bounded historical Backfill for `ACTIVE + NOT_PROCESSED` items whose Source Vector already exists. Neither operation
 deletes old Relations; Backfill never generates a missing Vector and nothing runs on a startup or periodic schedule. Task 49 hardens the
 existing Java validation boundary, strengthens regression coverage, and completes an end-to-end consistency audit without adding Schema or
-new Relation product behavior.
+new Relation product behavior. Task 50 completes the final automated acceptance, documentation cleanup, and owner-controlled release
+preparation without starting V1.0.
 
 ---
 
@@ -1241,7 +1244,7 @@ The exact normalization contract is defined by the current implementation and te
 
 # V0.5 — Relations
 
-V0.5 is the current development stage.
+V0.5 is the latest completed development stage.
 
 Goal:
 
@@ -2553,7 +2556,7 @@ Agent Execution
 
 ---
 
-## V0.5 — Relations 🚧
+## V0.5 — Relations ✅
 
 Goal:
 
@@ -2562,7 +2565,7 @@ Discover useful relationships
 between captured information.
 ```
 
-Implemented Task 1 foundation:
+Implemented first-version model:
 
 ```text
 InboxItem A
@@ -2604,9 +2607,7 @@ Workflow Engine
 
 These require independent product justification.
 
-The exact V0.5 task decomposition is intentionally not fully hard-coded in advance.
-
-Completed:
+Completed tasks:
 
 ```text
 ✅ V0.5 Task 1 / Overall Task 41
@@ -2635,10 +2636,13 @@ Completed:
 
 ✅ V0.5 Task 9 / Overall Task 49
 — Relations Hardening / Integration / Full Regression
+
+✅ V0.5 Task 10 / Overall Task 50
+— V0.5 Final Acceptance / Cleanup / Release Preparation
 ```
 
-Scheduled/automatic SUCCESS rediscovery, startup or unlimited Backfill, automatic Vector repair, Relation cleanup, and final V0.5 acceptance
-remain unimplemented future work.
+Scheduled/automatic SUCCESS rediscovery, startup or unlimited Backfill, automatic Vector repair, and Relation cleanup remain outside the
+completed V0.5 scope.
 
 ---
 
@@ -3238,7 +3242,7 @@ Current intentional scope limitations include:
 * Calendar integration is not currently implemented.
 * Todo source traceability depends on available source data; deleted source content is not reconstructed from a snapshot.
 * Browser Extension Capture remains postponed.
-* V0.5 Relations is now the active development stage; Tasks 1–6 provide Relation persistence, discovery, read API, and UI, Task 7 adds Vector-ready automatic first-pass processing plus guarded manual retry, Task 8 adds explicit bounded historical Backfill plus explicit SUCCESS Rediscovery, and Task 9 hardens and regression-tests the integrated contract. Startup/unlimited Backfill and automatic/scheduled Rediscovery are not implemented.
+* V0.5 Relations is complete; Tasks 1–6 provide Relation persistence, discovery, read API, and UI, Task 7 adds Vector-ready automatic first-pass processing plus guarded manual retry, Task 8 adds explicit bounded historical Backfill plus explicit SUCCESS Rediscovery, Task 9 hardens the integrated contract, and Task 10 completes final acceptance and release preparation. Startup/unlimited Backfill and automatic/scheduled Rediscovery are not implemented.
 * `content_relation` exists in the V0.5 Task 1 migration and fresh schema; existing V0.4 databases must apply the incremental migration.
 * The first version intentionally has no `relation_candidate` model.
 * The first version intentionally persists no Relation score; Task 42's `semanticScore` is a runtime-only Qdrant ranking signal, not Relation truth.
@@ -3421,7 +3425,7 @@ Infrastructure Strategy
 
 ---
 
-# Current Focus
+# Latest Completed Focus
 
 ```text
 V0.5 — Relations
@@ -3468,9 +3472,9 @@ useful relationships between
 the information I have accumulated?”
 ```
 
-That is the focus of V0.5.
+That was the focus of V0.5.
 
-The completed first implementation step is:
+The completed first-version model is:
 
 ```text
 InboxItem A
@@ -3522,6 +3526,10 @@ Overall Task 48
 V0.5 Task 9
 =
 Overall Task 49
+
+V0.5 Task 10
+=
+Overall Task 50
 ```
 
 Task 41 established the first concrete Relation Contract and persistence foundation. Task 42 added bounded semantic neighbor candidates
@@ -3530,8 +3538,9 @@ non-destructive conversion of validated suggestions into business Relation state
 ACTIVE Related Items. Task 46 added lazy frontend display and navigation through existing Inbox cards. Task 47 added Vector-ready automatic
 first-pass processing and guarded manual retry. Task 48 added explicit SUCCESS rediscovery and explicit bounded historical processing for
 already vector-ready `ACTIVE + NOT_PROCESSED` items. Task 49 audited and hardened the integrated lifecycle without changing the Relation
-product scope or Schema. Scheduled rediscovery, startup/unlimited Backfill, automatic Vector repair, Relation cleanup, and final acceptance
-remain separate tasks.
+product scope or Schema. Task 50 completed final automated acceptance, documentation cleanup, and release preparation. Scheduled
+rediscovery, startup/unlimited Backfill, automatic Vector repair, and Relation cleanup remain outside the completed V0.5 scope; V1.0 is
+still planned and has not started.
 
 ---
 

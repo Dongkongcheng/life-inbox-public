@@ -53,7 +53,7 @@ V0.3 已完成基础字段与 AI 派生字段检索、过滤、基础排序、�
 
 V0.4 已完成 Action Extraction、确定性日期归一化、Candidate 决策、Todo 生命周期与来源追溯，并通过最终回归验收。
 
-## V0.5 — Relations 🚧
+## V0.5 — Relations ✅
 
 - ✅ Task 1 / Overall Task 41 — Relation Core Model & Persistence Foundation（`InboxItem ↔ InboxItem`、仅 `RELATED_TO`、对称 Canonical Pair、ACTIVE-only 创建、MySQL 唯一约束与 Delete Cascade）
 - ✅ Task 2 / Overall Task 42 — Bounded Relation Candidate Discovery（复用已有 Qdrant Point Vector、有界近邻、Java/MySQL 权威过滤、运行时 Score、不落库）
@@ -64,7 +64,10 @@ V0.4 已完成 Action Extraction、确定性日期归一化、Candidate 决策�
 - ✅ Task 7 / Overall Task 47 — Automatic Relation Discovery & Processing Lifecycle（Vector 成功后自动首次发现、独立状态与 Attempt Guard、同步手动重试、短事务原子持久化、安全失败降级）
 - ✅ Task 8 / Overall Task 48 — Relation Rediscovery & Historical Backfill Foundation（SUCCESS 显式重新发现、新 Attempt 与既有 Guard、ACTIVE + NOT_PROCESSED 有界显式历史调度、仅消费已就绪 Vector、非破坏性增量持久化）
 - ✅ Task 9 / Overall Task 49 — Relations Hardening / Integration / Full Regression（整体不变量、Attempt Guard、并发/事务/降级/API/UI 边界审计，Java 二次校验加固与完整回归）
-- 定时/自动 SUCCESS 重新发现、启动或无限历史回填、自动 Vector 修复、FAILED 自动重试与最终 V0.5 acceptance 仍未实现；当前 UI 仍只读取已经持久化的 Relation
+- ✅ Task 10 / Overall Task 50 — V0.5 Final Acceptance / Cleanup / Release Preparation（完整自动化回归、Fresh/增量 Schema 验证、维护文档清理与发布准备）
+- 定时/自动 SUCCESS 重新发现、启动或无限历史回填、自动 Vector 修复与 FAILED 自动重试不属于 V0.5 完成范围；当前 UI 仍只读取已经持久化的 Relation
+
+V0.5 已完成有界 Relation 发现、持久化、读取、前端展示、处理生命周期、显式重新发现与历史回填，并通过最终回归验收。V1.0 仍为 Planned，未在本任务中启动。
 
 ## V1.0 — Personal AI（Long-term）
 

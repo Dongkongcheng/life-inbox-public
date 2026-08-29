@@ -79,10 +79,10 @@ V0.1 — Universal Inbox        ✅ Completed
 V0.2 — AI Organizer           ✅ Completed
 V0.3 — Smart Search           ✅ Completed
 V0.4 — Action Extractor       ✅ Completed
-V0.5 — Relations              🚧 Current
+V0.5 — Relations              ✅ Completed
 ```
 
-V0.5 Task 1 / Overall Task 41 后，MySQL 使用 8 张业务表：
+V0.5 最终 Schema 使用 8 张业务表：
 
 ```text
 inbox_item
@@ -100,9 +100,9 @@ content_relation
 ```text
 Current Schema
 =
-V0.5 Task 1 Schema
+V0.5 Final Schema
 =
-V0.4 Final Schema + content_relation
+V0.4 Final Schema + content_relation + inbox_item Relation Processing Metadata
 ```
 
 Task 35 的 Candidate Decision 使用现有两张表完成，没有新增 Schema。仍未实现的是：
@@ -2096,7 +2096,7 @@ docs/sql/v0.5-schema.sql
 
 # 54. V0.5 Incremental Migration
 
-已有 V0.4 数据库进入当前 V0.5 Task 7，按顺序执行：
+已有 V0.4 数据库进入已完成的 V0.5，按顺序执行：
 
 ```text
 docs/sql/v0.5-task1-add-content-relation.sql
@@ -2151,7 +2151,7 @@ docs/sql/v0.4-task4-add-todo.sql
 docs/sql/v0.4-task7-add-action-processing-state.sql
 ```
 
-## 从 V0.4 进入当前 V0.5 Task 7
+## 从 V0.4 进入已完成的 V0.5
 
 执行：
 
@@ -2203,7 +2203,7 @@ Not Yet Implemented
 
 # 57. 当前数据库总结
 
-截至 V0.5 Task 9 / Overall Task 49（Tasks 48–49 复用现有 Relation Schema，没有 Schema 变化）：
+截至 V0.5 Task 10 / Overall Task 50（Tasks 48–50 复用现有 Relation Schema，没有 Schema 变化）：
 
 ```text
 MySQL
@@ -2240,6 +2240,9 @@ V0.5 Task 4 — Relation Persistence Integration (additive/idempotent, no schema
 V0.5 Task 5 — Related Items Product API (bounded read-only query, no schema change)
 V0.5 Task 6 — Frontend Related Items UI (no schema change)
 V0.5 Task 7 — Automatic Relation Discovery & Processing Lifecycle (inbox_item lifecycle columns)
+V0.5 Task 8 — Relation Rediscovery & Historical Backfill Foundation (no schema change)
+V0.5 Task 9 — Relations Hardening / Integration / Full Regression (no schema change)
+V0.5 Task 10 — V0.5 Final Acceptance / Cleanup / Release Preparation (no schema change)
 ```
 
 当前已形成两个不同生命周期的数据方向：
