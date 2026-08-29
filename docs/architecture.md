@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 8 / Overall Task 48
-— Relation Rediscovery & Historical Backfill Foundation
+V0.5 Task 9 / Overall Task 49
+— Relations Hardening / Integration / Full Regression
 ```
 
-V0.5 当前已完成 Relation 持久化、候选与 AI 判断、只读 Product API、前端 Related Items、Vector 成功后的自动首次处理和手动重试生命周期，以及显式 SUCCESS Rediscovery 和显式有界历史 Backfill。定时重新发现、启动时回填和自动 Vector 修复尚未实现。
+V0.5 当前已完成 Relation 持久化、候选与 AI 判断、只读 Product API、前端 Related Items、Vector 成功后的自动首次处理和手动重试生命周期，以及显式 SUCCESS Rediscovery 和显式有界历史 Backfill。Task 49 已完成整体边界、并发、事务、降级和回归加固；定时重新发现、启动时回填、自动 Vector 修复和最终版本验收尚未实现。
 
 ---
 
@@ -2493,9 +2493,10 @@ Reminder 与 Calendar 仍未实现。
 ✅ Task 6 Frontend Related Items UI
 ✅ Task 7 Automatic Relation Discovery & Processing Lifecycle
 ✅ Task 8 Relation Rediscovery & Historical Backfill Foundation
+✅ Task 9 Relations Hardening / Integration / Full Regression
 ```
 
-当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API、Task 46 懒加载 UI、Task 47 Vector-ready 自动首次处理与手动重试，以及 Task 48 显式 SUCCESS Rediscovery 与显式有界历史 Backfill；定时重新发现、启动/无限回填和自动 Vector 修复仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API、Task 46 懒加载 UI、Task 47 Vector-ready 自动首次处理与手动重试，以及 Task 48 显式 SUCCESS Rediscovery 与显式有界历史 Backfill；Task 49 已完成集成加固和完整回归，定时重新发现、启动/无限回填、自动 Vector 修复和最终 V0.5 验收仍未实现。
 
 ---
 

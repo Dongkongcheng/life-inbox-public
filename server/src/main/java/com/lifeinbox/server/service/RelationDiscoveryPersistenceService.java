@@ -6,8 +6,10 @@ import com.lifeinbox.server.entity.RelationType;
 import com.lifeinbox.server.exception.AiServiceUnavailableException;
 import org.springframework.stereotype.Service;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Task 44 同步编排入口：先在事务外完成 Task 43，再进入 ContentRelationService 的短事务。
@@ -71,11 +73,16 @@ public class RelationDiscoveryPersistenceService {
                 || suggestions.size() > RelationDiscoveryLimits.MAX_CANDIDATES) {
             throw invalidDiscoveryResult();
         }
+        Set<Long> targetIds = new HashSet<>();
         for (RelationDiscoverySuggestion suggestion : suggestions) {
             if (suggestion == null
                     || !Objects.equals(sourceInboxItemId, suggestion.sourceInboxItemId())
+                    || suggestion.targetInboxItemId() == null
+                    || suggestion.targetInboxItemId() <= 0
+                    || Objects.equals(sourceInboxItemId, suggestion.targetInboxItemId())
+                    || !targetIds.add(suggestion.targetInboxItemId())
                     || suggestion.relationType() != RelationType.RELATED_TO) {
-                // Source 或类型错位属于 Task 43 Contract 破坏，不能部分信任后继续落库。
+                // Source、Target 或类型错位属于 Task 43 Contract 破坏，不能部分信任后继续落库。
                 throw invalidDiscoveryResult();
             }
         }

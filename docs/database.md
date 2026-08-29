@@ -2203,7 +2203,7 @@ Not Yet Implemented
 
 # 57. 当前数据库总结
 
-截至 V0.5 Task 8 / Overall Task 48（Task 48 复用 Relation Processing Metadata，没有 Schema 变化）：
+截至 V0.5 Task 9 / Overall Task 49（Tasks 48–49 复用现有 Relation Schema，没有 Schema 变化）：
 
 ```text
 MySQL
