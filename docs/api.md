@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | GET | `/api/inbox` | 查询 ACTIVE InboxItem，并聚合 AI 状态与五类结果 |
 | GET | `/api/inbox/{id}/related` | 只读查询已持久化的 ACTIVE Related InboxItems；不触发发现或 AI |
+| POST | `/api/inbox/{id}/relations/discover` | 同步手动执行或重试 Relation Discovery；受独立 Attempt Guard 保护 |
 | GET | `/api/search?q={query}` | 默认 Keyword Search；支持显式 `semantic` 与 `hybrid` 模式 |
 | POST | `/api/inbox` | JSON Capture；当前支持 TEXT、URL |
 | POST | `/api/inbox/file` | multipart FILE Capture |
@@ -154,6 +155,38 @@ GET /api/inbox/123/related?limit=10
 `searchable_content`，为空时回退 title。响应不包含完整正文、left/right Canonical Storage、Relation ID、Score、Evidence、
 Provider 信息、AI/Action Attempt 或其他内部处理状态。
 
+### Relation Discovery Processing API
+
+`POST /api/inbox/{id}/relations/discover` 是 Task 47 的同步手动入口：
+
+```http
+POST /api/inbox/123/relations/discover
+```
+
+- Source 必须存在且为 `ACTIVE`；
+- `NOT_PROCESSED`、`FAILED` 和 stale `PROCESSING` 可领取新的 UUID Attempt；
+- fresh `PROCESSING` 与 `SUCCESS` 返回 409，不会重复调用 Provider；
+- Source Vector 必须已经就绪。未就绪返回受控 409 并把当前 Attempt 安全结束为 `FAILED`，之后可手动重试；
+- Vector 已就绪但没有候选或 LLM 返回空关系是合法 SUCCESS；
+- Qdrant/LLM 在事务外执行，最终短事务原子提交 additive Relation 和 `SUCCESS`；
+- 失败、空结果和重试都不删除既有 `content_relation`。
+
+成功响应只包含状态和计数：
+
+```json
+{
+  "relationStatus": "SUCCESS",
+  "discoveredCount": 2,
+  "persistedNewCount": 1,
+  "alreadyExistingCount": 1,
+  "skippedInvalidCount": 0
+}
+```
+
+自动入口没有额外 HTTP API：只有 Qdrant 索引明确返回 `indexed=true` 才投递后台首次发现，且自动 Claim 仅允许
+`NOT_PROCESSED`。系统不会扫描历史数据、自动重试 FAILED 或重新处理 SUCCESS。普通
+`GET /api/inbox/{id}/related` 与前端展开/读取仍不会触发发现。
+
 ### JSON Capture
 
 TEXT：
@@ -194,12 +227,14 @@ URL：
   "aiFinishedTime": "2026-08-21T10:00:02",
   "aiProcessingStale": false,
   "actionStatus": "SUCCESS",
-  "actionProcessingStale": false
+  "actionProcessingStale": false,
+  "relationStatus": "SUCCESS",
+  "relationProcessingStale": false
 }
 ```
 
 fresh PROCESSING 的重复请求返回 409。失败只更新 Attempt 状态，旧的成功结果仍可能继续出现在响应中。Java 不向浏览器透传 Python Traceback、SQL Exception、上游正文或 API Key。
-Action 的 Attempt ID、错误摘要与内部时间不向产品 JSON 暴露。
+Action 与 Relation 的 Attempt ID、错误摘要和内部时间不向产品 JSON 暴露。
 
 ### Action Candidate 产品 API
 

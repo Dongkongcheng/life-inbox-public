@@ -107,7 +107,7 @@ The fact that V0.5 is now the active stage does **not** mean every Relations cap
 
 Each Relation capability is implemented task by task.
 
-The first six V0.5 implementation tasks are complete:
+The first seven V0.5 implementation tasks are complete:
 
 ```text
 V0.5 Task 1
@@ -145,13 +145,21 @@ V0.5 Task 6
 Overall Task 46
 
 Frontend Related Items UI
+
+V0.5 Task 7
+=
+Overall Task 47
+
+Automatic Relation Discovery & Processing Lifecycle
 ```
 
 Task 42 retrieves bounded semantic neighbors for an existing indexed ACTIVE InboxItem and filters them through Java/MySQL. Task 43 sends
 only the bounded Source/Candidate text to one LLM call and returns strictly validated runtime `RELATED_TO` suggestions. Task 44 converts
 valid suggestions into canonical, additive, idempotent Relations after one short final-validation transaction. Task 45 exposes persisted
 Relations through a bounded, read-only MySQL Product API. Task 46 adds a lazy, read-only Related Items section to existing Inbox cards so the
-user can rediscover and focus related saved information. Automatic Relation processing is not implemented yet.
+user can rediscover and focus related saved information. Task 47 now runs one guarded automatic discovery only after a new Source Vector is
+actually indexed, and provides a synchronous manual retry endpoint. It does not backfill historical rows or automatically rediscover
+`FAILED`/`SUCCESS` items.
 
 ---
 
@@ -488,7 +496,8 @@ The same ownership principle is reused where later AI processing requires protec
 
 V0.4 already applies this principle to Action processing.
 
-If V0.5 later introduces automatic Relation rediscovery or retries, the corresponding task should decide whether an equivalent Relation attempt lifecycle is actually required.
+V0.5 Task 47 applies this same ownership rule to Relation processing. Automatic first-pass discovery and manual retries receive independent
+Relation Attempt IDs; stale attempts cannot insert Relations or change terminal state.
 
 ---
 
@@ -1328,7 +1337,8 @@ The implementation provides a Java internal service for idempotent `ensureRelate
 the requested InboxItem is on either canonical side. Endpoint rows are locked in canonical ID order during creation so Archive/Delete and
 concurrent reverse-pair writes have deterministic database ordering.
 
-Task 41 intentionally contains no persisted `RelationCandidate`, score, evidence/reason, provider metadata, or Relation processing state.
+Task 41 intentionally contains no persisted `RelationCandidate`, score, evidence/reason, or provider metadata. Task 47 later adds only
+InboxItem-level Relation processing metadata; it does not introduce a Candidate table.
 
 Task 42 adds a separate runtime-only candidate flow:
 
@@ -1371,6 +1381,12 @@ FastAPI, LLM, Embedding, Qdrant, Rerank, Relation Discovery, or Relation Persist
 Task 46 consumes that Product API only after the user expands “相关内容” on one Inbox card. It renders compact bounded previews with isolated
 loading, empty, and retryable error states. Clicking a related row focuses the existing full Inbox card and replaces the active Related panel,
 so chained navigation does not build nested detail surfaces. Opening or viewing an item never triggers Relation Discovery.
+
+Task 47 adds independent `relation_status` processing state and a UUID Attempt Guard. A successful `indexed=true` Vector response publishes a
+business event into the existing bounded AI executor; only `NOT_PROCESSED` may be claimed automatically. Qdrant/LLM work stays outside
+transactions. The final short transaction revalidates the current Attempt before any insert, performs Task 44 additive persistence, and commits
+new Relations with `SUCCESS` atomically. `POST /api/inbox/{id}/relations/discover` retries `FAILED` or stale `PROCESSING`; fresh `PROCESSING` and
+`SUCCESS` are rejected. Failures preserve existing Relations, and there is no historical scan or automatic rediscovery.
 
 ---
 
@@ -2586,9 +2602,12 @@ Completed:
 
 ✅ V0.5 Task 6 / Overall Task 46
 — Frontend Related Items UI
+
+✅ V0.5 Task 7 / Overall Task 47
+— Automatic Relation Discovery & Processing Lifecycle
 ```
 
-Automatic discovery, rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
+Historical backfill, automatic rediscovery/hardening, and final V0.5 acceptance remain unimplemented future work.
 
 ---
 
@@ -3188,7 +3207,7 @@ Current intentional scope limitations include:
 * Calendar integration is not currently implemented.
 * Todo source traceability depends on available source data; deleted source content is not reconstructed from a snapshot.
 * Browser Extension Capture remains postponed.
-* V0.5 Relations is now the active development stage; Task 1 Relation persistence, Task 2 bounded runtime candidates, Task 3 bounded AI Relation judgment, Task 4 additive persistence integration, Task 5 bounded Related Items Product API, and Task 6 lazy frontend Related Items are implemented, while automatic processing and rediscovery are not.
+* V0.5 Relations is now the active development stage; Tasks 1–6 provide Relation persistence, discovery, read API, and UI, while Task 7 adds Vector-ready automatic first-pass processing plus guarded manual retry. Historical backfill and automatic rediscovery are not implemented.
 * `content_relation` exists in the V0.5 Task 1 migration and fresh schema; existing V0.4 databases must apply the incremental migration.
 * The first version intentionally has no `relation_candidate` model.
 * The first version intentionally persists no Relation score; Task 42's `semanticScore` is a runtime-only Qdrant ranking signal, not Relation truth.
@@ -3460,13 +3479,17 @@ Overall Task 45
 V0.5 Task 6
 =
 Overall Task 46
+
+V0.5 Task 7
+=
+Overall Task 47
 ```
 
 Task 41 established the first concrete Relation Contract and persistence foundation. Task 42 added bounded semantic neighbor candidates
 without converting them into business Relation state. Task 43 added one bounded, strict AI judgment step. Task 44 added the explicit,
 non-destructive conversion of validated suggestions into business Relation state. Task 45 added the read-only MySQL Product API for bounded
-ACTIVE Related Items. Task 46 added lazy frontend display and navigation through existing Inbox cards. Automatic processing and hardening
-remain separate tasks.
+ACTIVE Related Items. Task 46 added lazy frontend display and navigation through existing Inbox cards. Task 47 added Vector-ready automatic
+first-pass processing and guarded manual retry. Historical backfill, automatic rediscovery, and final hardening remain separate tasks.
 
 ---
 

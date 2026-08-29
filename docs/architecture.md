@@ -61,11 +61,11 @@ V1.0 — Personal AI           📋 Planned
 当前稳定架构基线：
 
 ```text
-V0.5 Task 6 / Overall Task 46
-— Frontend Related Items UI
+V0.5 Task 7 / Overall Task 47
+— Automatic Relation Discovery & Processing Lifecycle
 ```
 
-V0.5 当前已完成 Relation 持久化基础、有界运行时候选发现、有界 AI Relation 判断、建议到正式 Relation 的内部持久化、只读 Related Items Product API，以及前端 Related Items 体验；自动处理尚未实现。
+V0.5 当前已完成 Relation 持久化、候选与 AI 判断、只读 Product API、前端 Related Items，以及 Vector 成功后的自动首次处理和手动重试生命周期；历史回填和自动重新发现尚未实现。
 
 ---
 
@@ -1931,8 +1931,8 @@ Delete            = either endpoint cascades relation row
 Persistence Owner = Java + MySQL
 ```
 
-`content_relation` 是持久化派生产品状态。第一版没有 `RelationCandidate`、score、evidence、provider metadata
-或 Relation processing state。创建服务按 Canonical ID 顺序锁住两个 InboxItem，使创建与 Archive/Delete
+`content_relation` 是持久化派生产品状态。第一版没有 `RelationCandidate`、score、evidence 或 provider metadata。
+Task 47 的处理状态只位于 `inbox_item`，不进入 Relation Row。创建服务按 Canonical ID 顺序锁住两个 InboxItem，使创建与 Archive/Delete
 拥有明确顺序；数据库唯一约束是并发重复的最终防线。
 
 Task 42 在这个持久化基础旁增加了独立的运行时候选流：
@@ -2056,6 +2056,33 @@ AI Relation Discovery
 ```
 
 浏览器只调用 Java Product API。展开、空结果和重试都不会调用 FastAPI、LLM、Embedding、Qdrant 或 Relation Discovery。
+
+Task 47 在 Product Read 之外增加一次性自动处理链：
+
+```text
+Qdrant index response: indexed=true
+        ↓
+InboxVectorReadyEvent
+        ↓
+Existing bounded aiTaskExecutor
+        ↓
+Automatic claim: NOT_PROCESSED → PROCESSING + UUID Attempt
+        ↓
+Task 42 + Task 43 outside transaction
+        ↓
+Sorted Source/Target row locks + current Attempt check
+        ↓
+Task 44 additive inserts + SUCCESS in one short transaction
+```
+
+Relation 使用独立的 `NOT_PROCESSED / PROCESSING / SUCCESS / FAILED`，与 Analyze、Action 状态互不覆盖。自动入口只领取
+`NOT_PROCESSED`；不会扫描历史行、自动重试 `FAILED` 或重跑 `SUCCESS`。手动 `POST /api/inbox/{id}/relations/discover`
+允许首次执行、FAILED 重试和 stale PROCESSING 接管，拒绝 fresh PROCESSING 与 SUCCESS。Source Vector 未就绪是受控失败；
+Vector 已就绪但零候选则是合法 SUCCESS。
+
+Qdrant 和 LLM 调用期间不持有数据库事务。最终事务在任何 INSERT 前核对当前 Attempt，旧请求因而不能留下关系；若最后的
+SUCCESS Guard 失败，当前事务内新增关系全部回滚。Archive/Delete 通过最终 ACTIVE/存在性校验阻断写入，失败收尾不删除任何
+已有 Relation。`relationStatus` 和派生 stale 值可随 InboxItem 返回，Attempt、错误详情与时间戳不向产品 API 暴露。
 
 ---
 
@@ -2434,9 +2461,10 @@ Reminder 与 Calendar 仍未实现。
 ✅ Task 4 Relation Persistence Integration
 ✅ Task 5 Related Items Product API
 ✅ Task 6 Frontend Related Items UI
+✅ Task 7 Automatic Relation Discovery & Processing Lifecycle
 ```
 
-当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API，以及 Task 46 懒加载 Related Items UI；自动处理仍未实现。
+当前已具备 Java/MySQL 核心模型、Task 42 有界候选、Task 43 运行时 AI 判断、Task 44 非破坏性正式 Relation 转换、Task 45 只读 Product API、Task 46 懒加载 UI，以及 Task 47 Vector-ready 自动首次处理与手动重试生命周期；历史回填和自动重新发现仍未实现。
 
 ---
 
@@ -2595,7 +2623,7 @@ User Confirmation
 Todo / Deadline
 ```
 
-V0.5 Task 1 到 Task 5 进一步建立：
+V0.5 Task 1 到 Task 7 进一步建立：
 
 ```text
 InboxItem
@@ -2615,6 +2643,10 @@ Additive / Idempotent Persistence
 Bounded MySQL Related Items Product API
         ↓
 Lazy Vue Related Items Section
+        +
+Vector-ready Automatic First-pass Processing
+        +
+Attempt-guarded Manual Retry
         ↓
 User Rediscovery
 ```

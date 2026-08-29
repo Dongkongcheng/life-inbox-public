@@ -3,6 +3,7 @@ package com.lifeinbox.server.service;
 import com.lifeinbox.server.entity.ContentRelation;
 import com.lifeinbox.server.entity.InboxItem;
 import com.lifeinbox.server.entity.RelationType;
+import com.lifeinbox.server.entity.RelationProcessingStatus;
 import com.lifeinbox.server.dto.RelationPersistenceResult;
 import com.lifeinbox.server.mapper.ContentRelationMapper;
 import com.lifeinbox.server.mapper.InboxItemMapper;
@@ -368,6 +369,58 @@ class ContentRelationServiceTests {
         assertEquals(0, result.alreadyExistingCount());
         assertEquals(0, result.skippedInvalidCount());
         assertEquals(List.of(), result.relations());
+        verify(contentRelationMapper, never()).selectByInboxItemId(any());
+        verify(contentRelationMapper, never()).insert(any(ContentRelation.class));
+    }
+
+    @Test
+    void currentAttemptCompletesEmptyDiscoveryAndSuccessAtomically() {
+        InboxItem source = item(20L, "ACTIVE");
+        source.setRelationStatus(RelationProcessingStatus.PROCESSING);
+        source.setRelationAttemptId("attempt-current");
+        when(inboxItemMapper.selectRelationEndpointsForUpdateByIds(List.of(20L)))
+                .thenReturn(List.of(source));
+        when(inboxItemMapper.markRelationSuccess(
+                20L,
+                "attempt-current",
+                RelationProcessingStatus.PROCESSING,
+                RelationProcessingStatus.SUCCESS
+        )).thenReturn(1);
+
+        RelationPersistenceResult result = service.ensureRelatedToBatchForAttempt(
+                20L,
+                "attempt-current",
+                List.of()
+        );
+
+        assertEquals(0, result.discoveredCount());
+        verify(inboxItemMapper).markRelationSuccess(
+                20L,
+                "attempt-current",
+                RelationProcessingStatus.PROCESSING,
+                RelationProcessingStatus.SUCCESS
+        );
+        verifyNoMoreInteractions(contentRelationMapper);
+    }
+
+    @Test
+    void staleAttemptCannotInsertAnyRelation() {
+        InboxItem source = item(20L, "ACTIVE");
+        source.setRelationStatus(RelationProcessingStatus.PROCESSING);
+        source.setRelationAttemptId("attempt-new");
+        when(inboxItemMapper.selectRelationEndpointsForUpdateByIds(List.of(10L, 20L)))
+                .thenReturn(List.of(item(10L, "ACTIVE"), source));
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.ensureRelatedToBatchForAttempt(
+                        20L,
+                        "attempt-old",
+                        List.of(10L)
+                )
+        );
+
+        assertEquals(HttpStatus.CONFLICT, exception.getStatusCode());
         verify(contentRelationMapper, never()).selectByInboxItemId(any());
         verify(contentRelationMapper, never()).insert(any(ContentRelation.class));
     }

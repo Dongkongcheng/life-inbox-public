@@ -4,9 +4,12 @@ import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
 import com.lifeinbox.server.dto.AiVectorIndexResponse;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.event.InboxVectorReadyEvent;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.locks.ReentrantLock;
@@ -25,15 +28,27 @@ public class InboxVectorIndexWorker {
     private final InboxItemMapper inboxItemMapper;
     private final InboxSearchableContentService searchableContentService;
     private final AiServiceClient aiServiceClient;
+    private final ApplicationEventPublisher eventPublisher;
 
+    @Autowired
     public InboxVectorIndexWorker(
             InboxItemMapper inboxItemMapper,
             InboxSearchableContentService searchableContentService,
-            AiServiceClient aiServiceClient
+            AiServiceClient aiServiceClient,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.inboxItemMapper = inboxItemMapper;
         this.searchableContentService = searchableContentService;
         this.aiServiceClient = aiServiceClient;
+        this.eventPublisher = eventPublisher;
+    }
+
+    InboxVectorIndexWorker(
+            InboxItemMapper inboxItemMapper,
+            InboxSearchableContentService searchableContentService,
+            AiServiceClient aiServiceClient
+    ) {
+        this(inboxItemMapper, searchableContentService, aiServiceClient, event -> { });
     }
 
     public void index(Long inboxItemId, String expectedAttemptId) {
@@ -67,6 +82,8 @@ public class InboxVectorIndexWorker {
                         response.model(),
                         response.dimension()
                 );
+                // 以真实 Vector 成功作为唯一自动发现钩子；不扫描历史数据，也不在 Capture 事务内调用 AI。
+                eventPublisher.publishEvent(new InboxVectorReadyEvent(inboxItemId));
             } else {
                 LOGGER.debug("Vector Store 已关闭，跳过 InboxItem={} 的索引", inboxItemId);
             }

@@ -55,19 +55,53 @@ public class RelationDiscoveryService {
             Long sourceInboxItemId,
             Integer limit
     ) {
+        return discoverRelations(sourceInboxItemId, limit, false);
+    }
+
+    /** 生命周期入口必须确认 Source Vector 已存在；零候选仍是合法成功。 */
+    public List<RelationDiscoverySuggestion> discoverRelationsForProcessing(
+            Long sourceInboxItemId,
+            Integer limit
+    ) {
+        return discoverRelations(sourceInboxItemId, limit, true);
+    }
+
+    private List<RelationDiscoverySuggestion> discoverRelations(
+            Long sourceInboxItemId,
+            Integer limit,
+            boolean requireVectorReady
+    ) {
         requirePositiveId(sourceInboxItemId);
         int normalizedLimit = normalizeLimit(limit);
 
         InboxItem initialSource = requireActiveSource(sourceInboxItemId);
         if (textBuilder.buildSource(initialSource) == null) {
+            if (requireVectorReady) {
+                throw new ResponseStatusException(
+                        HttpStatus.CONFLICT,
+                        "InboxItem 没有可用于 Relation Discovery 的内容"
+                );
+            }
             return List.of();
         }
 
-        List<RelationDiscoveryCandidate> discoveredCandidates =
-                candidateDiscoveryService.discoverCandidates(
-                        sourceInboxItemId,
-                        normalizedLimit
+        List<RelationDiscoveryCandidate> discoveredCandidates;
+        if (requireVectorReady) {
+            RelationCandidateDiscoveryResult discoveryResult = candidateDiscoveryService
+                    .discoverCandidatesWithReadiness(sourceInboxItemId, normalizedLimit);
+            if (!discoveryResult.sourceIndexed()) {
+                throw new ResponseStatusException(
+                        HttpStatus.CONFLICT,
+                        "Source Vector 尚未就绪"
                 );
+            }
+            discoveredCandidates = discoveryResult.candidates();
+        } else {
+            discoveredCandidates = candidateDiscoveryService.discoverCandidates(
+                    sourceInboxItemId,
+                    normalizedLimit
+            );
+        }
         List<Long> candidateIds = normalizeCandidateIds(
                 sourceInboxItemId,
                 discoveredCandidates

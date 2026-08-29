@@ -40,6 +40,29 @@ public class RelationDiscoveryPersistenceService {
         return contentRelationService.ensureRelatedToBatch(sourceInboxItemId, targetIds);
     }
 
+    /** Task 47 外部发现阶段只返回受验证的目标 ID，不在远程调用期间持有事务。 */
+    public List<Long> discoverTargetIdsForProcessing(
+            Long sourceInboxItemId,
+            Integer limit
+    ) {
+        List<RelationDiscoverySuggestion> suggestions = relationDiscoveryService
+                .discoverRelationsForProcessing(sourceInboxItemId, limit);
+        return validateAndExtractTargetIds(sourceInboxItemId, suggestions);
+    }
+
+    /** 最终短事务在 ContentRelationService 内原子完成增量写入和 SUCCESS。 */
+    public RelationPersistenceResult completeAttempt(
+            Long sourceInboxItemId,
+            String attemptId,
+            List<Long> targetIds
+    ) {
+        return contentRelationService.ensureRelatedToBatchForAttempt(
+                sourceInboxItemId,
+                attemptId,
+                targetIds
+        );
+    }
+
     private List<Long> validateAndExtractTargetIds(
             Long sourceInboxItemId,
             List<RelationDiscoverySuggestion> suggestions

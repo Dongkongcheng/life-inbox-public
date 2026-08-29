@@ -38,3 +38,6 @@ life-inbox:
   action:
     # Task 37 默认在可用正文提交后后台提取；可在需要控制 Provider 调用时显式关闭。
     auto-extract-enabled: ${LIFEINBOX_ACTION_AUTO_EXTRACT_ENABLED:true}
+  relation:
+    # 仅在新 Vector 成功写入后执行一次；失败和历史数据都必须由用户手动触发。
+    auto-discover-enabled: ${LIFEINBOX_RELATION_AUTO_DISCOVER_ENABLED:true}

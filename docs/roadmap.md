@@ -61,7 +61,8 @@ V0.4 已完成 Action Extraction、确定性日期归一化、Candidate 决策�
 - ✅ Task 4 / Overall Task 44 — Relation Persistence Integration（AI 调用在事务外、最终 ACTIVE 校验、批量锁定/查询、Canonical 幂等新增、非破坏性持久化）
 - ✅ Task 5 / Overall Task 45 — Related Items Product API（只读 MySQL 双向 Relation 查询、ACTIVE 产品过滤、有界结果、稳定排序、最小 DTO、读取不调用 AI）
 - ✅ Task 6 / Overall Task 46 — Frontend Related Items UI（单条 Inbox 卡片懒加载、Loading/Empty/局部 Error、可重试读取、复用现有 Inbox 卡片导航、无列表 N+1）
-- 自动发现与重处理仍未实现；当前 UI 只读取已经持久化的 Relation
+- ✅ Task 7 / Overall Task 47 — Automatic Relation Discovery & Processing Lifecycle（Vector 成功后自动首次发现、独立状态与 Attempt Guard、同步手动重试、短事务原子持久化、安全失败降级）
+- 历史回填、FAILED 自动重试、SUCCESS 自动重新发现与最终 V0.5 hardening 仍未实现；当前 UI 仍只读取已经持久化的 Relation
 
 ## V1.0 — Personal AI（Long-term）
 

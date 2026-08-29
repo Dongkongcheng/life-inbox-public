@@ -4,8 +4,10 @@ import com.lifeinbox.server.client.AiServiceClient;
 import com.lifeinbox.server.dto.AiVectorDeleteResponse;
 import com.lifeinbox.server.dto.AiVectorIndexResponse;
 import com.lifeinbox.server.entity.InboxItem;
+import com.lifeinbox.server.event.InboxVectorReadyEvent;
 import com.lifeinbox.server.mapper.InboxItemMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.mock;
@@ -13,6 +15,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 class InboxVectorIndexWorkerTests {
 
@@ -21,10 +24,12 @@ class InboxVectorIndexWorkerTests {
             InboxSearchableContentService.class
     );
     private final AiServiceClient aiServiceClient = mock(AiServiceClient.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final InboxVectorIndexWorker worker = new InboxVectorIndexWorker(
             inboxItemMapper,
             searchableContentService,
-            aiServiceClient
+            aiServiceClient,
+            eventPublisher
     );
 
     @Test
@@ -39,6 +44,7 @@ class InboxVectorIndexWorkerTests {
         worker.index(1L, "attempt-b");
 
         verify(aiServiceClient).indexVector(1L, "最新正文 B");
+        verify(eventPublisher).publishEvent(any(InboxVectorReadyEvent.class));
     }
 
     @Test
@@ -95,6 +101,26 @@ class InboxVectorIndexWorkerTests {
         assertDoesNotThrow(() -> worker.delete(1L));
 
         verify(inboxItemMapper).selectById(1L);
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void disabledVectorStoreDoesNotPublishReadyEvent() {
+        InboxItem item = item("ACTIVE", "attempt-a");
+        when(inboxItemMapper.selectById(1L)).thenReturn(item);
+        when(searchableContentService.resolveForRetrieval(item)).thenReturn("正文");
+        when(aiServiceClient.indexVector(1L, "正文")).thenReturn(new AiVectorIndexResponse(
+                1L,
+                false,
+                null,
+                null,
+                null,
+                null
+        ));
+
+        worker.index(1L, "attempt-a");
+
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
