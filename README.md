@@ -2,16 +2,27 @@
 
 > 先收集，再整理。让保存的信息能够被找回、转化为行动，并发现彼此之间的联系。
 
-## 项目截图
+## 界面预览
 
-### 首页
-![首页](docs/images/home.png)
+### 收件箱
+统一保存文本、链接、文件和图片。
 
-### 信息收件箱
-![信息收件箱](docs/images/inbox.png)
+![LifeInbox 收件箱](docs/images/inbox.png)
 
-### AI 分析
-![AI 分析](docs/images/ai-analysis.png)
+### AI 整理
+自动生成摘要、分类和标签，方便后续查看。
+
+![AI 整理结果](docs/images/ai-analysis.png)
+
+### 智能搜索
+通过自然语言查找已保存的内容。
+
+![智能搜索](docs/images/search.png)
+
+### 待办管理
+查看并管理从信息中确认的待办事项。
+
+![待办管理](docs/images/todo.png)
 
 LifeInbox 是一个基于 **Java / Spring Boot + Vue + Python / FastAPI** 的个人信息管理项目。它将文本、网页、文件和图片统一保存到 Inbox，通过 AI 提取摘要与标签，结合关键词和向量检索找回内容，并将信息中的行动建议转化为用户确认的 Todo。
 
