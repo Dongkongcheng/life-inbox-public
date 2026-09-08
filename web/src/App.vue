@@ -1,11 +1,12 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import ActionCandidatePanel from './components/ActionCandidatePanel.vue'
 import HighlightedText from './components/HighlightedText.vue'
 import RelatedItemsPanel from './components/RelatedItemsPanel.vue'
 import TodoPanel from './components/TodoPanel.vue'
 import { requestJson } from './apiClient.js'
 import { createLatestRequestGuard } from './searchRequestGuard.js'
+import { TODO_STATUS } from './todoState.js'
 
 // Capture 表单状态由四种类型共用，切换类型时只展示该类型需要的字段。
 const title = ref('')
@@ -37,7 +38,35 @@ const analysisErrorItemId = ref(null)
 const analysisErrorMessage = ref('')
 const errorMessage = ref('')
 const activeView = ref('inbox')
+const activeTodoStatus = ref(TODO_STATUS.OPEN)
+const expandedInboxItemId = ref(null)
 const expandedRelatedItemId = ref(null)
+
+// 只筛选当前已加载的 Inbox；搜索仍沿用现有后端查询与请求保护。
+const inboxCollection = ref('all')
+const inboxTypeFilter = ref('')
+const todoPreview = ref(null)
+const contentTypeFilters = [
+  { value: '', label: '全部' },
+  { value: 'TEXT', label: '文字' },
+  { value: 'URL', label: '链接' },
+  { value: 'FILE', label: '文件' },
+  { value: 'IMAGE', label: '图片' }
+]
+const visibleInboxItems = computed(() => activeView.value === 'inbox'
+  ? inboxItems.value.filter((item) => (
+    (inboxCollection.value !== 'favorites' || item.favorite === 1)
+    && (!inboxTypeFilter.value || item.type === inboxTypeFilter.value)
+  ))
+  : inboxItems.value)
+const viewLabel = computed(() => activeView.value === 'search'
+  ? '智能搜索'
+  : activeView.value === 'todos'
+    ? activeTodoStatus.value === TODO_STATUS.OPEN ? '待完成' : '已完成'
+    : inboxCollection.value === 'favorites' ? '我的收藏' : '收件箱')
+const todayLabel = new Intl.DateTimeFormat('zh-CN', {
+  month: 'long', day: 'numeric', weekday: 'long'
+}).format(new Date())
 
 const AI_STATUS_POLL_INTERVAL_MS = 1500
 const CAPTURE_STATUS_DISCOVERY_REFRESHES = 3
@@ -58,9 +87,9 @@ const entityTypeLabels = {
 }
 
 const aiStatusLabels = {
-  NOT_PROCESSED: '未分析',
+  NOT_PROCESSED: '待分析',
   PROCESSING: '分析中…',
-  SUCCESS: '分析完成',
+  SUCCESS: '已分析',
   FAILED: '分析失败'
 }
 
@@ -207,6 +236,8 @@ const searchInbox = async () => {
   activeSearchType.value = searchType.value
   activeSearchCategory.value = searchCategory.value.trim()
   activeSearchFavorite.value = searchFavorite.value
+  activeView.value = 'search'
+  expandedInboxItemId.value = null
   expandedRelatedItemId.value = null
   await refreshCurrentView()
 }
@@ -223,8 +254,55 @@ const clearSearch = async () => {
   activeSearchCategory.value = ''
   activeSearchFavorite.value = ''
   searchErrorMessage.value = ''
+  expandedInboxItemId.value = null
   expandedRelatedItemId.value = null
   await refreshCurrentView()
+}
+
+const syncTodoStatus = (status) => {
+  if (Object.values(TODO_STATUS).includes(status)) activeTodoStatus.value = status
+}
+
+const switchView = async (view, todoStatus = activeTodoStatus.value) => {
+  if (!['inbox', 'search', 'todos'].includes(view)) return
+
+  expandedInboxItemId.value = null
+  expandedRelatedItemId.value = null
+  if (view === 'todos') syncTodoStatus(todoStatus)
+  activeView.value = view
+
+  if (view === 'inbox' && activeSearchQuery.value) {
+    await clearSearch()
+    return
+  }
+
+  if (view === 'search') {
+    await nextTick()
+    document.getElementById('inbox-search')?.focus()
+  }
+}
+
+const toggleInboxItemDetail = (inboxItemId) => {
+  const expanding = expandedInboxItemId.value !== inboxItemId
+  expandedInboxItemId.value = expanding ? inboxItemId : null
+  if (!expanding || expandedRelatedItemId.value !== inboxItemId) {
+    expandedRelatedItemId.value = null
+  }
+}
+
+const openInboxCollection = async (collection = 'all') => {
+  inboxCollection.value = collection
+  inboxTypeFilter.value = ''
+  await switchView('inbox')
+}
+
+const focusCapture = async () => {
+  await openInboxCollection()
+  await nextTick()
+  document.getElementById('capture-heading')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const inputId = captureType.value === 'TEXT' ? 'content'
+    : captureType.value === 'URL' ? 'source-url' : 'file'
+  document.getElementById(inputId)?.focus({ preventScroll: true })
 }
 
 const toggleRelatedItems = (inboxItemId) => {
@@ -246,17 +324,21 @@ const openRelatedInboxItem = async (relatedItem) => {
   if (!Number.isInteger(inboxItemId) || inboxItemId <= 0) return
 
   activeView.value = 'inbox'
+  // 相关内容导航要清除本地展示筛选，确保目标卡片能被渲染并获得焦点。
+  inboxCollection.value = 'all'
+  inboxTypeFilter.value = ''
   // 先收起 Source 面板并作废其在途请求，导航等待列表刷新期间也不会串入旧结果。
   expandedRelatedItemId.value = null
   const targetAlreadyVisible = inboxItems.value.some((item) => item.id === inboxItemId)
-  if (!targetAlreadyVisible && activeSearchQuery.value) {
+  if (activeSearchQuery.value) {
     // Related DTO 只提供有界预览；先回到权威 Inbox 列表，再复用现有完整卡片查看目标。
     await clearSearch()
   } else if (!targetAlreadyVisible) {
     await refreshCurrentView()
   }
 
-  // 同一时刻只展开目标卡片，A → B → C 不会形成嵌套详情栈。
+  // 同一时刻只展开目标详情，A → B → C 不会形成嵌套详情栈。
+  expandedInboxItemId.value = inboxItemId
   expandedRelatedItemId.value = inboxItemId
   await focusInboxItem(inboxItemId)
 }
@@ -329,6 +411,7 @@ const saveItem = async () => {
     content.value = ''
     sourceUrl.value = ''
     clearSelectedUpload()
+    inboxTypeFilter.value = ''
     // 自动 Analyze 在 AFTER_COMMIT 后领取任务；有限刷新用于跨过最初的 NOT_PROCESSED 窗口。
     captureStatusDiscoveryRemaining = CAPTURE_STATUS_DISCOVERY_REFRESHES
     await refreshCurrentView()
@@ -499,37 +582,133 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="page-shell">
-    <header class="page-header">
-      <p class="eyebrow">Capture first, organize later</p>
-      <h1>LifeInbox</h1>
-      <p>{{ activeView === 'inbox'
-        ? '先把值得保留的文字、链接、文件和图片放进来。'
-        : '查看已经确认的行动，并在完成后保留清晰状态。' }}</p>
-    </header>
+  <main class="app-shell">
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand-lockup" aria-label="LifeInbox">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="m4 8 3-4h10l3 4v11H4Z" />
+              <path d="M4 12h5l2 3h2l2-3h5" />
+            </svg>
+          </span>
+          <span>LifeInbox</span>
+        </div>
 
-    <nav class="primary-view-switch" aria-label="主要功能">
-      <button
-        type="button"
-        :class="{ active: activeView === 'inbox' }"
-        :aria-current="activeView === 'inbox' ? 'page' : undefined"
-        @click="activeView = 'inbox'"
-      >
-        Inbox
-      </button>
-      <button
-        type="button"
-        :class="{ active: activeView === 'todos' }"
-        :aria-current="activeView === 'todos' ? 'page' : undefined"
-        @click="activeView = 'todos'"
-      >
-        Todo
-      </button>
-    </nav>
+        <button class="sidebar-capture-button" type="button" @click="focusCapture">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          收集新内容
+        </button>
 
-    <section v-if="activeView === 'inbox'" class="capture-card" aria-labelledby="capture-heading">
-      <h2 id="capture-heading">添加到 Inbox</h2>
-      <div class="capture-type-switch" aria-label="选择内容类型">
+        <p class="sidebar-label">我的空间 / WORKSPACE</p>
+        <nav class="primary-view-switch" aria-label="主要功能">
+          <button
+            type="button"
+            :class="{ active: activeView === 'inbox' && inboxCollection === 'all' }"
+            :aria-current="activeView === 'inbox' && inboxCollection === 'all' ? 'page' : undefined"
+            @click="openInboxCollection()"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 7.5h16v11H4z" />
+              <path d="m7 7.5 1.6-3h6.8l1.6 3M8 12h8" />
+            </svg>
+            <span>收件箱</span>
+          </button>
+          <button
+            type="button"
+            :class="{ active: activeView === 'search' }"
+            :aria-current="activeView === 'search' ? 'page' : undefined"
+            @click="switchView('search')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="5.5" />
+              <path d="m15 15 4 4" />
+            </svg>
+            <span>智能搜索</span>
+          </button>
+          <button
+            type="button"
+            :class="{ active: activeView === 'inbox' && inboxCollection === 'favorites' }"
+            :aria-current="activeView === 'inbox' && inboxCollection === 'favorites' ? 'page' : undefined"
+            @click="openInboxCollection('favorites')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m12 3 2.7 5.6 6.2.9-4.5 4.4 1.1 6.1-5.5-2.9L6.5 20l1.1-6.1-4.5-4.4 6.2-.9Z" /></svg>
+            <span>我的收藏</span>
+          </button>
+          <p class="sidebar-label sidebar-action-label">行动 / ACTIONS</p>
+          <button
+            type="button"
+            :class="{ active: activeView === 'todos' && activeTodoStatus === TODO_STATUS.OPEN }"
+            :aria-current="activeView === 'todos' && activeTodoStatus === TODO_STATUS.OPEN ? 'page' : undefined"
+            @click="switchView('todos', TODO_STATUS.OPEN)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="16" height="16" rx="4" />
+              <path d="M8 9h8M8 13h5" />
+            </svg>
+            <span>待完成</span>
+          </button>
+          <button
+            type="button"
+            :class="{ active: activeView === 'todos' && activeTodoStatus === TODO_STATUS.COMPLETED }"
+            :aria-current="activeView === 'todos' && activeTodoStatus === TODO_STATUS.COMPLETED ? 'page' : undefined"
+            @click="switchView('todos', TODO_STATUS.COMPLETED)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" />
+              <path d="m8.5 12 2.2 2.2 4.8-5" />
+            </svg>
+            <span>已完成</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="sidebar-note">
+        <div>
+          <strong>Capture first.</strong>
+          <span>Organize later.</span>
+        </div>
+        <div class="sidebar-profile"><span class="profile-avatar" aria-hidden="true">L</span><div><strong>我的 LifeInbox</strong><span>个人信息空间</span></div></div>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <div class="workspace-topbar">
+        <div class="workspace-breadcrumb"><span>个人空间</span><span aria-hidden="true">/</span><strong>{{ viewLabel }}</strong></div>
+        <button class="workspace-search-link" type="button" @click="switchView('search')">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" /></svg>
+          找回一个想法
+        </button>
+      </div>
+      <div class="workspace-content">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">A little less chaos.</p>
+          <h1>{{ activeView === 'inbox'
+            ? inboxCollection === 'favorites' ? '值得，一读再读。' : '留住每一个好想法。'
+            : activeView === 'search'
+              ? '找回，曾经的灵光。'
+              : activeTodoStatus === TODO_STATUS.OPEN ? '让好想法，发生。' : '每一步，都算数。' }}</h1>
+          <p>{{ activeView === 'inbox'
+            ? inboxCollection === 'favorites' ? '为那些想反复回看的内容，留一个位置。' : '先放进来，整理的事可以慢慢来。'
+            : activeView === 'search'
+              ? '用关键词或自然语言，找回你曾经保存的内容。'
+              : '查看已经确认的行动，并维护清晰的完成状态。' }}</p>
+        </div>
+        <div class="workspace-date"><strong>{{ todayLabel }}</strong><span>你的灵感，正在这里生长</span></div>
+      </header>
+
+      <div class="workspace-columns" :class="{ 'has-context': activeView === 'inbox' }">
+      <div class="workspace-primary">
+    <section v-if="activeView === 'inbox' && inboxCollection === 'all'" class="capture-card" aria-labelledby="capture-heading">
+      <div class="card-heading">
+        <span class="card-heading-icon" aria-hidden="true">✧</span>
+        <div>
+          <h2 id="capture-heading">此刻，想留下什么？</h2>
+          <p>一段文字、一个链接，或刚刚闪过的念头。</p>
+        </div>
+      </div>
+      <div class="capture-type-switch" role="group" aria-label="选择内容类型">
         <button
           class="type-button"
           type="button"
@@ -537,7 +716,8 @@ onBeforeUnmount(() => {
           :aria-pressed="captureType === 'TEXT'"
           @click="changeCaptureType('TEXT')"
         >
-          文字
+          <span class="type-icon type-icon-text" aria-hidden="true">Aa</span>
+          <span>文字</span>
         </button>
         <button
           class="type-button"
@@ -546,7 +726,8 @@ onBeforeUnmount(() => {
           :aria-pressed="captureType === 'URL'"
           @click="changeCaptureType('URL')"
         >
-          链接
+          <span class="type-icon type-icon-url" aria-hidden="true">↗</span>
+          <span>链接</span>
         </button>
         <button
           class="type-button"
@@ -555,7 +736,8 @@ onBeforeUnmount(() => {
           :aria-pressed="captureType === 'FILE'"
           @click="changeCaptureType('FILE')"
         >
-          文件
+          <span class="type-icon type-icon-file" aria-hidden="true">▤</span>
+          <span>文件</span>
         </button>
         <button
           class="type-button"
@@ -564,12 +746,13 @@ onBeforeUnmount(() => {
           :aria-pressed="captureType === 'IMAGE'"
           @click="changeCaptureType('IMAGE')"
         >
-          图片
+          <span class="type-icon type-icon-image" aria-hidden="true">▧</span>
+          <span>图片</span>
         </button>
       </div>
 
-      <form @submit.prevent="saveItem">
-        <label for="title">
+      <form id="capture-form" class="capture-form" @submit.prevent="saveItem">
+        <label class="visually-hidden" for="title">
           {{ captureType === 'URL'
             ? '标题（可选，将尝试自动获取）'
             : captureType === 'FILE' || captureType === 'IMAGE'
@@ -581,23 +764,17 @@ onBeforeUnmount(() => {
           v-model="title"
           type="text"
           maxlength="255"
-          :placeholder="captureType === 'TEXT'
-            ? '例如：学习 Agent'
-            : captureType === 'URL'
-              ? '例如：Spring AI MCP'
-              : captureType === 'FILE'
-                ? '例如：操作系统实验报告'
-                : '例如：旅行照片'"
+          placeholder="标题（可选）"
         />
 
         <template v-if="captureType === 'TEXT'">
-          <label for="content">内容</label>
-          <textarea id="content" v-model="content" rows="6" required
-            placeholder="例如：今天准备学习 Agent Memory"></textarea>
+          <label class="visually-hidden" for="content">内容</label>
+          <textarea id="content" v-model="content" rows="3" required
+            placeholder="直接写下来，不用先想好放在哪里…"></textarea>
         </template>
 
         <template v-else-if="captureType === 'URL'">
-          <label for="source-url">URL</label>
+          <label class="visually-hidden" for="source-url">URL</label>
           <input
             id="source-url"
             v-model="sourceUrl"
@@ -609,7 +786,7 @@ onBeforeUnmount(() => {
         </template>
 
         <template v-else>
-          <label for="file">
+          <label class="upload-label" for="file">
             {{ captureType === 'IMAGE' ? '图片（最大 10MB）' : '文件（最大 20MB）' }}
           </label>
           <input
@@ -630,32 +807,56 @@ onBeforeUnmount(() => {
           />
         </template>
 
-        <button type="submit" :disabled="saving">
+        <button class="capture-submit" type="submit" :disabled="saving">
           {{ saving
             ? '保存中…'
             : captureType === 'TEXT'
-              ? '保存文字'
+              ? '收进 Inbox'
               : captureType === 'URL'
                 ? '保存链接'
                 : captureType === 'FILE'
                   ? '上传文件'
                   : '上传图片' }}
+          <svg v-if="!saving" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg>
         </button>
       </form>
       <p v-if="errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
     </section>
 
-    <section v-if="activeView === 'inbox'" class="inbox-section" aria-labelledby="inbox-heading">
-      <form class="search-form" role="search" @submit.prevent="searchInbox">
-        <label for="inbox-search">搜索 Inbox</label>
+    <section
+      v-if="activeView === 'inbox' || activeView === 'search'"
+      class="inbox-section"
+      :class="{ 'search-results-section': activeView === 'search' }"
+      aria-labelledby="inbox-heading"
+    >
+      <form
+        v-if="activeView === 'search'"
+        class="search-form"
+        role="search"
+        @submit.prevent="searchInbox"
+      >
+        <div class="search-form-heading">
+          <div>
+            <h2>智能搜索</h2>
+            <p>用关键词或自然语言找回已经保存的内容</p>
+          </div>
+          <span class="search-mode-indicator">{{ searchModeLabel(searchMode) }}模式</span>
+        </div>
+        <label class="visually-hidden" for="inbox-search">搜索 Inbox</label>
         <div class="search-controls">
-          <input
-            id="inbox-search"
-            v-model="searchQuery"
-            type="search"
-            maxlength="200"
-            :placeholder="searchPlaceholder(searchMode)"
-          />
+          <div class="search-input-wrap">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="5.5" />
+              <path d="m15 15 4 4" />
+            </svg>
+            <input
+              id="inbox-search"
+              v-model="searchQuery"
+              type="search"
+              maxlength="200"
+              :placeholder="searchPlaceholder(searchMode)"
+            />
+          </div>
           <button type="submit" :disabled="loading">
             {{ searchButtonLabel(searchMode) }}
           </button>
@@ -669,15 +870,36 @@ onBeforeUnmount(() => {
             清除搜索
           </button>
         </div>
+        <div class="search-mode-tabs" role="tablist" aria-label="搜索模式">
+          <button
+            type="button"
+            role="tab"
+            :class="{ active: searchMode === 'keyword' }"
+            :aria-selected="searchMode === 'keyword'"
+            @click="searchMode = 'keyword'"
+          >
+            关键词搜索
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :class="{ active: searchMode === 'semantic' }"
+            :aria-selected="searchMode === 'semantic'"
+            @click="searchMode = 'semantic'"
+          >
+            语义搜索
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :class="{ active: searchMode === 'hybrid' }"
+            :aria-selected="searchMode === 'hybrid'"
+            @click="searchMode = 'hybrid'"
+          >
+            混合搜索
+          </button>
+        </div>
         <div class="search-filter-controls">
-          <label>
-            模式
-            <select v-model="searchMode">
-              <option value="keyword">关键词</option>
-              <option value="hybrid">混合</option>
-              <option value="semantic">语义</option>
-            </select>
-          </label>
           <label>
             类型
             <select v-model="searchType">
@@ -707,14 +929,28 @@ onBeforeUnmount(() => {
           </label>
         </div>
       </form>
-      <p v-if="searchErrorMessage" class="search-error" role="alert">
+      <p v-if="activeView === 'search' && searchErrorMessage" class="search-error" role="alert">
         {{ searchErrorMessage }}
       </p>
-      <div class="section-heading">
-        <h2 id="inbox-heading">{{ activeSearchQuery ? '搜索结果' : 'Inbox' }}</h2>
-        <span>{{ inboxItems.length }} 条</span>
+      <div v-if="activeView === 'inbox' || activeSearchQuery" class="section-heading inbox-list-heading">
+        <div>
+          <h2 id="inbox-heading">{{ activeView === 'search' ? '搜索结果' : inboxCollection === 'favorites' ? '我的收藏' : '最近收集' }}</h2>
+        </div>
+        <span>{{ activeView === 'search' ? `${inboxItems.length} 条结果` : '按收集时间排序' }}</span>
       </div>
-      <p v-if="activeSearchQuery" class="search-context">
+      <div v-if="activeView === 'inbox'" class="inbox-type-filters" role="group" aria-label="筛选内容类型">
+        <button
+          v-for="option in contentTypeFilters"
+          :key="option.value"
+          type="button"
+          :class="{ active: inboxTypeFilter === option.value }"
+          :aria-pressed="inboxTypeFilter === option.value"
+          @click="inboxTypeFilter = option.value"
+        >{{ option.label }}</button>
+        <span>{{ visibleInboxItems.length }} 条内容</span>
+      </div>
+      <p v-if="activeView === 'inbox' && inboxCollection === 'favorites' && errorMessage" class="error-message" role="alert">{{ errorMessage }}</p>
+      <p v-if="activeView === 'search' && activeSearchQuery" class="search-context">
         模式：{{ searchModeLabel(activeSearchMode) }}
         · 查询：{{ activeSearchQuery }}
         <span v-if="activeSearchType"> · 类型：{{ activeSearchType }}</span>
@@ -724,33 +960,46 @@ onBeforeUnmount(() => {
         </span>
       </p>
 
-      <p v-if="loading" class="empty-state">
-        {{ activeSearchQuery ? '正在搜索…' : '正在加载…' }}
+      <p v-if="activeView === 'search' && !activeSearchQuery && !searchErrorMessage" class="empty-state">
+        输入你记得的关键词或描述，开始查找已保存的内容。
       </p>
-      <p v-else-if="inboxItems.length === 0 && !searchErrorMessage" class="empty-state">
-        {{ activeSearchQuery
+      <p v-else-if="loading" class="empty-state">
+        {{ activeView === 'search' ? '正在搜索…' : '正在加载…' }}
+      </p>
+      <p v-else-if="visibleInboxItems.length === 0 && !searchErrorMessage" class="empty-state">
+        {{ activeView === 'search'
           ? searchEmptyMessage(activeSearchMode)
-          : 'Inbox 还是空的，先保存一条信息吧。' }}
+          : inboxCollection === 'favorites' ? '还没有符合条件的收藏。点击内容旁的星标，就能把它留在这里。'
+            : inboxTypeFilter ? '暂时没有这类内容，试试其他类型。' : 'Inbox 还是空的，先保存一条信息吧。' }}
       </p>
-      <div v-else-if="inboxItems.length > 0" class="item-list">
+      <div
+        v-else-if="visibleInboxItems.length > 0 && (activeView === 'inbox' || activeSearchQuery)"
+        class="item-list"
+        :class="{ 'search-result-list': activeView === 'search' }"
+      >
         <article
-          v-for="item in inboxItems"
+          v-for="item in visibleInboxItems"
           :key="item.id"
           :id="`inbox-item-${item.id}`"
           class="inbox-item"
-          :class="{ 'is-related-target': expandedRelatedItemId === item.id }"
+          :class="{
+            'is-related-target': expandedRelatedItemId === item.id,
+            'is-expanded': expandedInboxItemId === item.id
+          }"
           tabindex="-1"
           :aria-busy="isFreshProcessing(item)"
         >
+          <span class="list-type-icon" :class="`list-type-${String(item.type).toLowerCase()}`" aria-hidden="true">
+            <svg v-if="item.type === 'TEXT'" viewBox="0 0 24 24" fill="none"><path d="M5 5h14M12 5v14M9 19h6" /></svg>
+            <svg v-else-if="item.type === 'URL'" viewBox="0 0 24 24" fill="none"><path d="m10 13 4-4m-5 7-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m0 10a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-1 1" /></svg>
+            <svg v-else-if="item.type === 'IMAGE'" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="3" /><circle cx="8" cy="9" r="1.5" /><path d="m3 17 6-5 4 3 3-3 5 5" /></svg>
+            <svg v-else viewBox="0 0 24 24" fill="none"><path d="M6 3h8l4 4v14H6Z M14 3v5h4M9 12h6M9 16h6" /></svg>
+          </span>
           <div class="item-top">
             <div class="item-meta">
-              <span>{{ item.type === 'URL'
-                ? '🔗 URL'
-                : item.type === 'FILE'
-                  ? '📄 FILE'
-                  : item.type === 'IMAGE'
-                    ? '🖼️ IMAGE'
-                    : item.type }}</span>
+              <span class="type-badge" :class="`type-${String(item.type).toLowerCase()}`">
+                {{ item.type }}
+              </span>
               <time>{{ formatTime(item.createdTime) }}</time>
               <span class="ai-status-chip" :class="aiStatusClass(item)">
                 {{ aiStatusLabel(item) }}
@@ -761,50 +1010,53 @@ onBeforeUnmount(() => {
                 class="favorite-button"
                 type="button"
                 :class="{ 'is-favorite': item.favorite === 1 }"
+                :aria-label="`${item.favorite === 1 ? '取消收藏' : '收藏'}：${item.title || '未命名内容'}`"
+                :aria-pressed="item.favorite === 1"
                 :disabled="favoritingId === item.id || archivingId === item.id || deletingId === item.id || analyzingId === item.id"
                 @click="toggleFavorite(item)"
               >
-                {{ item.favorite === 1 ? '★ 已收藏' : '☆ 收藏' }}
+                <span aria-hidden="true">{{ item.favorite === 1 ? '★' : '☆' }}</span>
               </button>
               <button
-                class="archive-button"
+                class="detail-button"
                 type="button"
-                :disabled="archivingId === item.id || deletingId === item.id || favoritingId === item.id || analyzingId === item.id"
-                @click="archiveItem(item.id)"
+                :aria-expanded="expandedInboxItemId === item.id"
+                :aria-controls="`inbox-detail-${item.id}`"
+                @click="toggleInboxItemDetail(item.id)"
               >
-                {{ archivingId === item.id ? '归档中…' : '归档' }}
-              </button>
-              <button
-                class="delete-button"
-                type="button"
-                :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || analyzingId === item.id"
-                @click="deleteItem(item.id)"
-              >
-                {{ deletingId === item.id ? '删除中…' : '删除' }}
+                {{ expandedInboxItemId === item.id ? '收起详情' : '查看详情' }}
               </button>
             </div>
           </div>
+          <h3>
+            <button class="item-title-button" type="button" :aria-expanded="expandedInboxItemId === item.id" :aria-controls="`inbox-detail-${item.id}`" @click="toggleInboxItemDetail(item.id)">
+            <HighlightedText
+              :text="item.title || (item.type === 'FILE'
+                ? '未命名文件'
+                : item.type === 'IMAGE'
+                  ? '未命名图片'
+                  : '未命名内容')"
+              :query="activeSearchQuery"
+            />
+            </button>
+          </h3>
+          <div
+            v-if="!item.summary || expandedInboxItemId === item.id || item.type === 'IMAGE'"
+            class="item-content-preview"
+            :class="{ 'is-expanded': expandedInboxItemId === item.id }"
+          >
           <template v-if="item.type === 'URL'">
-            <h3 v-if="item.title">
-              <HighlightedText :text="item.title" :query="activeSearchQuery" />
-            </h3>
             <a class="source-link" :href="item.sourceUrl" target="_blank" rel="noopener noreferrer">
               {{ item.sourceUrl }}
             </a>
           </template>
           <template v-else-if="item.type === 'FILE'">
-            <h3>
-              📄 <HighlightedText :text="item.title || '未命名文件'" :query="activeSearchQuery" />
-            </h3>
             <div class="file-links">
               <a :href="item.fileUrl" target="_blank" rel="noopener noreferrer">查看</a>
               <a :href="item.fileUrl" :download="item.title || 'download'">下载</a>
             </div>
           </template>
           <template v-else-if="item.type === 'IMAGE'">
-            <h3 v-if="item.title">
-              <HighlightedText :text="item.title" :query="activeSearchQuery" />
-            </h3>
             <a class="image-link" :href="item.fileUrl" target="_blank" rel="noopener noreferrer">
               <img
                 class="image-thumbnail"
@@ -815,11 +1067,65 @@ onBeforeUnmount(() => {
             </a>
           </template>
           <template v-else>
-            <h3 v-if="item.title">
-              <HighlightedText :text="item.title" :query="activeSearchQuery" />
-            </h3>
             <p><HighlightedText :text="item.content" :query="activeSearchQuery" /></p>
           </template>
+          </div>
+          <section
+            v-if="item.summary && expandedInboxItemId !== item.id"
+            class="ai-summary-preview"
+            aria-label="AI 摘要"
+          >
+            <strong>✦ AI 摘要</strong>
+            <p><HighlightedText :text="item.summary" :query="activeSearchQuery" /></p>
+          </section>
+          <div
+            v-if="expandedInboxItemId !== item.id && (item.category || hasTags(item))"
+            class="card-taxonomy"
+          >
+            <span v-if="item.category" class="analysis-category">
+              <HighlightedText :text="item.category" :query="activeSearchQuery" />
+            </span>
+            <span
+              v-for="(tag, index) in (item.tags || []).slice(0, 3)"
+              :key="`${item.id}-preview-tag-${index}-${tag}`"
+              class="analysis-tag"
+            >
+              <HighlightedText :text="tag" :query="activeSearchQuery" />
+            </span>
+            <span v-if="(item.tags || []).length > 3" class="tag-overflow">
+              +{{ item.tags.length - 3 }}
+            </span>
+          </div>
+          <section
+            v-if="expandedInboxItemId === item.id"
+            :id="`inbox-detail-${item.id}`"
+            class="item-detail"
+            aria-label="Inbox 内容详情"
+          >
+            <div class="item-detail-heading">
+              <div>
+                <h4>分析与关联</h4>
+                <p>完整原文已展开，下方是 AI 分析、行动建议与相关内容</p>
+              </div>
+              <div class="item-detail-actions">
+                <button
+                  class="archive-button"
+                  type="button"
+                  :disabled="archivingId === item.id || deletingId === item.id || favoritingId === item.id || analyzingId === item.id"
+                  @click="archiveItem(item.id)"
+                >
+                  {{ archivingId === item.id ? '归档中…' : '归档' }}
+                </button>
+                <button
+                  class="delete-button"
+                  type="button"
+                  :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || analyzingId === item.id"
+                  @click="deleteItem(item.id)"
+                >
+                  {{ deletingId === item.id ? '删除中…' : '删除' }}
+                </button>
+              </div>
+            </div>
           <section
             v-if="isAnalyzableItem(item) && hasAnalysis(item)"
             class="analysis-block"
@@ -918,6 +1224,7 @@ onBeforeUnmount(() => {
             v-if="isAnalyzableItem(item)"
             :inbox-item-id="item.id"
             :disabled="deletingId === item.id || archivingId === item.id || favoritingId === item.id || analyzingId === item.id"
+            @accepted="todoPreview?.refresh()"
           />
           <RelatedItemsPanel
             :inbox-item-id="item.id"
@@ -925,9 +1232,27 @@ onBeforeUnmount(() => {
             @toggle="toggleRelatedItems"
             @open-inbox-item="openRelatedInboxItem"
           />
+          </section>
         </article>
       </div>
     </section>
-    <TodoPanel v-if="activeView === 'todos'" />
+    <p v-if="activeView === 'inbox'" class="workspace-endnote">Everything worth keeping, in one place.</p>
+    <TodoPanel
+      v-if="activeView === 'todos'"
+      :status="activeTodoStatus"
+      @status-change="syncTodoStatus"
+    />
+      </div>
+      <aside v-if="activeView === 'inbox'" class="context-sidebar" aria-label="待办与收集提示">
+        <TodoPanel ref="todoPreview" compact :status="TODO_STATUS.OPEN" @open-all="switchView('todos', TODO_STATUS.OPEN)" />
+        <div class="workspace-note">
+          <span aria-hidden="true">✧</span>
+          <h2>收集，是整理的开始。</h2>
+          <p>摘要帮你快速理解，<br>标签帮你归类，<br>相关内容让想法再次相遇。</p>
+        </div>
+      </aside>
+      </div>
+      </div>
+    </div>
   </main>
 </template>

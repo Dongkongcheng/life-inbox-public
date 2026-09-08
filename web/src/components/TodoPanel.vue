@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { completeTodo, getTodoSource, getTodos, reopenTodo } from '../todoApi.js'
 import {
   applyTodoOperationResult,
@@ -9,7 +9,20 @@ import {
   todoCalendarDate
 } from '../todoState.js'
 
-const activeStatus = ref(TODO_STATUS.OPEN)
+const props = defineProps({
+  status: {
+    type: String,
+    default: TODO_STATUS.OPEN,
+    validator: (value) => Object.values(TODO_STATUS).includes(value)
+  },
+  compact: {
+    type: Boolean,
+    default: false
+  }
+})
+const emit = defineEmits(['status-change', 'open-all'])
+
+const activeStatus = ref(props.status)
 const todos = ref([])
 const loading = ref(false)
 const listErrorMessage = ref('')
@@ -105,6 +118,7 @@ const loadTodos = async (status = activeStatus.value) => {
 
 const switchStatus = (status) => {
   if (status === activeStatus.value && !listErrorMessage.value) return
+  emit('status-change', status)
   loadTodos(status)
 }
 
@@ -143,20 +157,35 @@ const formatCompletedTime = (value) => {
 
 const formatSourceCreatedTime = (value) => formatCompletedTime(value) || '时间未知'
 
-onMounted(() => loadTodos(TODO_STATUS.OPEN))
+defineExpose({ refresh: () => loadTodos(props.status) })
+
+watch(
+  () => props.status,
+  (status) => {
+    if (status !== activeStatus.value) loadTodos(status)
+  }
+)
+
+onMounted(() => loadTodos(props.status))
 </script>
 
 <template>
-  <section class="todo-section" aria-labelledby="todo-heading">
+  <section
+    class="todo-section"
+    :class="{ 'todo-compact': compact }"
+    :aria-labelledby="compact ? 'todo-preview-heading' : 'todo-heading'"
+  >
     <div class="section-heading todo-heading">
       <div>
-        <h2 id="todo-heading">Todo</h2>
-        <p>查看已确认的行动，并维护完成状态。</p>
+        <h2 :id="compact ? 'todo-preview-heading' : 'todo-heading'">
+          {{ compact ? '让想法，向前一步' : 'Todo' }}
+        </h2>
+        <p>{{ compact ? '从收集的信息里，走向下一件事。' : '已确认的行动' }}</p>
       </div>
       <span v-if="!loading && !listErrorMessage">{{ todos.length }} 条</span>
     </div>
 
-    <div class="todo-status-switch" role="tablist" aria-label="Todo 状态">
+    <div v-if="!compact" class="todo-status-switch" role="tablist" aria-label="Todo 状态">
       <button
         type="button"
         role="tab"
@@ -188,7 +217,7 @@ onMounted(() => loadTodos(TODO_STATUS.OPEN))
 
     <div v-else class="todo-list" aria-live="polite">
       <article
-        v-for="todo in todos"
+        v-for="todo in (compact ? todos.slice(0, 3) : todos)"
         :key="todo.id"
         class="todo-item"
         :class="{ 'is-completed': todo.status === TODO_STATUS.COMPLETED }"
@@ -197,7 +226,7 @@ onMounted(() => loadTodos(TODO_STATUS.OPEN))
         <div class="todo-item-row">
           <div class="todo-item-main">
             <h3>{{ todo.title }}</h3>
-            <p v-if="todo.description" class="todo-description">{{ todo.description }}</p>
+            <p v-if="!compact && todo.description" class="todo-description">{{ todo.description }}</p>
             <p v-if="todoCalendarDate(todo)" class="todo-date">
               截止：<time>{{ todoCalendarDate(todo) }}</time>
             </p>
@@ -214,7 +243,7 @@ onMounted(() => loadTodos(TODO_STATUS.OPEN))
               class="todo-source-button"
               type="button"
               :aria-expanded="sourceFor(todo.id).expanded"
-              :aria-controls="`todo-source-${todo.id}`"
+              :aria-controls="`${compact ? 'todo-preview-source' : 'todo-source'}-${todo.id}`"
               @click="toggleTodoSource(todo)"
             >
               {{ sourceFor(todo.id).expanded ? '收起来源' : '查看来源' }}
@@ -224,10 +253,26 @@ onMounted(() => loadTodos(TODO_STATUS.OPEN))
               v-if="todo.status === TODO_STATUS.OPEN"
               class="todo-complete-button"
               type="button"
+              :aria-label="compact
+                ? `${operationFor(todo.id) === 'complete' ? '正在完成' : '完成待办'}：${todo.title}`
+                : undefined"
               :disabled="isTodoProcessing(todo.id)"
               @click="runTodoOperation(todo, 'complete')"
             >
-              {{ operationFor(todo.id) === 'complete' ? '完成中…' : '完成' }}
+              <svg
+                v-if="compact"
+                class="todo-complete-icon"
+                viewBox="0 0 20 20"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                aria-hidden="true"
+              >
+                <rect x="3" y="3" width="14" height="14" rx="4" />
+              </svg>
+              <span v-else>{{ operationFor(todo.id) === 'complete' ? '完成中…' : '完成' }}</span>
             </button>
             <button
               v-else
@@ -243,7 +288,7 @@ onMounted(() => loadTodos(TODO_STATUS.OPEN))
 
         <section
           v-if="sourceFor(todo.id).expanded"
-          :id="`todo-source-${todo.id}`"
+          :id="`${compact ? 'todo-preview-source' : 'todo-source'}-${todo.id}`"
           class="todo-source-panel"
           aria-label="Todo 来源"
         >
@@ -322,5 +367,14 @@ onMounted(() => loadTodos(TODO_STATUS.OPEN))
         </section>
       </article>
     </div>
+
+    <button
+      v-if="compact"
+      type="button"
+      class="todo-open-all-button"
+      @click="emit('open-all')"
+    >
+      查看全部待办 →
+    </button>
   </section>
 </template>

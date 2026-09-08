@@ -21,6 +21,8 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['accepted'])
+
 const candidates = ref([])
 const loaded = ref(false)
 const loadingCandidates = ref(false)
@@ -143,6 +145,7 @@ const acceptCandidate = async (candidate) => {
       [candidate.id]: 'Todo 已创建'
     }
     loaded.value = true
+    emit('accepted')
   } catch (error) {
     console.error(error)
     if (error.status === 409) {
@@ -192,8 +195,11 @@ const dismissCandidate = async (candidate) => {
   <section class="action-panel" aria-label="行动候选" :aria-busy="panelBusy">
     <div class="action-panel-header">
       <div>
-        <h4>行动</h4>
-        <span v-if="loaded" class="action-count">{{ pendingCandidates.length }} 个待处理</span>
+        <div class="action-title-row">
+          <h4>AI 行动建议</h4>
+          <span v-if="loaded" class="action-count">{{ pendingCandidates.length }} 个待处理</span>
+        </div>
+        <p class="action-boundary-note">建议需由你确认，确认后才会创建 Todo。</p>
       </div>
       <div class="action-panel-actions">
         <button
